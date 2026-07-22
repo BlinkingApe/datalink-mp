@@ -1,0 +1,19 @@
+[package]
+name = "smac-helper"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "smac-helper"
+path = "src/main.rs"
+
+[dependencies]
+ipc-protocol = { path = "../ipc-protocol" }
+iroh-transport = { path = "../iroh-transport" }
+dp-types = { path = "../dp-types" }
+tokio = { workspace = true, features = ["net", "io-util", "fs", "process"] }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }

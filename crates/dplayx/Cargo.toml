@@ -1,0 +1,25 @@
+[package]
+name = "dplayx"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "DirectPlay 4 DLL replacement using Iroh networking"
+
+[lib]
+crate-type = ["cdylib"]
+name = "dplayx"
+
+[dependencies]
+dp-types = { workspace = true }
+ipc-protocol = { workspace = true }
+parking_lot = { workspace = true }
+once_cell = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
+smac-fixes = { path = "../smac-fixes" }
+
+[build-dependencies]
+cc = "1.2"

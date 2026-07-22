@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dp-types",
+    "crates/ipc-protocol",
+    "crates/iroh-transport",
+    "crates/smac-helper",
+    "crates/dplayx",
+    "crates/smac-fixes",
+    "tools/mock-dp-client",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hdevalence/smac"
+
+[workspace.dependencies]
+# Networking
+iroh = "1.0"
+tokio = { version = "1.48", features = ["rt-multi-thread", "sync", "time", "macros"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+postcard = { version = "1.1", features = ["use-std"] }
+data-encoding = "2.6"
+
+# Utilities
+uuid = { version = "1.19", features = ["v4"] }
+parking_lot = "0.12"
+once_cell = "1.21"
+thiserror = "2.0"
+hex = "0.4"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Internal crates
+dp-types = { path = "crates/dp-types" }
+ipc-protocol = { path = "crates/ipc-protocol" }
+iroh-transport = { path = "crates/iroh-transport" }
+
+[profile.release]
+lto = true
+strip = true
+opt-level = "z"
+panic = "abort"
+

@@ -1,0 +1,21 @@
+[package]
+name = "smac-fixes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SMAC runtime bug fixes via DLL injection"
+
+[lib]
+# Using rlib for integration into dplayx
+# To build standalone DLL, change to ["cdylib"] and add build.rs with unwind stubs
+crate-type = ["rlib"]
+name = "smac_fixes"
+
+[dependencies]
+tracing = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_System_Memory",
+    "Win32_Foundation",
+]}

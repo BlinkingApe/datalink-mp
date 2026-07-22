@@ -1,0 +1,15 @@
+; dplayx.dll module definition file
+; Ordinals must match original Windows dplayx.dll (DirectX Dec 2006)
+LIBRARY dplayx.dll
+EXPORTS
+    DirectPlayCreate       @1
+    DirectPlayEnumerateA   @2
+    DirectPlayEnumerateW   @3
+    DirectPlayLobbyCreateA @4
+    DirectPlayLobbyCreateW @5
+    DllCanUnloadNow        @6
+    DllGetClassObject      @7
+    DllRegisterServer      @8
+    DirectPlayEnumerate    @9
+    DllUnregisterServer    @10
+    gdwDPlaySPRefCount     @11 DATA
