@@ -16,22 +16,22 @@ live *outside* Wine.
 ## The design
 
 ```
-game (terran_PRACX.exe, 32-bit, in Wine)
+game (thinker.exe or terran_PRACX.exe, 32-bit, in Wine)
   │  DirectPlay COM calls (CreatePlayer, Send, Receive, EnumSessions, …)
   ▼
-dplayx.dll (crates/dplayx, 32-bit Windows, in Wine)
+DLL: dplayx.dll (crates/dplayx, 32-bit Windows, in Wine)
   │  length-prefixed binary IPC over localhost TCP (crates/ipc-protocol)
   ▼
-smac-helper (crates/smac-helper, native)
+Helper: datalink-mp (crates/datalink-mp, native)
   │  session/roster state + system-message synthesis (crates/iroh-transport)
   ▼
 Iroh endpoint — one QUIC connection per peer, full mesh
 ```
 
-### dplayx.dll (`crates/dplayx`)
+### The DLL (`crates/dplayx`)
 
-Implements the DirectPlay COM surface the game actually uses: interface
-QueryInterface/AddRef/Release plumbing, `EnumConnections` (advertising the
+`dplayx.dll` implements the DirectPlay COM surface the game actually uses:
+interface QueryInterface/AddRef/Release plumbing, `EnumConnections` (advertising the
 "Iroh P2P" provider), `Initialize`, `EnumSessions`, `Open`, `CreatePlayer`,
 `Send`, `Receive`, `GetPlayerData`/`SetPlayerData`, `GetPlayerName`/
 `SetPlayerName`, `SetSessionDesc`, and the system-message envelope the game's
@@ -41,7 +41,7 @@ message pump expects. Export ordinals match the real dplayx.dll (see
 Two details matter more than the rest:
 
 - **Pointer fixups.** DirectPlay system messages (`DPMSG_CREATEPLAYERORGROUP`
-  etc.) contain interior pointers. The helper serializes them as offsets; the
+  etc.) contain interior pointers. The Helper serializes them as offsets; the
   DLL rewrites them into absolute addresses in the buffer it hands the game.
 - **Faithful semantics over cleverness.** The game's JACKAL network layer has
   its own reliability (sequence numbers, acks, retransmits) and its own
@@ -51,33 +51,34 @@ Two details matter more than the rest:
 
 ### The IPC layer (`crates/ipc-protocol`)
 
-Simple request/response over localhost TCP: the DLL is the client, the helper
-is the server, one request at a time (the protocol is versioned; a mismatched
-DLL/helper pair fails the handshake). `Receive` is polled by the game every
-frame, so the hot call is `ReceiveMessage` → drained from the helper's queue.
+Simple request/response over localhost TCP: the DLL is the client, the Helper
+is the listener, one request at a time (the handshake carries the IPC version;
+a DLL whose IPC version doesn't match the Helper's fails it). `Receive` is
+polled by the game every frame, so the hot call is `ReceiveMessage` → drained
+from the Helper's queue.
 
 ### The transport (`crates/iroh-transport`)
 
-- **Full mesh.** The joiner connects to the host by ticket; the host announces
-  new players (with their tickets) to everyone; existing players dial the
+- **Full mesh.** The joiner connects to the host by Ticket; the host announces
+  new players (with their Tickets) to everyone; existing players dial the
   newcomer directly. A broadcast is N-1 directed QUIC sends by the origin — no
   relaying, no double delivery.
 - **One ordered stream per peer direction.** All messages to a peer are
   enqueued (synchronously — enqueue order is wire order) onto a single
-  long-lived QUIC stream carrying a `SMAC` + protocol-version preamble and
+  long-lived QUIC stream carrying a `SMAC` + Peer protocol version preamble and
   4-byte length-prefixed frames. The receive side decodes and applies frames
   strictly sequentially. This makes per-peer FIFO a structural property rather
   than a hope; an integration test drives 200 messages through two real
   endpoints and asserts exact order
   (`crates/iroh-transport/tests/mesh_networking.rs`).
 - **Name-table at join.** The host answers a join with the complete player
-  table — IDs, names, tickets, and per-player data — applied atomically by the
+  table — IDs, names, Tickets, and per-player data — applied atomically by the
   joiner before it processes anything else, mirroring real DirectPlay's
   name-table download. Player-data updates that arrive for a not-yet-known
   player are buffered and merged at registration instead of dropped: cross-peer
   arrival order is inherently unordered in a mesh, and the game's own handler
   for the equivalent message silently discards early updates.
-- **Loud failures.** Send errors are logged and surfaced; a protocol-version
+- **Loud failures.** Send errors are logged and surfaced; a Peer protocol version
   mismatch kills the stream with an unmissable error. Silent drops of
   control-plane messages produce multi-day debugging sessions; this codebase
   chooses noise.
@@ -117,6 +118,6 @@ involved.
 
 `cargo test` runs unit tests plus the end-to-end mesh test (two real Iroh
 endpoints over local networking). For live-game verification the project used
-three parallel Wine instances with per-instance helpers on distinct ports —
+three parallel Wine instances with per-instance Helpers on distinct ports —
 instrumented runs confirmed zero loss and exact per-peer ordering of the
 game's state-sync traffic.

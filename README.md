@@ -1,142 +1,197 @@
-# SMAC Iroh Multiplayer
+# datalink-mp
 
-Modern peer-to-peer multiplayer for **Sid Meier's Alpha Centauri** (1999), built
-by replacing Wine's DirectPlay (`dplayx.dll`) with a Rust implementation that
-routes the game's networking over [Iroh](https://www.iroh.computer/) — QUIC,
-hole-punching, and relays included. No port forwarding, no IPX emulators, no
-VPN: the host shares one ticket string and everyone connects.
+Play **Sid Meier's Alpha Centauri** (1999) online with your friends. No port
+forwarding, no VPN, no IPX emulator: one of you shares a Ticket, the others
+paste it, and you are connected.
 
-**Status: experimental, but real.** Full 3-player games — lobby, faction
-selection, simultaneous-turn play, diplomacy — have been played over this stack
-on macOS via Wine/Whisky, with instrumented runs verifying zero message loss
-and strict per-peer ordering.
+You extract one archive into your Game folder and double-click `datalink-mp`.
+Your browser opens a page with four numbered steps that tick off as you go.
+You never need a terminal to play.
 
-## How it works
+Based on smac-iroh by Henry de Valence.
 
-```
-┌───────────────────────────────┐
-│  Wine process                 │
-│  ┌─────────────┐  DirectPlay  │        TCP          ┌─────────────┐
-│  │ terran.exe   │◄───COM─────►│      localhost      │ smac-helper │
-│  │ (the game)   │  dplayx.dll │◄───────IPC─────────►│  (native)   │
-│  └─────────────┘  (this repo) │                     │    Iroh     │
-└───────────────────────────────┘                     └──────┬──────┘
-                                                             │ QUIC / P2P
-                                                        other players
-```
+datalink-mp has two parts: a replacement `dplayx.dll` (the DLL) that the game
+loads instead of its own DirectPlay, and a small program (the Helper, the
+`datalink-mp` you double-click) that talks to your friends' Helpers over
+[Iroh](https://www.iroh.computer/): QUIC, hole-punching and relays included.
 
-Two components, both in this repo:
+## What has been tested
 
-- **`dplayx.dll`** — a 32-bit Windows DLL implementing the DirectPlay COM
-  interfaces the game uses (sessions, players, sends, system messages). It is
-  loaded by Wine *instead of* Wine's built-in dplayx. It contains no game
-  networking itself; it forwards everything over localhost TCP to the helper.
-- **`smac-helper`** — a native binary that owns the actual networking: an Iroh
-  endpoint, one ordered QUIC stream per peer, session/roster state, and
-  DirectPlay system-message synthesis.
+This README claims only what has been tested.
 
-The split exists because tokio (and therefore Iroh) cannot run inside Wine —
-Wine's `\Device\Afd` doesn't support mio's IOCP model. See
-[docs/wine-compatibility.md](docs/wine-compatibility.md) for the investigation
-and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full design.
-
-## Requirements
-
-- Your own copy of **Sid Meier's Alpha Centauri** (e.g. from
-  [GOG](https://www.gog.com/game/sid_meiers_alpha_centauri)). This repo
-  contains no game files.
-- **[PRACX](https://github.com/DrazharLn/pracx)** (`terran_PRACX.exe`) — the
-  community patch. The stock `terran.exe` crashes on display-mode
-  initialization under Wine on macOS; PRACX fixes it.
-- **Wine** — tested with [Whisky](https://getwhisky.app/) on macOS. Other Wine
-  setups should work but are untested.
-- **Rust** (stable) with the `i686-pc-windows-gnu` target, plus **mingw-w64**
-  to link the 32-bit DLL:
-
-  ```bash
-  rustup target add i686-pc-windows-gnu
-  brew install mingw-w64          # macOS
-  # apt install gcc-mingw-w64-i686  # Debian/Ubuntu
-  ```
+| System | Status |
+|---|---|
+| Windows | Tested |
+| Linux, through Faugus | Tested |
+| Linux, through the shell under GE-Proton | Tested |
+| Linux, through Steam, Lutris or plain system Wine | Should work; not tested |
+| macOS | **Untested** (any Wine, for example CrossOver, should work) |
 
 ## Quickstart
 
-Build both components:
+**All systems, first:** You need Sid Meier's Alpha Centauri with
+[Thinker](https://github.com/induktio/thinker) or
+[PRACX](https://github.com/DrazharLn/pracx). Everyone playing needs the same
+release of datalink-mp.
 
-```bash
-cargo build --release -p smac-helper
-cargo build --release --target i686-pc-windows-gnu -p dplayx
-```
+Download the archive for your system from the
+[Releases page](https://github.com/BlinkingApe/datalink-mp/releases) and
+follow the section for your system.
 
-Install (detailed walkthrough in [docs/INSTALL.md](docs/INSTALL.md)):
+### Windows
 
-1. Copy `target/i686-pc-windows-gnu/release/dplayx.dll` into the game
-   directory (next to `terran_PRACX.exe`).
-2. Tell Wine to prefer it over the builtin:
-   ```bash
-   WINEPREFIX=/path/to/prefix wine reg add \
-     "HKEY_CURRENT_USER\Software\Wine\DllOverrides" \
-     /v dplayx /t REG_SZ /d native /f
-   ```
+1. Extract the whole zip into your Game folder, the one containing
+   `thinker.exe` or `terran_PRACX.exe`.
+2. Double-click `datalink-mp.exe`. Windows will say it doesn't recognise the
+   app: choose **More info** → **Run anyway**. If the firewall asks, allow
+   access.
+3. Your browser opens the datalink-mp page. Follow the four steps.
+4. Keep the console window open while you play.
 
-Play:
+### Linux
 
-```bash
-# Host machine — prints a ticket string to stdout
-./target/release/smac-helper host
+1. Extract the whole `.tar.gz` into your Game folder.
+2. In your launcher, add the Wine override: `WINEDLLOVERRIDES="dplayx=n,b"`
+   (Faugus: paste it unquoted into Game Arguments).
+3. Double-click `datalink-mp` and choose Run.
+4. Your browser opens the page. Follow the four steps.
 
-# Each joining machine
-./target/release/smac-helper join --ticket '<HOST_TICKET>'
+Keep the browser tab open while you play. Closing it doesn't stop the Helper;
+the Quit button on the page does.
 
-# Then launch the game on every machine (scripts/launch-whisky.sh automates
-# this on macOS/Whisky) and in-game:
-#   Multiplayer → Iroh P2P → Host Game   (host)
-#   Multiplayer → Iroh P2P → Join Game   (joiners)
-```
+The override is needed because Wine uses its own `dplayx.dll` unless you tell
+it to use ours. The page shows the override with Copy buttons.
 
-The helper and the game talk over localhost TCP (default port 47624, override
-with `SMAC_HELPER_PORT` — needed if you run two game instances on one
-machine).
+- **Tested:** Faugus, and the shell under GE-Proton.
+- **Should work, not tested:** Steam (put `WINEDLLOVERRIDES="dplayx=n,b"
+  %command%` in the launch options), Lutris and plain system Wine (add the
+  override to the launch environment).
+
+### macOS (untested)
+
+Nobody has run these steps on a Mac. They are what should work.
+
+1. Extract the zip into your Game folder inside your Wine bottle. Any Wine
+   should work (for example CrossOver). Bottles live under the hidden Library
+   folder: in Finder choose Go → Go to Folder (⇧⌘G).
+2. Add the Wine override to your launcher: `WINEDLLOVERRIDES="dplayx=n,b"`.
+3. Double-click `datalink-mp`. macOS will block it the first time: open System
+   Settings → Privacy & Security, choose **Open Anyway**, enter your password,
+   then double-click it again.
+4. A Terminal window opens and must stay open. Your browser opens the page.
+
+## The four steps on the page
+
+1. **Game folder.** The page confirms that `dplayx.dll` and your game
+   executable are next to `datalink-mp`. On Linux and macOS this step also
+   shows the Wine override.
+2. **Share or paste a Ticket.** Your own Ticket is there from the start, with a
+   Copy button. To host, send it to your friends. To join, paste your friend's
+   Ticket into the box and press Connect.
+3. **Start the game.** Choose Multiplayer → Iroh P2P → Host Game (if you are
+   hosting) or Join Game (if you are joining). A pill on the page shows "Game
+   connected" once the game has found datalink-mp.
+4. **Play.** The page shows who is connected.
+
+Your Ticket is new every time datalink-mp starts and every time you press
+**Stop**, so share it again after either. Stop ends your current connections
+and gives you a new Ticket without closing datalink-mp; with the game open,
+return to the game's main menu first. **Quit** closes datalink-mp.
+
+If you double-click `datalink-mp` a second time, your browser opens the page of
+the copy that is already running.
 
 ## Troubleshooting
 
-Every layer can log:
+### Windows says Smart App Control blocked the app
 
-| Variable | Component | Effect |
+Smart App Control blocks unsigned apps, and datalink-mp is unsigned. It is
+different from the SmartScreen warning in the Windows quickstart, which you can
+click through. The only workaround is turning Smart App Control off (Windows
+Security → App & browser control → Smart App Control settings). Smart App
+Control has not been tested with datalink-mp.
+
+### The page says `dplayx.dll` may have been quarantined
+
+Your antivirus may have removed `dplayx.dll` from the Game folder, because it
+is a replacement DLL that hooks into the game. Restore it from your antivirus's
+quarantine, or extract the archive into your Game folder again, and consider
+excluding the Game folder from scanning. The page notices the DLL is back
+within a second or so; you don't need to restart datalink-mp.
+
+The same banner appears when you ran `datalink-mp` from the wrong folder (for
+example Downloads). The page shows where it is running from. Extract the whole
+archive into your Game folder and run it from there.
+
+### The game never shows "Game connected"
+
+The game isn't loading our `dplayx.dll`.
+
+- On Linux and macOS this is almost always the Wine override. Check that
+  `WINEDLLOVERRIDES="dplayx=n,b"` is in the environment your launcher uses to
+  start the game (in Faugus, unquoted, in Game Arguments).
+- On every system, check that `dplayx.dll` sits in the same Game folder as the
+  game executable you start (`thinker.exe` or `terran_PRACX.exe`).
+- If the page says the DLL doesn't match the Helper, extract the whole archive
+  into your Game folder again and restart the game.
+
+### Your friend can't connect
+
+- Ask them for their current Ticket, not an old one: a Ticket changes every time
+  its owner starts datalink-mp or presses Stop.
+- Check that you both run the same release of datalink-mp. The page shows the
+  Release version at the bottom; compare them. Players whose Release versions
+  share a minor part (the middle number: the 2 in 1.2.3) can play together.
+
+## For power users
+
+You don't need any of this to play.
+
+Running `datalink-mp` with no subcommand starts the web page, as
+double-clicking does. Options in that mode:
+
+| Option | Environment variable | Meaning |
 |---|---|---|
-| `SMAC_HELPER_LOG_FILE=/path` | helper | log to file (stdout stays clean for the ticket) |
-| `RUST_LOG=debug` | helper | log verbosity |
-| `DPLAYX_LOG_FILE='Z:\path'` | DLL | DirectPlay call/traffic log (Wine `Z:` maps `/`) |
-| `DPLAYX_RXTRACE=1` | DLL | per-message send/receive trace lines |
-| `SMAC_PROBE_LOG=/path` | DLL | game-internal diagnostic probes (see ARCHITECTURE.md) |
+| `--ui-port <PORT>` | `SMAC_UI_PORT` | Port of the web page (default 47700; if taken, the next nine are tried). The flag wins over the variable. |
+| `--port <PORT>` | `SMAC_HELPER_PORT` | Port the game's DLL uses to reach the Helper (default 47624). Give two Helpers on one machine different ports, and start each game with the matching `SMAC_HELPER_PORT`. |
+| `--no-browser` | | Don't open a browser; open the printed URL yourself. |
+| | `SMAC_HELPER_LOG_FILE` | Write the log to this file. |
 
-If two machines run different builds, the helpers refuse to talk and log
-`PROTOCOL VERSION MISMATCH` — rebuild and redeploy on both sides.
+For scripts and headless use there are two subcommands that start no web page:
 
-**Faction colors**: vanilla SMAC multiplayer colors units/flags/labels by
-seat, not faction — a game bug this mod fixes so every faction wears its
-classic colors (`SMAC_NO_CLASSIC_COLORS=1` reverts). See
+- `datalink-mp host` prints your Ticket as the first line of standard output
+  and serves the game.
+- `datalink-mp join --ticket <TICKET>` connects to a friend's Ticket and serves
+  the game. It exits with an error if it can't reach them.
+
+Both accept `--port`, and `SMAC_HELPER_PORT` works as above.
+
+## Building from source
+
+See [docs/building.md](docs/building.md). It also lists the diagnostic logs.
+
+## How it works
+
+The game does multiplayer through DirectPlay, a retired Windows API. The DLL
+implements DirectPlay and forwards everything over localhost to the Helper,
+which owns the Iroh endpoint. The split exists because Iroh cannot run inside
+Wine. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
+[docs/wine-compatibility.md](docs/wine-compatibility.md) for the investigation.
+
+Vanilla multiplayer colors units, flags and labels by seat, not faction;
+datalink-mp fixes that so every faction wears its classic colors. See
 [docs/faction-colors.md](docs/faction-colors.md).
-
-## Repository layout
-
-| Path | What |
-|---|---|
-| `crates/dplayx` | the DirectPlay replacement DLL (32-bit Windows) |
-| `crates/smac-helper` | native networking helper binary |
-| `crates/iroh-transport` | Iroh session/mesh/ordered-stream transport |
-| `crates/dp-types` | DirectPlay structs, GUIDs, serialization |
-| `crates/ipc-protocol` | DLL ↔ helper localhost protocol |
-| `crates/smac-fixes` | in-memory game patches + diagnostic probe system |
-| `tools/mock-dp-client` | interactive transport test client (no game needed) |
 
 ## Credits
 
-- [PRACX](https://github.com/DrazharLn/pracx) — the community patch that makes
-  SMAC viable under Wine.
-- [Iroh](https://github.com/n0-computer/iroh) by n0 — the P2P layer.
-- [quinn](https://github.com/quinn-rs/quinn) — the QUIC implementation.
-- The Wine project — whose open dplayx source made the DirectPlay surface
+Based on smac-iroh by Henry de Valence.
+
+- [PRACX](https://github.com/DrazharLn/pracx) and
+  [Thinker](https://github.com/induktio/thinker), the community patches that
+  make the game work well on modern systems.
+- [Iroh](https://github.com/n0-computer/iroh) by n0, the peer-to-peer layer.
+- [quinn](https://github.com/quinn-rs/quinn), the QUIC implementation.
+- The Wine project, whose open dplayx source made the DirectPlay surface
   tractable to reimplement.
 
 ## License
