@@ -1,4 +1,4 @@
-//! Helpers shared by the Helper's tests.
+//! Test support shared by the tests of the Helper.
 //!
 //! Each test file compiles this module separately and uses only part of it.
 #![allow(dead_code)]
@@ -39,16 +39,23 @@ impl FakeDll {
         decode_response(&reply).expect("the Helper's reply should decode")
     }
 
-    /// Handshake with the IPC version this build of the DLL would send.
-    pub fn handshake(&mut self) -> IpcResponse {
-        self.handshake_with_version(PROTOCOL_VERSION)
-    }
-
     /// Handshake as a DLL from another build would, with its own IPC version.
     pub fn handshake_with_version(&mut self, ipc_version: u32) -> IpcResponse {
         self.request(&IpcRequest::Handshake {
             protocol_version: ipc_version,
         })
+    }
+
+    /// Handshake with this build's IPC version, and return the endpoint ID and
+    /// the Ticket the Helper answers with. Panics on any other reply.
+    pub fn handshake(&mut self) -> ([u8; 32], String) {
+        match self.handshake_with_version(PROTOCOL_VERSION) {
+            IpcResponse::HandshakeOk {
+                endpoint_id,
+                our_ticket,
+            } => (endpoint_id, our_ticket),
+            other => panic!("expected HandshakeOk, got {other:?}"),
+        }
     }
 }
 
@@ -66,12 +73,25 @@ pub fn poll_until<T>(timeout: Duration, mut cond: impl FnMut() -> Option<T>) -> 
     }
 }
 
+/// Take a loopback port the way another program would. The port stays taken
+/// for as long as the listener is kept.
+pub fn hold_port() -> (TcpListener, u16) {
+    let holder = TcpListener::bind("127.0.0.1:0").expect("should bind a loopback port");
+    let port = holder
+        .local_addr()
+        .expect("bound listener should have an address")
+        .port();
+    (holder, port)
+}
+
 /// A loopback port that was free a moment ago, for a Helper started as a
 /// separate process. In-process tests pass port 0 and read the bound port back.
 pub fn free_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("should bind a loopback port")
-        .local_addr()
-        .expect("bound listener should have an address")
-        .port()
+    hold_port().1
+}
+
+/// Say why a test returns early: no Transport could be created, which is
+/// expected in sandboxed environments.
+pub fn note_transport_unavailable(detail: &dyn std::fmt::Debug) {
+    eprintln!("Transport creation failed (expected in sandboxed environments): {detail:?}");
 }

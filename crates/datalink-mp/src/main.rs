@@ -104,7 +104,7 @@ fn main() -> Result<()> {
 
 /// Run in host mode - start the Helper and serve DLL connections
 fn run_host(port: u16) -> Result<()> {
-    let port = ipc_port(port);
+    let port = resolve_ipc_port(port);
     info!("datalink-mp starting in HOST mode on port {}", port);
 
     let helper = start_helper(port)?;
@@ -115,7 +115,7 @@ fn run_host(port: u16) -> Result<()> {
 
 /// Run in join mode - start the Helper, connect to host, then serve DLL connections
 fn run_join(port: u16, host_ticket: String) -> Result<()> {
-    let port = ipc_port(port);
+    let port = resolve_ipc_port(port);
     info!("datalink-mp starting in JOIN mode on port {}", port);
 
     let helper = start_helper(port)?;
@@ -126,7 +126,7 @@ fn run_join(port: u16, host_ticket: String) -> Result<()> {
 }
 
 /// The IPC port to use: `SMAC_HELPER_PORT` if set, otherwise the `--port` value
-fn ipc_port(port: u16) -> u16 {
+fn resolve_ipc_port(port: u16) -> u16 {
     // Allow env var override for backwards compatibility
     std::env::var("SMAC_HELPER_PORT")
         .ok()

@@ -6,7 +6,7 @@
 //! This library is the Helper itself; the `datalink-mp` binary is a thin
 //! command line on top of [`start`].
 
-pub mod controller;
+mod controller;
 mod ipc_server;
 
 pub use controller::SessionController;
@@ -15,6 +15,7 @@ use iroh_transport::{TransportError, TransportOptions};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use thiserror::Error;
+use tracing::info;
 
 /// Everything the Helper needs to start.
 pub struct Config {
@@ -39,7 +40,7 @@ pub enum StartError {
 pub struct Helper {
     ipc_port: u16,
     controller: Arc<SessionController>,
-    ipc_server: JoinHandle<()>,
+    ipc_thread: JoinHandle<()>,
 }
 
 /// Start the Helper: bind the IPC port, create the Transport and serve the DLL.
@@ -49,16 +50,17 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
     // Bind first: a taken port is found out before an Iroh endpoint is started.
     let listener = ipc_server::bind(config.ipc_port).map_err(StartError::IpcBind)?;
     let ipc_port = listener.local_addr().map_err(StartError::IpcBind)?.port();
+    info!("Listening on 127.0.0.1:{}", ipc_port);
 
     let controller = Arc::new(
         SessionController::new(config.transport_options).map_err(StartError::Transport)?,
     );
-    let ipc_server = ipc_server::spawn(listener, controller.clone());
+    let ipc_thread = ipc_server::spawn(listener, controller.clone());
 
     Ok(Helper {
         ipc_port,
         controller,
-        ipc_server,
+        ipc_thread,
     })
 }
 
@@ -75,7 +77,7 @@ impl Helper {
 
     /// Block for as long as the IPC server runs, which is the life of the process.
     pub fn wait(self) {
-        if let Err(panic) = self.ipc_server.join() {
+        if let Err(panic) = self.ipc_thread.join() {
             // A Helper whose IPC server died is of no use to the game.
             std::panic::resume_unwind(panic);
         }

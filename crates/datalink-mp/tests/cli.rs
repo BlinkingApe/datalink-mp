@@ -3,11 +3,9 @@
 
 mod common;
 
-use common::{free_port, poll_until, FakeDll};
-use ipc_protocol::IpcResponse;
+use common::{free_port, hold_port, note_transport_unavailable, poll_until, FakeDll};
 use iroh_transport::{Ticket, Transport};
 use std::io::{BufRead, BufReader, Read};
-use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;
 use std::thread::JoinHandle;
@@ -28,6 +26,24 @@ struct HelperProcess {
     child: Child,
     stdout_lines: mpsc::Receiver<String>,
     stderr: Option<JoinHandle<String>>,
+}
+
+/// How a `datalink-mp` process ended by itself.
+struct Exit {
+    status: ExitStatus,
+    stderr: String,
+}
+
+impl Exit {
+    /// True when the binary failed because it could not create a Transport,
+    /// which is expected in sandboxed environments; the test then returns early.
+    fn transport_unavailable(&self) -> bool {
+        let unavailable = self.stderr.contains("Failed to create transport");
+        if unavailable {
+            note_transport_unavailable(&self.stderr);
+        }
+        unavailable
+    }
 }
 
 impl HelperProcess {
@@ -83,31 +99,34 @@ impl HelperProcess {
                 panic!("datalink-mp printed nothing within {STARTUP_DEADLINE:?}")
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                let status = self.wait_for_exit();
-                let stderr = self.stderr();
-                if transport_unavailable(&stderr) {
+                let exit = self
+                    .wait_for_exit()
+                    .expect("datalink-mp closed standard output without exiting");
+                if exit.transport_unavailable() {
                     return None;
                 }
-                panic!("datalink-mp exited ({status:?}) before printing a Ticket: {stderr}");
+                panic!(
+                    "datalink-mp exited ({:?}) before printing a Ticket: {}",
+                    exit.status, exit.stderr
+                );
             }
         }
     }
 
-    /// Wait for the process to exit by itself. None if it is still running at
-    /// the deadline.
-    fn wait_for_exit(&mut self) -> Option<ExitStatus> {
-        poll_until(EXIT_DEADLINE, || {
+    /// Wait for the process to exit by itself, and collect what it wrote to
+    /// standard error. None if it is still running at the deadline.
+    fn wait_for_exit(&mut self) -> Option<Exit> {
+        let status = poll_until(EXIT_DEADLINE, || {
             self.child.try_wait().expect("should poll the process")
-        })
-    }
-
-    /// Everything the process wrote to standard error. Call after it exited.
-    fn stderr(&mut self) -> String {
-        self.stderr
+        })?;
+        // The process is gone, so its end of the pipe is closed and the reader finishes.
+        let stderr = self
+            .stderr
             .take()
-            .expect("stderr is read once")
+            .expect("the exit is collected once")
             .join()
-            .expect("stderr reader should not panic")
+            .expect("stderr reader should not panic");
+        Some(Exit { status, stderr })
     }
 }
 
@@ -118,35 +137,19 @@ impl Drop for HelperProcess {
     }
 }
 
-/// True when the binary failed because it could not create a Transport, which
-/// is expected in sandboxed environments.
-fn transport_unavailable(stderr: &str) -> bool {
-    let unavailable = stderr.contains("Failed to create transport");
-    if unavailable {
-        eprintln!("Transport creation failed (expected in sandboxed environments): {stderr}");
-    }
-    unavailable
-}
-
-/// Connect a fake DLL to a Helper process that has printed its Ticket.
-fn connect_fake_dll(ipc_port: u16) -> FakeDll {
-    poll_until(STARTUP_DEADLINE, || FakeDll::connect(ipc_port).ok())
-        .expect("the Helper should accept a DLL connection on its IPC port")
-}
-
 /// Assert that the Helper answers a handshake on `ipc_port` with the Ticket it printed.
 fn assert_handshake_carries_ticket(ipc_port: u16, printed_ticket: &str) {
-    match connect_fake_dll(ipc_port).handshake() {
-        IpcResponse::HandshakeOk { our_ticket, .. } => assert_eq!(
-            our_ticket, printed_ticket,
-            "the handshake should carry the Ticket printed on standard output"
-        ),
-        other => panic!("expected HandshakeOk, got {other:?}"),
-    }
+    let mut dll = poll_until(STARTUP_DEADLINE, || FakeDll::connect(ipc_port).ok())
+        .expect("the Helper should accept a DLL connection on its IPC port");
+    let (_, our_ticket) = dll.handshake();
+    assert_eq!(
+        our_ticket, printed_ticket,
+        "the handshake should carry the Ticket printed on standard output"
+    );
 }
 
 #[test]
-fn host_prints_a_parseable_ticket_first_and_answers_an_ipc_handshake() {
+fn test_host_prints_a_parseable_ticket_first_and_answers_an_ipc_handshake() {
     let ipc_port = free_port();
     let mut helper = HelperProcess::spawn(&["host", "--port", &ipc_port.to_string()]);
 
@@ -159,8 +162,10 @@ fn host_prints_a_parseable_ticket_first_and_answers_an_ipc_handshake() {
 }
 
 #[test]
-fn host_prefers_smac_helper_port_over_the_port_flag() {
-    let flag_port = free_port();
+fn test_host_prefers_smac_helper_port_over_the_port_flag() {
+    // The port given by --port stays taken for the whole test: a Helper that
+    // preferred it over SMAC_HELPER_PORT could not start.
+    let (_holder, flag_port) = hold_port();
     let env_port = free_port();
     let mut helper = HelperProcess::spawn_with_env(
         &["host", "--port", &flag_port.to_string()],
@@ -172,14 +177,10 @@ fn host_prefers_smac_helper_port_over_the_port_flag() {
     };
 
     assert_handshake_carries_ticket(env_port, &ticket);
-    assert!(
-        TcpStream::connect(("127.0.0.1", flag_port)).is_err(),
-        "nothing should listen on the port given by --port when SMAC_HELPER_PORT is set"
-    );
 }
 
 #[test]
-fn no_subcommand_behaves_as_host() {
+fn test_no_subcommand_behaves_as_host() {
     let ipc_port = free_port();
     let mut helper =
         HelperProcess::spawn_with_env(&[], &[("SMAC_HELPER_PORT", &ipc_port.to_string())]);
@@ -193,32 +194,35 @@ fn no_subcommand_behaves_as_host() {
 }
 
 #[test]
-fn host_exits_with_an_error_when_the_ipc_port_is_taken() {
-    let holder = TcpListener::bind("127.0.0.1:0").expect("should bind a loopback port");
-    let taken_port = holder.local_addr().unwrap().port();
+fn test_host_exits_with_an_error_when_the_ipc_port_is_taken() {
+    let (_holder, taken_port) = hold_port();
     let mut helper = HelperProcess::spawn(&["host", "--port", &taken_port.to_string()]);
 
-    let status = helper
+    let exit = helper
         .wait_for_exit()
         .expect("a failed IPC bind should be fatal, but the Helper kept running");
-    let stderr = helper.stderr();
-    if transport_unavailable(&stderr) {
+    if exit.transport_unavailable() {
         return;
     }
 
-    assert!(!status.success(), "expected an error exit, got {status:?}");
     assert!(
-        stderr.contains("Failed to bind TCP listener"),
-        "the error should say the IPC port could not be bound, got: {stderr}"
+        !exit.status.success(),
+        "expected an error exit, got {:?}",
+        exit.status
+    );
+    assert!(
+        exit.stderr.contains("Failed to bind TCP listener"),
+        "the error should say the IPC port could not be bound, got: {}",
+        exit.stderr
     );
 }
 
 #[test]
-fn join_connects_to_a_friends_helper_and_answers_an_ipc_handshake() {
+fn test_join_connects_to_a_friend_and_answers_an_ipc_handshake() {
     let friend = match Transport::new() {
         Ok(friend) => friend,
         Err(e) => {
-            eprintln!("Transport creation failed (expected in sandboxed environments): {e:?}");
+            note_transport_unavailable(&e);
             return;
         }
     };
@@ -253,7 +257,7 @@ fn join_connects_to_a_friends_helper_and_answers_an_ipc_handshake() {
 }
 
 #[test]
-fn join_with_text_that_is_not_a_ticket_exits_with_an_error() {
+fn test_join_with_text_that_is_not_a_ticket_exits_with_an_error() {
     let ipc_port = free_port();
     let mut helper = HelperProcess::spawn(&[
         "join",
@@ -263,17 +267,21 @@ fn join_with_text_that_is_not_a_ticket_exits_with_an_error() {
         "this is not a ticket",
     ]);
 
-    let status = helper
+    let exit = helper
         .wait_for_exit()
         .expect("join with a bad Ticket should exit, but the Helper kept running");
-    let stderr = helper.stderr();
-    if transport_unavailable(&stderr) {
+    if exit.transport_unavailable() {
         return;
     }
 
-    assert!(!status.success(), "expected an error exit, got {status:?}");
     assert!(
-        stderr.contains("Invalid ticket"),
-        "the error should say the Ticket is invalid, got: {stderr}"
+        !exit.status.success(),
+        "expected an error exit, got {:?}",
+        exit.status
+    );
+    assert!(
+        exit.stderr.contains("Invalid ticket"),
+        "the error should say the Ticket is invalid, got: {}",
+        exit.stderr
     );
 }

@@ -18,9 +18,7 @@ use tracing::{debug, debug_span, error, info, warn};
 
 /// Bind the listener for DLL connections. Port 0 picks a free port.
 pub(crate) fn bind(port: u16) -> std::io::Result<TcpListener> {
-    let listener = TcpListener::bind(("127.0.0.1", port))?;
-    info!("Listening on {}", listener.local_addr()?);
-    Ok(listener)
+    TcpListener::bind(("127.0.0.1", port))
 }
 
 /// Serve DLL connections on their own thread.
