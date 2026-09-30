@@ -9,15 +9,19 @@
 //! - Joiners connect using `--host-ticket` to establish peer connection
 //! - `enum_sessions()` queries all connected peers for their sessions
 
-use crate::connection::{ConnectionManager, ReceivedMessage};
+use crate::connection::{
+    peer_protocol_alpn, ConnectionManager, ReceivedMessage, DEFAULT_DIAL_TIMEOUT,
+    STREAM_PROTO_VERSION,
+};
 use crate::protocol::{Message, PlayerInfo, SessionInfo};
 use crate::session::SessionManager;
-use crate::{TransportError, TransportResult, DPLAY_ALPN};
+use crate::{TransportError, TransportResult};
 use dp_types::{dpid, PlayerName, SessionDesc, DPID, GUID};
 use iroh::{Endpoint, EndpointId, SecretKey};
 use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 use tracing::{debug, debug_span, error, info, warn};
@@ -62,9 +66,36 @@ pub struct QueuedMessage {
     pub guaranteed: bool,
 }
 
+/// Options for constructing a [`Transport`].
+///
+/// Production code uses the defaults. Tests use the options to stand in for a
+/// Helper from a different build (another Peer protocol version) and to keep
+/// dial-timeout tests short.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TransportOptions {
+    /// Peer protocol version this Transport speaks
+    pub peer_protocol_version: u16,
+    /// How long a dial may take before it fails with `TransportError::CantReach`
+    pub dial_timeout: Duration,
+}
+
+impl Default for TransportOptions {
+    fn default() -> Self {
+        Self {
+            peer_protocol_version: STREAM_PROTO_VERSION,
+            dial_timeout: DEFAULT_DIAL_TIMEOUT,
+        }
+    }
+}
+
 impl Transport {
     /// Create a new transport instance
     pub fn new() -> TransportResult<Self> {
+        Self::with_options(TransportOptions::default())
+    }
+
+    /// Create a new transport instance with non-default options
+    pub fn with_options(options: TransportOptions) -> TransportResult<Self> {
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -72,7 +103,7 @@ impl Transport {
             .map_err(|e| TransportError::Io(e))?;
 
         let (endpoint, connection_manager, session_manager, message_rx, our_ticket) =
-            runtime.block_on(async { Self::init_async().await })?;
+            runtime.block_on(async { Self::init_async(options).await })?;
 
         Ok(Self {
             runtime,
@@ -86,7 +117,7 @@ impl Transport {
         })
     }
 
-    async fn init_async() -> TransportResult<(
+    async fn init_async(options: TransportOptions) -> TransportResult<(
         Endpoint,
         ConnectionManager,
         Arc<SessionManager>,
@@ -102,7 +133,7 @@ impl Transport {
         // the builder pre-binds IPv4 0.0.0.0 with an OS-assigned port.
         let endpoint = match Endpoint::builder(iroh::endpoint::presets::N0)
             .secret_key(secret_key)
-            .alpns(vec![DPLAY_ALPN.to_vec()])
+            .alpns(vec![peer_protocol_alpn(options.peer_protocol_version)])
             .bind()
             .await
         {
@@ -130,7 +161,7 @@ impl Transport {
         let (message_tx, message_rx) = mpsc::unbounded_channel();
 
         let connection_manager =
-            ConnectionManager::new(endpoint.clone(), session_manager.clone(), message_tx, our_ticket.clone(), NetworkMode::default());
+            ConnectionManager::with_options(endpoint.clone(), session_manager.clone(), message_tx, our_ticket.clone(), NetworkMode::default(), options);
 
         // Spawn connection acceptor
         let endpoint_clone = endpoint.clone();

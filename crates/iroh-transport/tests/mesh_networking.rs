@@ -451,6 +451,296 @@ fn test_join_and_ordered_delivery_end_to_end() {
     assert_eq!(received, expected, "messages arrived out of order");
 }
 
+/// Helper to create a test transport with non-default options: a different
+/// Peer protocol version (a stand-in for a different build) or a short dial timeout
+fn create_transport_with_options(options: iroh_transport::TransportOptions) -> Option<Transport> {
+    match Transport::with_options(options) {
+        Ok(t) => Some(t),
+        Err(e) => {
+            eprintln!("Transport creation failed (expected in sandboxed environments): {:?}", e);
+            None
+        }
+    }
+}
+
+#[test]
+fn test_default_options_are_peer_protocol_version_1_and_15s_dial_timeout() {
+    let options = iroh_transport::TransportOptions::default();
+    assert_eq!(options.peer_protocol_version, 1, "default Peer protocol version");
+    assert_eq!(options.dial_timeout, Duration::from_secs(15), "default dial timeout");
+}
+
+/// Helper to bind a bare Iroh endpoint: a stand-in for "some other program on
+/// the wire", used to observe what a Transport advertises and sends.
+async fn bind_bare_endpoint(alpns: Vec<Vec<u8>>) -> Option<iroh::Endpoint> {
+    match iroh::Endpoint::builder(iroh::endpoint::presets::N0).alpns(alpns).bind().await {
+        Ok(ep) => Some(ep),
+        Err(e) => {
+            eprintln!("Endpoint bind failed (expected in sandboxed environments): {:?}", e);
+            None
+        }
+    }
+}
+
+/// The ALPN of a default Transport is `datalink/1`. A dial with that ALPN is
+/// accepted; a dial with smac-iroh's `dplay-iroh/1` is refused, which is the
+/// deliberate break with smac-iroh builds.
+#[test]
+fn test_default_transport_accepts_alpn_datalink_1_and_refuses_dplay_iroh_1() {
+    let transport = match create_transport() {
+        Some(t) => t,
+        None => return,
+    };
+    let addr = iroh_transport::Ticket::parse(transport.our_ticket())
+        .expect("our ticket parses")
+        .into_addr();
+
+    let rt = tokio::runtime::Runtime::new().expect("test runtime");
+    let outcome = rt.block_on(async {
+        let dialler = bind_bare_endpoint(Vec::new()).await?;
+        let old = dialler.connect(addr.clone(), b"dplay-iroh/1").await.map(|_| ());
+        let current = dialler.connect(addr, b"datalink/1").await.map(|_| ());
+        dialler.close().await;
+        Some((old, current))
+    });
+    let (old, current) = match outcome {
+        Some(o) => o,
+        None => return,
+    };
+
+    assert!(current.is_ok(), "dial with ALPN datalink/1 should be accepted: {:?}", current.err());
+    assert!(old.is_err(), "dial with ALPN dplay-iroh/1 should be refused");
+}
+
+/// Two Transports with different Peer protocol versions refuse each other, in
+/// both directions, and the dialler is told why: PeerProtocolMismatch, not CantReach.
+#[test]
+fn test_different_peer_protocol_versions_refuse_each_other() {
+    let ours = match create_transport() {
+        Some(t) => t,
+        None => return,
+    };
+    let other_build = match create_transport_with_options(iroh_transport::TransportOptions {
+        peer_protocol_version: 2,
+        ..Default::default()
+    }) {
+        Some(t) => t,
+        None => return,
+    };
+
+    // Both host a session, so the Peer protocol version is the only obstacle.
+    for transport in [&ours, &other_build] {
+        transport.create_session(SessionDesc {
+            guid_instance: GUID::new_random(),
+            guid_application: GUID::new_random(),
+            session_name: "Mismatch Test".to_string(),
+            max_players: 4,
+            ..Default::default()
+        });
+    }
+
+    // The join the DLL asks for, from the other build to ours
+    let err = other_build
+        .join_session_by_ticket(ours.our_ticket())
+        .expect_err("join across Peer protocol versions should be refused");
+    assert!(
+        matches!(err, iroh_transport::TransportError::PeerProtocolMismatch),
+        "dialler should get PeerProtocolMismatch, got {:?}",
+        err
+    );
+
+    // And a plain dial the other way round
+    let err = ours
+        .connect_to_peer(other_build.our_ticket())
+        .expect_err("dial across Peer protocol versions should be refused");
+    assert!(
+        matches!(err, iroh_transport::TransportError::PeerProtocolMismatch),
+        "dialler should get PeerProtocolMismatch, got {:?}",
+        err
+    );
+
+    // Neither side ever lists the other as connected. connect_for_discovery
+    // succeeds only for an already-connected peer, so it serves as the read.
+    let connected = poll_until(Duration::from_secs(1), || {
+        let listed = ours.connect_for_discovery(other_build.endpoint_id_bytes()).is_ok()
+            || other_build.connect_for_discovery(ours.endpoint_id_bytes()).is_ok();
+        listed.then_some(())
+    });
+    assert!(connected.is_none(), "mismatched peers must never be listed as connected");
+}
+
+/// A dial to a Ticket nobody answers on gives up at the configured dial
+/// timeout with CantReach, through the join the DLL asks for.
+#[test]
+fn test_dial_to_silent_ticket_fails_with_cant_reach_at_dial_timeout() {
+    let dial_timeout = Duration::from_secs(2);
+    let dialler = match create_transport_with_options(iroh_transport::TransportOptions {
+        dial_timeout,
+        ..Default::default()
+    }) {
+        Some(t) => t,
+        None => return,
+    };
+
+    // A Ticket for a Helper that never existed, at a loopback address that is
+    // bound (so nothing is refused) but never answers.
+    let silent_socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind silent socket");
+    let silent_addr = silent_socket.local_addr().expect("silent socket address");
+    let dead_ticket = iroh_transport::Ticket::new(
+        iroh::EndpointAddr::new(iroh::SecretKey::generate().public()).with_ip_addr(silent_addr),
+    )
+    .serialize();
+
+    let started = std::time::Instant::now();
+    let err = dialler
+        .join_session_by_ticket(&dead_ticket)
+        .expect_err("join to a silent Ticket should fail");
+    let elapsed = started.elapsed();
+
+    assert!(
+        matches!(err, iroh_transport::TransportError::CantReach),
+        "dialler should get CantReach, got {:?}",
+        err
+    );
+    assert!(elapsed >= dial_timeout, "gave up before the dial timeout: {:?}", elapsed);
+    assert!(
+        elapsed < Duration::from_secs(8),
+        "should give up at the 2s dial timeout, well under the 15s default, took {:?}",
+        elapsed
+    );
+}
+
+/// A Ticket goes dead when its Helper goes away: a dial to the Ticket of a
+/// dropped Transport fails with CantReach, no later than the dial timeout.
+#[test]
+fn test_dial_to_ticket_of_dropped_transport_fails_with_cant_reach() {
+    let dialler = match create_transport_with_options(iroh_transport::TransportOptions {
+        dial_timeout: Duration::from_secs(2),
+        ..Default::default()
+    }) {
+        Some(t) => t,
+        None => return,
+    };
+    let dead_ticket = match create_transport() {
+        Some(gone) => gone.our_ticket().to_string(),
+        None => return,
+    };
+
+    let started = std::time::Instant::now();
+    let err = dialler
+        .connect_to_peer(&dead_ticket)
+        .expect_err("dial to a dead Ticket should fail");
+    let elapsed = started.elapsed();
+
+    assert!(
+        matches!(err, iroh_transport::TransportError::CantReach),
+        "dialler should get CantReach, got {:?}",
+        err
+    );
+    assert!(
+        elapsed < Duration::from_secs(8),
+        "should give up by the 2s dial timeout, well under the 15s default, took {:?}",
+        elapsed
+    );
+}
+
+/// A Transport built with a non-default Peer protocol version is a faithful
+/// stand-in for that build on the wire: it dials with the matching ALPN and
+/// opens its ordered stream with that version in the preamble
+/// (b"SMAC" + version as u16 LE).
+#[test]
+fn test_non_default_peer_protocol_version_is_used_in_alpn_and_stream_preamble() {
+    let transport = match create_transport_with_options(iroh_transport::TransportOptions {
+        peer_protocol_version: 7,
+        ..Default::default()
+    }) {
+        Some(t) => t,
+        None => return,
+    };
+
+    let rt = tokio::runtime::Runtime::new().expect("test runtime");
+    let listener = match rt.block_on(bind_bare_endpoint(vec![b"datalink/7".to_vec()])) {
+        Some(ep) => ep,
+        None => return,
+    };
+    let listener_ticket = iroh_transport::Ticket::new(listener.addr()).serialize();
+
+    // Accept one connection and read the preamble of its first ordered stream.
+    let preamble = rt.spawn(async move {
+        let connection = listener.accept().await?.await.ok()?;
+        let mut recv = connection.accept_uni().await.ok()?;
+        let mut preamble = [0u8; 6];
+        recv.read_exact(&mut preamble).await.ok()?;
+        Some(preamble)
+    });
+
+    transport
+        .connect_to_peer(&listener_ticket)
+        .expect("dial with ALPN datalink/7 should be accepted");
+    // Any broadcast opens the ordered stream to the connected peer.
+    transport.set_player_data(0x10000, vec![0x42], false);
+
+    let preamble = rt
+        .block_on(async { tokio::time::timeout(Duration::from_secs(10), preamble).await })
+        .expect("ordered stream should open before the deadline")
+        .expect("listener task");
+    assert_eq!(preamble, Some(*b"SMAC\x07\x00"));
+}
+
+/// Two Transports on the same non-default Peer protocol version are compatible
+/// builds: they connect, and messages on the ordered stream get through.
+#[test]
+fn test_same_non_default_peer_protocol_version_connects_and_delivers() {
+    let options = iroh_transport::TransportOptions {
+        peer_protocol_version: 7,
+        ..Default::default()
+    };
+    let host = match create_transport_with_options(options) {
+        Some(t) => t,
+        None => return,
+    };
+    let joiner = match create_transport_with_options(options) {
+        Some(t) => t,
+        None => return,
+    };
+
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Same Version Test".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+
+    let joiner_id = joiner
+        .join_session_by_ticket(host.our_ticket())
+        .expect("join between Transports on the same Peer protocol version should succeed");
+
+    // The accepting side lists the peer as connected (the same read the
+    // mismatch test uses to show a refused peer is never listed).
+    let listed = poll_until(Duration::from_secs(10), || {
+        host.connect_for_discovery(joiner.endpoint_id_bytes()).ok()
+    });
+    assert!(listed.is_some(), "host should list the joiner as connected");
+
+    // The data byte travels over the ordered stream, behind the preamble check.
+    joiner.create_player(
+        PlayerName {
+            short_name: "Joiner".to_string(),
+            long_name: "Joining Player".to_string(),
+        },
+        0,
+        vec![0x42],
+    );
+    let host_sees = poll_until(Duration::from_secs(10), || {
+        match host.session_manager().get_player_data(joiner_id, false) {
+            Some(d) if d == vec![0x42] => Some(()),
+            _ => None,
+        }
+    });
+    assert!(host_sees.is_some(), "host should receive the joiner's ordered-stream message");
+}
+
 /// Full mesh networking test (requires actual network access)
 /// This test creates multiple transports and verifies mesh connectivity
 #[test]

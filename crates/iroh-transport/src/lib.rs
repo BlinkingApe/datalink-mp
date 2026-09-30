@@ -17,9 +17,6 @@ pub use ticket::*;
 
 use thiserror::Error;
 
-/// ALPN protocol identifier for DirectPlay over Iroh
-pub const DPLAY_ALPN: &[u8] = b"dplay-iroh/1";
-
 /// Errors from the transport layer
 #[derive(Debug, Error)]
 pub enum TransportError {
@@ -49,6 +46,15 @@ pub enum TransportError {
 
     #[error("Protocol version mismatch (peer speaks {0:#06x}, we speak {1:#06x})")]
     ProtocolMismatch(u16, u16),
+
+    /// A dial the other Helper rejected for the ALPN: it speaks a different
+    /// Peer protocol version, so the two players run different builds.
+    #[error("Peer protocol version mismatch (the other Helper is a different build)")]
+    PeerProtocolMismatch,
+
+    /// A dial that timed out or could not connect.
+    #[error("Can't reach the other Helper")]
+    CantReach,
 
     #[error("Invalid ticket: {0}")]
     InvalidTicket(#[from] ticket::TicketError),

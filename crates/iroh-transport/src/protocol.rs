@@ -10,9 +10,6 @@
 use dp_types::{PlayerName, SessionDesc, DPID, GUID};
 use serde::{Deserialize, Serialize};
 
-/// Protocol version
-pub const PROTOCOL_VERSION: u32 = 2;
-
 /// Message types exchanged between peers
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Message {

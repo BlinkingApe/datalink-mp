@@ -9,26 +9,71 @@
 //! directly, forming a full mesh.
 
 use crate::protocol::{decode_message, encode_message, Message, PlayerInfo, SessionInfo};
-use crate::runtime::NetworkMode;
+use crate::runtime::{NetworkMode, TransportOptions};
 use crate::session::SessionManager;
-use crate::{TransportError, TransportResult, DPLAY_ALPN};
+use crate::{TransportError, TransportResult};
 use dp_types::structs::{serialize_dpmsg_setplayerorgroupdata, serialize_dpmsg_setplayerorgroupname, serialize_dpmsg_setsessiondesc};
 use dp_types::{SessionDesc, DPID, GUID};
 
 /// DPPLAYERTYPE_PLAYER constant (player, not group)
 const DPPLAYERTYPE_PLAYER: u32 = 1;
-use iroh::endpoint::{Connection, RecvStream, SendStream};
+use iroh::endpoint::{
+    ConnectError, ConnectingError, Connection, ConnectionError, RecvStream, SendStream,
+    TransportErrorCode,
+};
 use iroh::{Endpoint, EndpointAddr, EndpointId};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{debug, debug_span, error, info, warn};
 
-/// Ordered-stream protocol version. Bumped whenever the wire format changes so a
-/// stale DLL/helper on one machine fails LOUDLY instead of desyncing silently.
-/// v2: message payloads are postcard-encoded (previously bincode).
-pub const STREAM_PROTO_VERSION: u16 = 2;
+/// Peer protocol version: the version of the Helper-to-Helper wire protocol.
+/// Bumped whenever the wire format changes so two Helpers from different builds
+/// refuse each other LOUDLY instead of desyncing silently. It is carried twice:
+/// in the ALPN (`datalink/<version>`, see `peer_protocol_alpn`), so a mismatch
+/// is rejected in the QUIC handshake, and in the ordered-stream preamble as a
+/// second line of defence.
+/// v1: first datalink-mp release (postcard-encoded message payloads).
+pub const STREAM_PROTO_VERSION: u16 = 1;
+
+/// ALPN for a Peer protocol version: `datalink/<version>`. Two Helpers only
+/// complete the QUIC handshake if their ALPNs, and so their versions, are equal.
+pub fn peer_protocol_alpn(peer_protocol_version: u16) -> Vec<u8> {
+    format!("datalink/{}", peer_protocol_version).into_bytes()
+}
+
+/// TLS alert `no_application_protocol` (RFC 7301): the accepting side supports
+/// none of the ALPNs the dialler offered.
+const TLS_ALERT_NO_APPLICATION_PROTOCOL: u8 = 120;
+
+/// Classify a failed dial for the caller. The other Helper rejecting our ALPN
+/// reaches us as a connection close carrying the TLS `no_application_protocol`
+/// alert as a QUIC crypto error code: a Peer protocol version mismatch. Every
+/// other failure means the other Helper could not be reached.
+fn classify_dial_error(e: &ConnectError) -> TransportError {
+    let connection_error = match e {
+        ConnectError::Connecting {
+            source: ConnectingError::ConnectionError { source, .. },
+            ..
+        } => Some(source),
+        ConnectError::Connection { source, .. } => Some(source),
+        _ => None,
+    };
+    match connection_error {
+        Some(ConnectionError::ConnectionClosed(close))
+            if close.error_code
+                == TransportErrorCode::crypto(TLS_ALERT_NO_APPLICATION_PROTOCOL) =>
+        {
+            TransportError::PeerProtocolMismatch
+        }
+        _ => TransportError::CantReach,
+    }
+}
+
+/// Default bound on a single dial (see `ConnectionManager::connect_by_ticket`).
+pub const DEFAULT_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Magic prefix opening every ordered message stream: b"SMAC" + version (u16 LE).
 const STREAM_MAGIC: &[u8; 4] = b"SMAC";
@@ -58,7 +103,12 @@ pub struct PeerConnection {
 impl PeerConnection {
     /// Create a peer and spawn its ordered-stream writer task.
     /// Must be called from within the tokio runtime context.
-    fn spawn(connection: Connection, endpoint_id: EndpointId, ticket: String) -> Arc<Self> {
+    fn spawn(
+        connection: Connection,
+        endpoint_id: EndpointId,
+        ticket: String,
+        peer_protocol_version: u16,
+    ) -> Arc<Self> {
         let (outbox, outbox_rx) = mpsc::unbounded_channel();
         let peer = Arc::new(PeerConnection {
             connection: connection.clone(),
@@ -71,6 +121,7 @@ impl PeerConnection {
             connection,
             outbox_rx,
             endpoint_short(&endpoint_id),
+            peer_protocol_version,
         ));
         peer
     }
@@ -101,14 +152,18 @@ async fn ordered_writer_task(
     connection: Connection,
     mut outbox_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     peer_label: String,
+    peer_protocol_version: u16,
 ) {
     let mut stream: Option<SendStream> = None;
 
-    async fn open_stream(connection: &Connection) -> TransportResult<SendStream> {
+    async fn open_stream(
+        connection: &Connection,
+        peer_protocol_version: u16,
+    ) -> TransportResult<SendStream> {
         let mut s = connection.open_uni().await?;
         let mut preamble = [0u8; 6];
         preamble[..4].copy_from_slice(STREAM_MAGIC);
-        preamble[4..].copy_from_slice(&STREAM_PROTO_VERSION.to_le_bytes());
+        preamble[4..].copy_from_slice(&peer_protocol_version.to_le_bytes());
         s.write_all(&preamble).await?;
         Ok(s)
     }
@@ -122,7 +177,7 @@ async fn ordered_writer_task(
     while let Some(data) = outbox_rx.recv().await {
         // Ensure we have a stream
         if stream.is_none() {
-            match open_stream(&connection).await {
+            match open_stream(&connection, peer_protocol_version).await {
                 Ok(s) => stream = Some(s),
                 Err(e) => {
                     error!(peer = %peer_label, error = %e, "failed to open ordered stream; dropping connection");
@@ -135,7 +190,7 @@ async fn ordered_writer_task(
         let s = stream.as_mut().expect("stream set above");
         if let Err(e) = write_frame(s, &data).await {
             warn!(peer = %peer_label, error = %e, "ordered stream write failed; reopening once");
-            match open_stream(&connection).await {
+            match open_stream(&connection, peer_protocol_version).await {
                 Ok(mut s2) => {
                     if let Err(e2) = write_frame(&mut s2, &data).await {
                         error!(peer = %peer_label, error = %e2, "ordered stream retry failed; dropping connection");
@@ -212,6 +267,8 @@ pub struct ConnectionManager {
     our_ticket: String,
     /// Network mode for message routing (IPX broadcast vs TCP/IP point-to-point)
     network_mode: NetworkMode,
+    /// Peer protocol version and dial timeout
+    options: TransportOptions,
 }
 
 impl Clone for ConnectionManager {
@@ -225,6 +282,7 @@ impl Clone for ConnectionManager {
             endpoint_id: self.endpoint_id,
             our_ticket: self.our_ticket.clone(),
             network_mode: self.network_mode,
+            options: self.options,
         }
     }
 }
@@ -238,6 +296,26 @@ impl ConnectionManager {
         our_ticket: String,
         network_mode: NetworkMode,
     ) -> Self {
+        Self::with_options(
+            endpoint,
+            session_manager,
+            message_tx,
+            our_ticket,
+            network_mode,
+            TransportOptions::default(),
+        )
+    }
+
+    /// Create a new connection manager with non-default options. The endpoint
+    /// must advertise `peer_protocol_alpn(options.peer_protocol_version)`.
+    pub fn with_options(
+        endpoint: Endpoint,
+        session_manager: Arc<SessionManager>,
+        message_tx: mpsc::UnboundedSender<ReceivedMessage>,
+        our_ticket: String,
+        network_mode: NetworkMode,
+        options: TransportOptions,
+    ) -> Self {
         let endpoint_id = endpoint.id();
         Self {
             endpoint,
@@ -248,6 +326,7 @@ impl ConnectionManager {
             endpoint_id,
             our_ticket,
             network_mode,
+            options,
         }
     }
 
@@ -291,12 +370,29 @@ impl ConnectionManager {
 
         info!("Connecting to peer via ticket: {}", endpoint_addr.id);
 
-        let connection = self
-            .endpoint
-            .connect(endpoint_addr.clone(), DPLAY_ALPN)
-            .await?;
+        let alpn = peer_protocol_alpn(self.options.peer_protocol_version);
+        // The dial timeout lives here, in the one place that dials, so every
+        // caller gets it: join, mesh connections and the reconnect driver.
+        let dial = self.endpoint.connect(endpoint_addr.clone(), &alpn);
+        let connection = match tokio::time::timeout(self.options.dial_timeout, dial).await {
+            Ok(Ok(connection)) => connection,
+            Ok(Err(e)) => {
+                let classified = classify_dial_error(&e);
+                warn!(peer = %endpoint_addr.id, error = %e, "dial failed: {}", classified);
+                return Err(classified);
+            }
+            Err(_) => {
+                warn!(peer = %endpoint_addr.id, timeout = ?self.options.dial_timeout, "dial timed out");
+                return Err(TransportError::CantReach);
+            }
+        };
 
-        let peer = PeerConnection::spawn(connection.clone(), endpoint_addr.id, ticket.to_string());
+        let peer = PeerConnection::spawn(
+            connection.clone(),
+            endpoint_addr.id,
+            ticket.to_string(),
+            self.options.peer_protocol_version,
+        );
 
         self.peers.write().insert(key, peer.clone());
 
@@ -636,7 +732,12 @@ impl ConnectionManager {
 
         if is_new {
             // Ticket will be filled in on Hello
-            let peer = PeerConnection::spawn(connection.clone(), endpoint_id, String::new());
+            let peer = PeerConnection::spawn(
+                connection.clone(),
+                endpoint_id,
+                String::new(),
+                self.options.peer_protocol_version,
+            );
             self.peers.write().insert(endpoint_id_bytes, peer);
         }
 
@@ -665,8 +766,11 @@ async fn read_ordered_stream(
         sender_endpoint_id[3],
     ]));
 
-    // Preamble: magic + protocol version. A mismatch means one machine runs a
+    // Preamble: magic + Peer protocol version. A mismatch means one machine runs a
     // stale build — fail loudly, this is exactly the silent-desync we refuse.
+    // The ALPN already refuses mismatched builds in the handshake; this check
+    // stays as a second line of defence.
+    let our_version = cm.options.peer_protocol_version;
     let mut preamble = [0u8; 6];
     if let Err(e) = recv.read_exact(&mut preamble).await {
         debug!(peer = %peer_label, error = %e, "stream ended before preamble");
@@ -674,13 +778,13 @@ async fn read_ordered_stream(
     }
     if &preamble[..4] != STREAM_MAGIC {
         error!(peer = %peer_label, "BAD STREAM MAGIC — peer is running an incompatible (pre-ordered-stream) build");
-        return Err(TransportError::ProtocolMismatch(0, STREAM_PROTO_VERSION));
+        return Err(TransportError::ProtocolMismatch(0, our_version));
     }
     let their_version = u16::from_le_bytes([preamble[4], preamble[5]]);
-    if their_version != STREAM_PROTO_VERSION {
-        error!(peer = %peer_label, their_version, our_version = STREAM_PROTO_VERSION,
+    if their_version != our_version {
+        error!(peer = %peer_label, their_version, our_version,
                "PROTOCOL VERSION MISMATCH — one machine has a stale build");
-        return Err(TransportError::ProtocolMismatch(their_version, STREAM_PROTO_VERSION));
+        return Err(TransportError::ProtocolMismatch(their_version, our_version));
     }
 
     let mut len_buf = [0u8; 4];
