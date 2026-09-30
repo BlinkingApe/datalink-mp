@@ -37,6 +37,14 @@
     border: 2px solid var(--line); color: var(--muted); }
   .num.done { background: var(--ok); border-color: var(--ok); color: #fff; }
   .num.now { border-color: var(--accent); color: var(--accent); }
+  [hidden] { display: none !important; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  .pill { display: inline-block; border-radius: 99px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  .pill.ok { background: var(--okbg); color: var(--ok); }
+  .pill.idle { background: var(--line); color: var(--muted); }
+  .banner { border-radius: 10px; padding: 12px 14px; margin: 12px 0; border: 1px solid; }
+  .banner.bad { background: var(--badbg); border-color: var(--bad); }
+  .ingame { border-left: 3px solid var(--accent); padding: 4px 0 4px 10px; margin: 8px 0; }
 </style>
 </head>
 <body>
@@ -44,6 +52,14 @@
   <div>
     <h1>datalink-mp</h1>
   </div>
+
+  <!-- One element per banner code; status says which are shown. -->
+  <div class="banner bad" data-banner="ipc_port_in_use" hidden>Another program is using port
+    <span id="ipc-port"></span>, so the game can't reach the Helper. Close the other program and
+    start datalink-mp again.</div>
+  <div class="banner bad" data-banner="ipc_version_mismatch" hidden>The game's <code>dplayx.dll</code>
+    doesn't match this Helper. Extract the whole archive into your Game folder again, then restart
+    the game.</div>
 
   <div class="card">
     <div class="step"><div class="num" id="num1">1</div>
@@ -59,7 +75,13 @@
       </div></div>
 
     <div class="step"><div class="num" id="num3">3</div>
-      <div><h2>Start the game</h2></div></div>
+      <div><h2>Start the game</h2>
+        <div class="ingame">In the game: <b>Multiplayer</b> → <b>Iroh P2P</b> →
+          <b>Host Game</b> (you) or <b>Join Game</b> (your friends).</div>
+        <div class="small"><span class="pill idle" id="game-pill">Game not running</span></div>
+        <div class="small muted" id="wine-hint" style="margin-top:6px" hidden>If the game is running
+          and this never shows “Game connected”, the Wine override is the usual cause.</div>
+      </div></div>
 
     <div class="step"><div class="num" id="num4">4</div>
       <div><h2>Play</h2></div></div>
@@ -90,6 +112,8 @@
   var STATE_WORDS = { ready: 'Ready', joining: 'Connecting…', joined: 'Joined', hosting: 'Hosting' };
   var ticketBox = document.getElementById('ticket');
   var copyButton = document.getElementById('copy');
+  var banners = document.querySelectorAll('[data-banner]');
+  var gamePill = document.getElementById('game-pill');
 
   function setStep(n, done, now) {
     var el = document.getElementById('num' + n);
@@ -105,8 +129,22 @@
     var connected = s.state === 'joined' || s.state === 'hosting';
     setStep(1, false, false);
     setStep(2, connected, !connected);
-    setStep(3, false, false);
+    setStep(3, s.game_connected, !s.game_connected);
     setStep(4, false, false);
+
+    // The Helper decides which banners are active; the page has the words.
+    document.getElementById('ipc-port').textContent = s.ipc_port;
+    for (var i = 0; i < banners.length; i++) {
+      banners[i].hidden = s.banners.indexOf(banners[i].getAttribute('data-banner')) < 0;
+    }
+
+    gamePill.className = 'pill ' + (s.game_connected ? 'ok' : 'idle');
+    gamePill.textContent = s.game_connected ? 'Game connected' : 'Game not running';
+    // Under Wine, a game that never connects usually lacks the override,
+    // unless a banner already says why the game can't connect.
+    var explained = s.banners.indexOf('ipc_port_in_use') >= 0 ||
+      s.banners.indexOf('ipc_version_mismatch') >= 0;
+    document.getElementById('wine-hint').hidden = s.game_connected || s.os === 'windows' || explained;
 
     document.getElementById('footer').textContent =
       'Release ' + s.release_version +

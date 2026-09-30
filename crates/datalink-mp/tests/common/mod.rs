@@ -39,6 +39,20 @@ impl FakeDll {
         decode_response(&reply).expect("the Helper's reply should decode")
     }
 
+    /// Send one framed message whose payload is `payload` as it is, the way a
+    /// DLL that speaks another protocol would. The Helper gives it no reply.
+    pub fn send_undecodable(&mut self, payload: &[u8]) {
+        ipc_protocol::write_message(&mut self.stream, payload)
+            .expect("message should be written to the Helper");
+    }
+
+    /// Send `bytes` as they are, with no framing.
+    pub fn send_raw(&mut self, bytes: &[u8]) {
+        self.stream
+            .write_all(bytes)
+            .expect("bytes should be written to the Helper");
+    }
+
     /// Handshake as a DLL from another build would, with its own IPC version.
     pub fn handshake_with_version(&mut self, ipc_version: u32) -> IpcResponse {
         self.request(&IpcRequest::Handshake {

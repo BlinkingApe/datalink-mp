@@ -17,6 +17,9 @@ const STARTUP_DEADLINE: Duration = Duration::from_secs(30);
 /// How long the binary may take to give up and exit on a fatal error.
 const EXIT_DEADLINE: Duration = Duration::from_secs(30);
 
+/// How long a Helper that should stay up is watched for an exit.
+const STAYS_UP_GRACE: Duration = Duration::from_secs(1);
+
 /// How long a friend's Transport may take to see a connect on loopback.
 const PEER_NOTICE_DEADLINE: Duration = Duration::from_secs(10);
 
@@ -124,6 +127,12 @@ impl HelperProcess {
                 return Some(line);
             }
         }
+    }
+
+    /// True if the process is still running once `grace` has passed. An exit
+    /// is seen as soon as it happens.
+    fn keeps_running_for(&mut self, grace: Duration) -> bool {
+        poll_until(grace, || self.child.try_wait().expect("should poll the process")).is_none()
     }
 
     /// Wait for the process to exit by itself, and collect what it wrote to
@@ -324,11 +333,9 @@ fn test_ui_mode_never_writes_the_token_to_the_log_file() {
     assert!(!log.contains(&token), "the token was logged");
 }
 
-#[test]
-fn test_host_exits_with_an_error_when_the_ipc_port_is_taken() {
-    let (_holder, taken_port) = hold_port();
-    let mut helper = HelperProcess::spawn(&["host", "--port", &taken_port.to_string()]);
-
+/// Assert that `helper`, started on an IPC port another program holds, exits
+/// with an error that says so.
+fn assert_exits_with_an_ipc_bind_error(mut helper: HelperProcess) {
     let exit = helper
         .wait_for_exit()
         .expect("a failed IPC bind should be fatal, but the Helper kept running");
@@ -345,6 +352,54 @@ fn test_host_exits_with_an_error_when_the_ipc_port_is_taken() {
         exit.stderr.contains("Failed to bind TCP listener"),
         "the error should say the IPC port could not be bound, got: {}",
         exit.stderr
+    );
+}
+
+#[test]
+fn test_host_exits_with_an_error_when_the_ipc_port_is_taken() {
+    let (_holder, taken_port) = hold_port();
+
+    let helper = HelperProcess::spawn(&["host", "--port", &taken_port.to_string()]);
+
+    assert_exits_with_an_ipc_bind_error(helper);
+}
+
+#[test]
+fn test_join_exits_with_an_error_when_the_ipc_port_is_taken() {
+    // A friend to join, so that the taken port is all that is wrong.
+    let friend = match Transport::new() {
+        Ok(friend) => friend,
+        Err(e) => return note_transport_unavailable(&e),
+    };
+    let (_holder, taken_port) = hold_port();
+
+    let helper = HelperProcess::spawn(&[
+        "join",
+        "--port",
+        &taken_port.to_string(),
+        "--ticket",
+        friend.our_ticket(),
+    ]);
+
+    assert_exits_with_an_ipc_bind_error(helper);
+}
+
+#[test]
+fn test_ui_mode_keeps_running_with_a_banner_when_the_ipc_port_is_taken() {
+    let (_holder, taken_port) = hold_port();
+    let args = ui_args(free_port(), taken_port);
+    let mut helper = HelperProcess::spawn(&args.iter().map(String::as_str).collect::<Vec<_>>());
+
+    let Some(launch_url) = helper.launch_url() else {
+        return;
+    };
+
+    let status = assert_page_and_status_are_served(&launch_url);
+    assert_eq!(status["banners"], serde_json::json!(["ipc_port_in_use"]));
+    // With no IPC server to run, the Helper must not take that for its end.
+    assert!(
+        helper.keeps_running_for(STAYS_UP_GRACE),
+        "the Helper exited although its page was being served"
     );
 }
 

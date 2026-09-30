@@ -915,3 +915,190 @@ fn test_helper_keeps_running_and_prints_the_url_when_the_opener_fails() {
     let status = http_get(port_of(&printed), "/api/status", &[("X-Token", token)]);
     assert_eq!(status.status, 200, "the page and API are served at the printed URL");
 }
+
+// ---------------------------------------------------------------------------
+// Ticket 09: step 3, the game's link to the Helper
+//
+// A fake DLL connects to the IPC port the way the game does; what the page
+// would show of it is read from status.
+// ---------------------------------------------------------------------------
+
+/// How long the Helper may take to notice that a DLL connection changed.
+const GAME_LINK_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+impl Started {
+    fn connect_fake_dll(&self) -> common::FakeDll {
+        common::FakeDll::connect(self.helper.ipc_port())
+            .expect("the Helper should accept a DLL connection")
+    }
+
+    /// Wait for status to report the game as connected, or as not connected.
+    fn wait_for_game_connected(&self, connected: bool) {
+        common::poll_until(GAME_LINK_DEADLINE, || {
+            (self.status()["game_connected"] == connected).then_some(())
+        })
+        .unwrap_or_else(|| panic!("status should report game_connected = {connected}"));
+    }
+
+    /// Wait for status to report exactly these banners.
+    fn wait_for_banners(&self, expected: &[&str]) {
+        common::poll_until(GAME_LINK_DEADLINE, || (self.banners() == expected).then_some(()))
+            .unwrap_or_else(|| panic!("expected banners {expected:?}, got {:?}", self.banners()));
+    }
+
+    /// The codes of the banners status reports.
+    fn banners(&self) -> Vec<String> {
+        let status = self.status();
+        let banners = status["banners"].as_array().expect("status should carry a banner list");
+        banners
+            .iter()
+            .map(|code| code.as_str().expect("a banner is a code").to_string())
+            .collect()
+    }
+}
+
+/// A message payload that is no IPC request.
+const GARBAGE: &[u8] = &[0xff; 4];
+
+#[test]
+fn test_fresh_helper_reports_the_game_as_not_connected() {
+    let Some(started) = start(false) else {
+        return;
+    };
+
+    assert_eq!(started.status()["game_connected"], false);
+}
+
+#[test]
+fn test_game_connected_follows_the_dll_connection() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let mut dll = started.connect_fake_dll();
+    // Whatever the answer, the Helper has taken the connection up by now.
+    dll.request(&ipc_protocol::IpcRequest::GetOurTicket);
+    assert_eq!(
+        started.status()["game_connected"], false,
+        "a connection that has not shaken hands is not the game yet"
+    );
+
+    dll.handshake();
+    assert_eq!(started.status()["game_connected"], true);
+
+    // The game was closed.
+    drop(dll);
+    started.wait_for_game_connected(false);
+}
+
+#[test]
+fn test_game_connected_turns_false_when_the_dll_connection_ends_on_an_error() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let mut dll = started.connect_fake_dll();
+    dll.handshake();
+    assert_eq!(started.status()["game_connected"], true);
+
+    // The Helper cannot read this and gives the connection up. The DLL's end
+    // stays open, so this is not a clean close.
+    dll.send_undecodable(GARBAGE);
+
+    started.wait_for_game_connected(false);
+    assert!(
+        started.banners().is_empty(),
+        "only the first message can say that the DLL does not match"
+    );
+}
+
+#[test]
+fn test_handshake_with_the_wrong_ipc_version_sets_the_ipc_version_mismatch_banner() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let mut dll = started.connect_fake_dll();
+
+    dll.handshake_with_version(ipc_protocol::PROTOCOL_VERSION + 1);
+
+    assert_eq!(started.banners(), ["ipc_version_mismatch"]);
+    assert_eq!(
+        started.status()["game_connected"], false,
+        "a DLL that does not match is not a connected game"
+    );
+}
+
+#[test]
+fn test_garbage_first_message_sets_the_ipc_version_mismatch_banner() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let mut dll = started.connect_fake_dll();
+
+    dll.send_undecodable(GARBAGE);
+
+    started.wait_for_banners(&["ipc_version_mismatch"]);
+}
+
+#[test]
+fn test_first_message_that_is_not_framed_as_ours_sets_the_ipc_version_mismatch_banner() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let mut dll = started.connect_fake_dll();
+
+    // Read as a length prefix, this announces a message far beyond any the
+    // IPC protocol sends.
+    dll.send_raw(b"DPLAY/9 hello\n");
+
+    started.wait_for_banners(&["ipc_version_mismatch"]);
+}
+
+#[test]
+fn test_later_good_handshake_clears_the_ipc_version_mismatch_banner() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let mut mismatched = started.connect_fake_dll();
+    mismatched.handshake_with_version(ipc_protocol::PROTOCOL_VERSION + 1);
+    assert_eq!(started.banners(), ["ipc_version_mismatch"]);
+    drop(mismatched);
+    // The Helper serves one DLL connection at a time: an answer on a new
+    // one, whatever it is, says the Helper has seen the old one close.
+    let mut matching = started.connect_fake_dll();
+    matching.request(&ipc_protocol::IpcRequest::GetOurTicket);
+    assert_eq!(
+        started.banners(),
+        ["ipc_version_mismatch"],
+        "the banner outlives the connection that set it"
+    );
+
+    // The player extracted the archive again and restarted the game.
+    matching.handshake();
+
+    assert!(started.banners().is_empty(), "got {:?}", started.banners());
+    assert_eq!(started.status()["game_connected"], true);
+}
+
+#[test]
+fn test_ui_works_with_the_ipc_port_in_use_banner_when_the_ipc_port_is_taken() {
+    // Another program holds the IPC port.
+    let (_holder, taken_port) = common::hold_port();
+    let config = Config {
+        ipc_port: taken_port,
+        ..ui_config_from(0)
+    };
+
+    let helper = match datalink_mp::start(config) {
+        Ok(helper) => helper,
+        Err(StartError::Transport(e)) => return note_transport_unavailable(&e),
+        Err(e) => panic!("a taken IPC port should not stop the Helper in UI mode: {e:?}"),
+    };
+    let started = Started { helper, opened: OpenedUrls::default() };
+
+    assert_eq!(http_get(started.ui_port(), "/", &[]).status, 200, "the page is served");
+    let status = started.status();
+    assert_eq!(status["banners"], serde_json::json!(["ipc_port_in_use"]));
+    assert_eq!(status["ipc_port"], taken_port, "status names the port that is taken");
+    assert_eq!(status["game_connected"], false);
+    Ticket::parse(status["ticket"].as_str().expect("status should carry a Ticket"))
+        .expect("the Helper still has a Ticket");
+}

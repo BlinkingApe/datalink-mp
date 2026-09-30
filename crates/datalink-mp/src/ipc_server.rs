@@ -6,10 +6,9 @@
 use crate::controller::SessionController;
 use anyhow::Result;
 use ipc_protocol::{
-    decode_request, encode_response, read_message, IpcRequest, IpcResponse, PlayerListEntry,
-    QueuedMessage, SessionListEntry, PROTOCOL_VERSION,
+    decode_request, encode_response, read_message, IpcError, IpcRequest, IpcResponse,
+    PlayerListEntry, QueuedMessage, SessionListEntry, PROTOCOL_VERSION,
 };
-use iroh_transport::Transport;
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
@@ -35,6 +34,8 @@ fn serve(listener: TcpListener, controller: &SessionController) {
                 if let Err(e) = handle_client(stream, controller) {
                     error!("Client error: {:?}", e);
                 }
+                // The connection is over, cleanly or not.
+                controller.dll_disconnected();
                 info!("Client disconnected");
             }
             Err(e) => {
@@ -48,29 +49,29 @@ fn handle_client(mut stream: TcpStream, controller: &SessionController) -> Resul
     // Disable Nagle's algorithm for lower latency
     stream.set_nodelay(true)?;
 
-    loop {
-        // Read request
-        let data = match read_message(&mut stream) {
-            Ok(data) => data,
-            Err(ipc_protocol::IpcError::Io(e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                // Client closed connection
-                return Ok(());
-            }
-            Err(e) => return Err(e.into()),
-        };
+    // A DLL from another build shows in its first message: either the
+    // handshake says so, or the message cannot be read at all.
+    let mut first_message = true;
 
-        let request = decode_request(&data)?;
+    loop {
+        let request = match read_request(&mut stream) {
+            Ok(Some(request)) => request,
+            // Client closed connection
+            Ok(None) => return Ok(()),
+            Err(e) => {
+                if first_message && is_unreadable(&e) {
+                    controller.dll_mismatched();
+                }
+                return Err(e.into());
+            }
+        };
+        first_message = false;
         let request_type = request.type_name();
 
         let span = debug_span!("ipc_request", request_type);
         let _guard = span.enter();
 
-        // Fetch the Transport for every request, not once per connection: a
-        // DLL connection outlives a Transport when Stop replaces it.
-        let transport = controller.transport();
-        let response = handle_request(&request, &transport);
+        let response = handle_request(&request, controller);
 
         let encoded = encode_response(&response)?;
         // encode_response already includes length prefix, so we write it directly
@@ -79,10 +80,35 @@ fn handle_client(mut stream: TcpStream, controller: &SessionController) -> Resul
     }
 }
 
-fn handle_request(request: &IpcRequest, transport: &Transport) -> IpcResponse {
+/// Read the next request. None when the DLL closed the connection.
+fn read_request(stream: &mut TcpStream) -> Result<Option<IpcRequest>, IpcError> {
+    let data = match read_message(stream) {
+        Ok(data) => data,
+        Err(IpcError::Io(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    Ok(Some(decode_request(&data)?))
+}
+
+/// Whether `error` says that what arrived was not a message this Helper can
+/// read, as opposed to the connection failing.
+fn is_unreadable(error: &IpcError) -> bool {
+    match error {
+        IpcError::Codec(_) => true,
+        // A length prefix beyond any real message
+        IpcError::Io(e) => e.kind() == std::io::ErrorKind::InvalidData,
+        _ => false,
+    }
+}
+
+fn handle_request(request: &IpcRequest, controller: &SessionController) -> IpcResponse {
+    // Fetch the Transport for every request, not once per connection: a
+    // DLL connection outlives a Transport when Stop replaces it.
+    let transport = controller.transport();
     match request {
         IpcRequest::Handshake { protocol_version } => {
             if *protocol_version != PROTOCOL_VERSION {
+                controller.dll_mismatched();
                 return IpcResponse::Error {
                     message: format!(
                         "Protocol version mismatch: expected {}, got {}",
@@ -90,6 +116,7 @@ fn handle_request(request: &IpcRequest, transport: &Transport) -> IpcResponse {
                     ),
                 };
             }
+            controller.dll_handshake_succeeded();
             IpcResponse::HandshakeOk {
                 endpoint_id: transport.endpoint_id_bytes(),
                 our_ticket: transport.our_ticket().to_string(),

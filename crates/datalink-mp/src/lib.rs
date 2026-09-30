@@ -11,7 +11,7 @@ mod http;
 mod ipc_server;
 mod platform;
 
-pub use controller::{SessionController, State, Status};
+pub use controller::{Banner, SessionController, State, Status};
 pub use http::generate_token;
 pub use platform::system_browser_opener;
 
@@ -19,12 +19,15 @@ use iroh_transport::{TransportError, TransportOptions};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use thiserror::Error;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Everything the Helper needs to start.
 pub struct Config {
     /// Port to listen on for DLL connections, on 127.0.0.1. Port 0 picks a
     /// free port; [`Helper::ipc_port`] reports the one that was bound.
+    ///
+    /// When another program holds the port, a Helper with a UI starts all the
+    /// same and says so on the page; one without a UI does not start.
     pub ipc_port: u16,
     /// Options for the Transport. Production code uses the defaults.
     pub transport_options: TransportOptions,
@@ -75,17 +78,31 @@ pub struct Helper {
     // async worker threads.
     http: Option<http::HttpServer>,
     controller: Arc<SessionController>,
-    ipc_thread: JoinHandle<()>,
+    /// None when another program holds the IPC port: there is no IPC server.
+    ipc_thread: Option<JoinHandle<()>>,
 }
 
 /// Start the Helper: bind the IPC port, create the Transport and serve the DLL.
 ///
 /// Returns once the Helper is running. It has a Ticket from this point on.
+/// A Helper with a UI runs even when another program holds the IPC port: it
+/// then serves no DLL, and its status carries the `ipc_port_in_use` banner.
 pub fn start(config: Config) -> Result<Helper, StartError> {
     // Bind first: a taken port is found out before an Iroh endpoint is started.
-    let listener = ipc_server::bind(config.ipc_port).map_err(StartError::IpcBind)?;
-    let ipc_port = listener.local_addr().map_err(StartError::IpcBind)?.port();
-    info!("Listening on 127.0.0.1:{}", ipc_port);
+    let (listener, ipc_port) = match ipc_server::bind(config.ipc_port) {
+        Ok(listener) => {
+            let port = listener.local_addr().map_err(StartError::IpcBind)?.port();
+            info!("Listening on 127.0.0.1:{}", port);
+            (Some(listener), port)
+        }
+        // With a page to say so on, a port held by another program is not
+        // fatal: the Helper runs without the game and shows a banner.
+        Err(e) if config.ui.is_some() && e.kind() == std::io::ErrorKind::AddrInUse => {
+            warn!("IPC port {} is in use by another program", config.ipc_port);
+            (None, config.ipc_port)
+        }
+        Err(e) => return Err(StartError::IpcBind(e)),
+    };
 
     // Likewise the UI port. A taken port is not fatal: the Helper walks on to
     // the next free one, and reports the port it bound.
@@ -102,10 +119,10 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
         .transpose()?;
 
     let controller = Arc::new(
-        SessionController::new(config.transport_options, ipc_port)
+        SessionController::new(config.transport_options, ipc_port, listener.is_none())
             .map_err(StartError::Transport)?,
     );
-    let ipc_thread = ipc_server::spawn(listener, controller.clone());
+    let ipc_thread = listener.map(|listener| ipc_server::spawn(listener, controller.clone()));
 
     let http = match (config.ui, ui_listener) {
         (Some(ui), Some(listener)) => {
@@ -128,7 +145,8 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
 }
 
 impl Helper {
-    /// The port the IPC server is listening on
+    /// The port the IPC server is listening on, or the port it could not have
+    /// because another program holds it
     pub fn ipc_port(&self) -> u16 {
         self.ipc_port
     }
@@ -150,9 +168,16 @@ impl Helper {
         &self.controller
     }
 
-    /// Block for as long as the IPC server runs, which is the life of the process.
+    /// Block for as long as the Helper runs, which is the life of the process.
     pub fn wait(self) {
-        if let Err(panic) = self.ipc_thread.join() {
+        let Some(ipc_thread) = self.ipc_thread else {
+            // No IPC server to wait for. The page is still served, for the
+            // life of the process.
+            loop {
+                std::thread::park();
+            }
+        };
+        if let Err(panic) = ipc_thread.join() {
             // A Helper whose IPC server died is of no use to the game.
             std::panic::resume_unwind(panic);
         }
@@ -160,8 +185,8 @@ impl Helper {
 
     /// Close every peer connection and the endpoint gracefully (blocking).
     ///
-    /// Takes up to `Transport::SHUTDOWN_TIMEOUT`. The IPC listener stays bound:
-    /// it lives as long as the process does.
+    /// Takes up to `Transport::SHUTDOWN_TIMEOUT`. The IPC listener, if one was
+    /// bound, stays bound: it lives as long as the process does.
     pub fn shutdown(self) {
         self.controller.transport().shutdown();
     }
