@@ -40,13 +40,19 @@
   .num.done { background: var(--ok); border-color: var(--ok); color: #fff; }
   .num.now { border-color: var(--accent); color: var(--accent); }
   [hidden] { display: none !important; }
-  code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; }
+  code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; overflow-wrap: anywhere; }
   .pill { display: inline-block; border-radius: 99px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
   .pill.ok { background: var(--okbg); color: var(--ok); }
   .pill.idle { background: var(--line); color: var(--muted); }
   .banner { border-radius: 10px; padding: 12px 14px; margin: 12px 0; border: 1px solid; }
   .banner.bad { background: var(--badbg); border-color: var(--bad); }
   .ingame { border-left: 3px solid var(--accent); padding: 4px 0 4px 10px; margin: 8px 0; }
+  .step .banner { margin: 0; }
+  .gap { margin-top: 6px; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details p { margin: 6px 0; }
+  .copyline { display: flex; gap: 6px; align-items: center; margin: 4px 0 8px; }
+  .copyline input { flex: 1; min-width: 0; }
 </style>
 </head>
 <body>
@@ -66,7 +72,40 @@
 
   <div class="card">
     <div class="step"><div class="num" id="num1">1</div>
-      <div><h2>Game folder</h2></div></div>
+      <div><h2>Game folder</h2>
+        <div class="small" id="self-check-ok" hidden><span class="pill ok">Game folder OK</span>
+          Found <code>dplayx.dll</code> and <code id="game-exe"></code> in
+          <code class="game-folder"></code>.</div>
+        <div class="banner bad" data-banner="not_game_folder" hidden>This isn't your Game folder.
+          Extract the whole archive into the folder that contains your game, then run datalink-mp
+          from there.
+          <span id="quarantine-hint" hidden>Your antivirus may have quarantined
+            <code>dplayx.dll</code>; restore it or extract the archive again.</span>
+          <div class="small muted gap">datalink-mp is running from:
+            <code class="game-folder"></code></div></div>
+        <details class="small gap" id="wine-setup" open hidden>
+          <summary>Wine setup (one time)</summary>
+          <p>Wine uses its own dplayx.dll unless you tell it to use ours. Add this to your
+            launcher's environment.</p>
+          <div><b>Generic:</b> put this before the launch command.</div>
+          <div class="copyline">
+            <input class="ticket" id="wine-generic" readonly value="WINEDLLOVERRIDES=&quot;dplayx=n,b&quot;">
+            <button data-copy="wine-generic">Copy</button></div>
+          <div><b>Faugus:</b> the same without the quotes. Paste it into the game's
+            “Game Arguments” field, separated by a space from anything already there.</div>
+          <div class="copyline">
+            <input class="ticket" id="wine-faugus" readonly value="WINEDLLOVERRIDES=dplayx=n,b">
+            <button data-copy="wine-faugus">Copy</button></div>
+          <div>Other launchers (Steam, Lutris…) should work: add the override to the launch
+            environment, e.g. Steam launch options
+            <code>WINEDLLOVERRIDES="dplayx=n,b" %command%</code>.</div>
+          <div class="gap" id="wine-macos" hidden><span class="pill idle">Untested</span>
+            Any Wine on macOS should work (e.g. CrossOver). Bottles live under the hidden Library
+            folder: in Finder choose Go → Go to Folder (⇧⌘G).</div>
+          <div class="muted gap">If the game never shows “Game connected”, this override is the
+            usual cause.</div>
+        </details>
+      </div></div>
 
     <div class="step"><div class="num" id="num2">2</div>
       <div><h2>Share or paste a Ticket</h2>
@@ -117,11 +156,18 @@
   var copyButton = document.getElementById('copy');
   var banners = document.querySelectorAll('[data-banner]');
   var gamePill = document.getElementById('game-pill');
+  var gameFolders = document.querySelectorAll('.game-folder');
 
   function setStep(n, done, now) {
     var el = document.getElementById('num' + n);
     el.className = 'num' + (done ? ' done' : now ? ' now' : '');
     el.textContent = done ? '✓' : String(n);
+  }
+
+  // Set an element's text, leaving it alone when it already says so: the
+  // player may be selecting it to copy.
+  function setText(el, text) {
+    if (el.textContent !== text) el.textContent = text;
   }
 
   function render(s) {
@@ -130,7 +176,8 @@
 
     // The Helper computes the state; the page only decides which steps are ticked.
     var connected = s.state === 'joined' || s.state === 'hosting';
-    setStep(1, false, false);
+    var step1Done = s.self_check.passed;
+    setStep(1, step1Done, !step1Done);
     setStep(2, connected, !connected);
     setStep(3, s.game_connected, !s.game_connected);
     setStep(4, false, false);
@@ -140,6 +187,17 @@
     for (var i = 0; i < banners.length; i++) {
       banners[i].hidden = s.banners.indexOf(banners[i].getAttribute('data-banner')) < 0;
     }
+
+    // Step 1 shows what the self-check found. When the check fails, the
+    // not_game_folder banner, which sits in this step, is shown in its place.
+    document.getElementById('self-check-ok').hidden = !step1Done;
+    setText(document.getElementById('game-exe'), s.self_check.game_exe || '');
+    for (i = 0; i < gameFolders.length; i++) setText(gameFolders[i], s.self_check.folder);
+    // The game is here and only the DLL is not: something took the DLL away.
+    document.getElementById('quarantine-hint').hidden = s.self_check.dll_found || !s.self_check.game_exe;
+    // Only Wine has to be told to load our DLL.
+    document.getElementById('wine-setup').hidden = s.os === 'windows';
+    document.getElementById('wine-macos').hidden = s.os !== 'macos';
 
     gamePill.className = 'pill ' + (s.game_connected ? 'ok' : 'idle');
     gamePill.textContent = s.game_connected ? 'Game connected' : 'Game not running';
@@ -224,21 +282,32 @@
     });
   });
 
-  ticketBox.addEventListener('click', function () { ticketBox.select(); });
-  copyButton.addEventListener('click', function () {
-    var text = ticketBox.value;
-    var done = function () {
-      copyButton.textContent = 'Copied ✓';
-      setTimeout(function () { copyButton.textContent = 'Copy Ticket'; }, 1200);
-    };
-    // Where the clipboard is blocked, leave the Ticket selected to copy by hand.
-    var fallback = function () { ticketBox.focus(); ticketBox.select(); };
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(text).then(done, fallback);
-    } else {
-      fallback();
-    }
-  });
+  // Make `button` copy what the read-only `box` holds. A click on the box
+  // selects its text.
+  function wireCopy(button, box) {
+    var label = button.textContent;
+    box.addEventListener('click', function () { box.select(); });
+    button.addEventListener('click', function () {
+      var done = function () {
+        button.textContent = 'Copied ✓';
+        setTimeout(function () { button.textContent = label; }, 1200);
+      };
+      // Where the clipboard is blocked, leave the text selected to copy by hand.
+      var fallback = function () { box.focus(); box.select(); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(box.value).then(done, fallback);
+      } else {
+        fallback();
+      }
+    });
+  }
+
+  wireCopy(copyButton, ticketBox);
+  // A button with data-copy names the box it copies.
+  var copyButtons = document.querySelectorAll('[data-copy]');
+  for (var i = 0; i < copyButtons.length; i++) {
+    wireCopy(copyButtons[i], document.getElementById(copyButtons[i].getAttribute('data-copy')));
+  }
 
   poll();
 })();

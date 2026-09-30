@@ -37,3 +37,19 @@ Tests use the seam 1 harness with a temporary directory as the Game folder and a
 - [ ] The page ticks step 1 when the check passes and shows the banner with the folder path when it fails, with the quarantine sentence only when the DLL alone is missing
 - [ ] The Wine setup text with its two Copy buttons appears when the OS is `linux` or `macos`, and not when it is `windows`
 - [ ] The macOS-only lines appear only on macOS and are labelled untested
+
+## Comments
+
+Implemented. Notes for the tickets that follow:
+
+- **The status field** is `self_check`: `{ "folder": "<path>", "dll_found": bool, "game_exe": "<file name as it is in the folder>" | null, "passed": bool }`. `not_game_folder` is in `banners` exactly while `passed` is false.
+- **The Game folder** is `Config::game_folder`. The binary fills it from `current_exe()` in every mode; if the OS cannot say where the executable is, it passes an empty path, which fails the check instead of falling back to the working directory. That last case has no test.
+- **The check runs on each status request** and nowhere else: there is no separate run at startup, because nothing but status shows the result. It is one read of the folder's list of files, done inside the status handler; the controller's note about status being safe to call from async code now says so.
+- **Only the file names are looked at.** A folder named `dplayx.dll` would count. If both game executables are there, `game_exe` names `thinker.exe`.
+- **Tests:** `start(..)` and `ui_config_from(..)` in `ui.rs` now give the Helper a Game folder that passes (one shared folder under Cargo's test tmpdir, which no test changes). A test about the Game folder makes its own with `GameFolder::holding(&[..])` and starts on it with `start_in(..)`. `scratch_dir` now works on every OS and gives a new directory per call.
+- **The built binary always fails the check in tests**, because it runs from the build folder. A smoke test of the binary therefore sees `not_game_folder` beside whatever banner it is about: the one in `cli.rs` that compared the whole banner list now looks for its own code in it.
+- **The banner sits in step 1**, not under the header, and is shown by the same loop as the others. The quarantine sentence shows when a game executable was found and the DLL was not.
+- **Wine setup** is a `<details>` that starts open, on Linux and macOS, whether or not the check passes. The override strings are in read-only boxes like the Ticket, so they scroll inside their box in a narrow window and Copy falls back to selecting them. Both Copy buttons, Faugus included, show on macOS too, as the ticket lists them.
+- **Copy** is one function, `wireCopy(button, box)`; a button with `data-copy="<id>"` copies the box with that id. The Ticket's Copy button goes through it too.
+- **Steps 2 and 3 are still highlighted as current while step 1 is not done.** Ticket 09's note left gating them on step 1 to this ticket; it was left out so that this ticket and ticket 10, done side by side, do not both edit the same lines of `render`. It is `setStep(2, connected, step1Done && !connected)` and the same for step 3.
+- **Checked by hand** in headless Firefox on Linux: a real Helper (its CSP included) in a folder that passes, an empty folder, and a folder with only a differently-cased `Terran_PRACX.exe`; and the page against canned statuses for `windows` and `macos`, for the DLL-only case, and at 320 px wide with a long unbroken path. Copy was exercised with a scripted click and a stand-in clipboard, both when it takes the text and when it refuses. A real click writing to the real clipboard was not tried, nor was anything on Windows or macOS: ticket 17's manual check still owes those.

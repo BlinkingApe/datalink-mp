@@ -12,6 +12,8 @@ use iroh_transport::{Ticket, TransportOptions};
 /// The configuration the tests start a Helper with. Port 0 picks a free IPC port.
 fn test_config(ipc_port: u16) -> Config {
     Config {
+        // No page shows the self-check here, so any folder does.
+        game_folder: std::env::temp_dir(),
         ipc_port,
         transport_options: TransportOptions::default(),
         ui: None,

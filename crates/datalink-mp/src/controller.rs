@@ -6,8 +6,10 @@
 //! also reports here what it sees of the game's DLL. Shutting the controller
 //! down closes the Transport for good, and is how the Helper ends.
 
+use crate::platform::{self, SelfCheck};
 use iroh_transport::{Transport, TransportOptions, TransportResult, STREAM_PROTO_VERSION};
 use serde::Serialize;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use tracing::info;
@@ -27,6 +29,8 @@ pub enum State {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Banner {
+    /// The Helper is not running from the Game folder
+    NotGameFolder,
     /// Another program holds the IPC port, so the game cannot reach the Helper
     IpcPortInUse,
     /// The game's DLL does not speak this Helper's IPC version
@@ -45,6 +49,8 @@ pub struct Status {
     pub ticket: String,
     pub ticket_seq: u64,
     pub ipc_port: u16,
+    /// What the Game folder self-check found
+    pub self_check: SelfCheck,
     /// Whether the game's DLL is connected to the Helper
     pub game_connected: bool,
     /// Short IDs of the connected Helpers
@@ -56,6 +62,7 @@ pub struct Status {
 /// Owns the current Transport, and therefore the Helper's Ticket.
 pub struct SessionController {
     transport: Arc<Transport>,
+    game_folder: PathBuf,
     ipc_port: u16,
     ipc_port_in_use: bool,
     game_connected: AtomicBool,
@@ -73,6 +80,7 @@ impl SessionController {
     /// server is listening on it.
     pub(crate) fn new(
         options: TransportOptions,
+        game_folder: PathBuf,
         ipc_port: u16,
         ipc_port_in_use: bool,
     ) -> TransportResult<Self> {
@@ -85,6 +93,7 @@ impl SessionController {
 
         Ok(Self {
             transport: Arc::new(transport),
+            game_folder,
             ipc_port,
             ipc_port_in_use,
             game_connected: AtomicBool::new(false),
@@ -102,11 +111,19 @@ impl SessionController {
         self.transport.clone()
     }
 
-    /// A snapshot of the Helper's status. Only non-blocking reads: safe to call
-    /// from async code.
+    /// A snapshot of the Helper's status. Nothing here waits on the Transport
+    /// or the network: safe to call from async code.
+    ///
+    /// The Game folder self-check is done again for each snapshot, so a file
+    /// the player restores is seen without a restart. It is one short read of
+    /// the folder's list of files.
     pub fn status(&self) -> Status {
         let transport = self.transport();
         let mut banners = Vec::new();
+        let self_check = platform::check_game_folder(&self.game_folder);
+        if !self_check.passed {
+            banners.push(Banner::NotGameFolder);
+        }
         if self.ipc_port_in_use {
             banners.push(Banner::IpcPortInUse);
         }
@@ -122,6 +139,7 @@ impl SessionController {
             ticket: transport.our_ticket().to_string(),
             ticket_seq: FIRST_TICKET_SEQ,
             ipc_port: self.ipc_port,
+            self_check,
             game_connected: self.game_connected.load(Ordering::Relaxed),
             peers: Vec::new(),
             banners,

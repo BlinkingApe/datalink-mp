@@ -429,7 +429,13 @@ fn test_ui_mode_keeps_running_with_a_banner_when_the_ipc_port_is_taken() {
     };
 
     let status = assert_page_and_status_are_served(&launch_url);
-    assert_eq!(status["banners"], serde_json::json!(["ipc_port_in_use"]));
+    // The built binary sits in the build folder, which is no Game folder, so
+    // that banner is not the only one.
+    let banners = status["banners"].as_array().expect("status should carry a banner list");
+    assert!(
+        banners.contains(&serde_json::json!("ipc_port_in_use")),
+        "status should carry ipc_port_in_use, got {banners:?}"
+    );
     // With no IPC server to run, the Helper must not take that for its end.
     assert!(
         helper.keeps_running_for(STAYS_UP_GRACE),

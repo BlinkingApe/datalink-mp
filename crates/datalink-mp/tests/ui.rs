@@ -39,8 +39,25 @@ impl Started {
     }
 }
 
-/// Start a Helper on free ports. `open_browser` says whether the opener is
-/// given to the Helper, the way the absence of `--no-browser` does.
+/// A Game folder that passes the self-check, for the tests that are about
+/// something else. There is one for the whole test run, and no test changes it.
+fn game_folder_that_passes() -> std::path::PathBuf {
+    static FOLDER: OnceLock<std::path::PathBuf> = OnceLock::new();
+    FOLDER
+        .get_or_init(|| {
+            let folder = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("game-folder-that-passes");
+            std::fs::create_dir_all(&folder).expect("should create the Game folder");
+            for name in ["dplayx.dll", "thinker.exe"] {
+                std::fs::write(folder.join(name), b"").expect("should write into the Game folder");
+            }
+            folder
+        })
+        .clone()
+}
+
+/// Start a Helper on free ports, in a Game folder that passes the self-check.
+/// `open_browser` says whether the opener is given to the Helper, the way the
+/// absence of `--no-browser` does.
 ///
 /// None when a Transport cannot be created (sandboxed environments); the test
 /// then returns early.
@@ -52,6 +69,7 @@ fn start(open_browser: bool) -> Option<Started> {
             as datalink_mp::BrowserOpener
     });
     let config = Config {
+        game_folder: game_folder_that_passes(),
         ipc_port: 0,
         transport_options: TransportOptions::default(),
         ui: Some(UiConfig {
@@ -180,6 +198,7 @@ fn test_ui_listens_on_loopback_only() {
 #[test]
 fn test_helper_without_a_ui_serves_no_page() {
     let config = Config {
+        game_folder: game_folder_that_passes(),
         ipc_port: 0,
         transport_options: TransportOptions::default(),
         ui: None,
@@ -653,6 +672,7 @@ fn hold_port_range(count: u16) -> Vec<std::net::TcpListener> {
 /// A Helper configured to serve the page from `port` upwards.
 fn ui_config_from(port: u16) -> Config {
     Config {
+        game_folder: game_folder_that_passes(),
         ipc_port: 0,
         transport_options: TransportOptions::default(),
         ui: Some(UiConfig {
@@ -715,9 +735,21 @@ impl UiProcess {
     /// Start the binary with `args`, `envs` set and `PATH` replaced by `path`,
     /// so the test decides which programs the Helper can find.
     fn spawn(args: &[String], envs: &[(&str, &str)], path: &std::path::Path) -> Self {
+        Self::spawn_in(std::path::Path::new("."), args, envs, path)
+    }
+
+    /// The same, started from `working_dir` the way a launcher or a shell
+    /// would start it from a folder of its own.
+    fn spawn_in(
+        working_dir: &std::path::Path,
+        args: &[String],
+        envs: &[(&str, &str)],
+        path: &std::path::Path,
+    ) -> Self {
         use std::io::{BufRead, BufReader};
         use std::process::{Command, Stdio};
         let mut child = Command::new(env!("CARGO_BIN_EXE_datalink-mp"))
+            .current_dir(working_dir)
             .args(args)
             // The developer's own settings must not leak into the test.
             .env_remove("SMAC_HELPER_PORT")
@@ -809,10 +841,12 @@ fn ui_args_from(ui_port: u16, no_browser: bool) -> Vec<String> {
     args
 }
 
-/// A fresh empty directory for a test to put files in.
-#[cfg(target_os = "linux")]
+/// A fresh empty directory for a test to put files in. Each call gives a
+/// directory of its own, so tests running side by side do not share one.
 fn scratch_dir(name: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("datalink-mp-{name}-{}", std::process::id()));
+    static MADE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let nth = MADE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let dir = std::env::temp_dir().join(format!("datalink-mp-{name}-{}-{nth}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("should create a scratch directory");
     dir
@@ -1289,4 +1323,210 @@ fn test_quit_finishes_a_helper_that_has_no_ipc_server() {
     wait_for_the_helper_to_finish(started.helper);
 
     assert_port_is_released("UI", ui_port);
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 08: step 1, the Game folder self-check
+//
+// Each test makes a Game folder of its own and starts a Helper on it; what the
+// page would show of the self-check is read from status.
+// ---------------------------------------------------------------------------
+
+/// A Game folder the test controls: a scratch directory holding empty files
+/// with the names the self-check looks for. Removed when dropped.
+struct GameFolder {
+    path: std::path::PathBuf,
+}
+
+impl GameFolder {
+    fn holding(file_names: &[&str]) -> Self {
+        let folder = Self { path: scratch_dir("game-folder") };
+        for name in file_names {
+            folder.add(name);
+        }
+        folder
+    }
+
+    fn add(&self, file_name: &str) {
+        std::fs::write(self.path.join(file_name), b"").expect("should write into the Game folder");
+    }
+}
+
+impl Drop for GameFolder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// Start a Helper on free ports whose Game folder is `game_folder`. None when
+/// a Transport cannot be created.
+fn start_in(game_folder: &GameFolder) -> Option<Started> {
+    let config = Config {
+        game_folder: game_folder.path.clone(),
+        ..ui_config_from(0)
+    };
+    match datalink_mp::start(config) {
+        Ok(helper) => Some(Started { helper, opened: OpenedUrls::default() }),
+        Err(StartError::Transport(e)) => {
+            note_transport_unavailable(&e);
+            None
+        }
+        Err(e) => panic!("the Helper should start whatever its Game folder holds: {e:?}"),
+    }
+}
+
+/// The status of a Helper started in a Game folder holding these files. None
+/// when a Transport cannot be created.
+fn status_in_a_folder_holding(file_names: &[&str]) -> Option<serde_json::Value> {
+    let folder = GameFolder::holding(file_names);
+    Some(start_in(&folder)?.status())
+}
+
+#[test]
+fn test_empty_folder_fails_the_self_check_and_sets_the_not_game_folder_banner() {
+    let Some(status) = status_in_a_folder_holding(&[]) else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["passed"], false);
+    assert_eq!(status["self_check"]["dll_found"], false);
+    assert_eq!(status["self_check"]["game_exe"], serde_json::Value::Null);
+    assert_eq!(status["banners"], serde_json::json!(["not_game_folder"]));
+}
+
+#[test]
+fn test_folder_with_only_the_dll_fails_the_self_check_and_reports_the_dll_as_found() {
+    let Some(status) = status_in_a_folder_holding(&["dplayx.dll"]) else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["passed"], false);
+    assert_eq!(status["self_check"]["dll_found"], true);
+    assert_eq!(status["self_check"]["game_exe"], serde_json::Value::Null);
+    assert_eq!(status["banners"], serde_json::json!(["not_game_folder"]));
+}
+
+#[test]
+fn test_folder_with_only_a_game_executable_fails_the_self_check_and_reports_the_dll_as_missing() {
+    let Some(status) = status_in_a_folder_holding(&["thinker.exe"]) else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["passed"], false);
+    assert_eq!(status["self_check"]["dll_found"], false);
+    assert_eq!(status["self_check"]["game_exe"], "thinker.exe");
+    assert_eq!(status["banners"], serde_json::json!(["not_game_folder"]));
+}
+
+#[test]
+fn test_folder_with_the_dll_and_thinker_passes_the_self_check() {
+    let Some(status) = status_in_a_folder_holding(&["dplayx.dll", "thinker.exe"]) else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["passed"], true);
+    assert_eq!(status["self_check"]["dll_found"], true);
+    assert_eq!(status["self_check"]["game_exe"], "thinker.exe");
+    assert_eq!(status["banners"], serde_json::json!([]));
+}
+
+#[test]
+fn test_folder_with_the_dll_and_pracx_passes_the_self_check() {
+    let Some(status) = status_in_a_folder_holding(&["dplayx.dll", "terran_PRACX.exe"]) else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["passed"], true);
+    assert_eq!(status["self_check"]["dll_found"], true);
+    assert_eq!(status["self_check"]["game_exe"], "terran_PRACX.exe");
+    assert_eq!(status["banners"], serde_json::json!([]));
+}
+
+#[test]
+fn test_differently_cased_file_names_pass_the_self_check() {
+    // The game's files as some installs have them, and as Wine users find them.
+    for file_names in [["DPLAYX.DLL", "Thinker.EXE"], ["Dplayx.dll", "TERRAN_pracx.exe"]] {
+        let Some(status) = status_in_a_folder_holding(&file_names) else {
+            return;
+        };
+
+        assert_eq!(status["self_check"]["passed"], true, "{file_names:?} should pass");
+        assert_eq!(status["self_check"]["dll_found"], true, "{file_names:?}");
+        assert_eq!(
+            status["self_check"]["game_exe"], file_names[1],
+            "the game executable is named as it is in the folder"
+        );
+        assert_eq!(status["banners"], serde_json::json!([]), "{file_names:?}");
+    }
+}
+
+#[test]
+fn test_restoring_the_missing_file_clears_the_not_game_folder_banner_without_a_restart() {
+    // The antivirus took the DLL away.
+    let folder = GameFolder::holding(&["thinker.exe"]);
+    let Some(started) = start_in(&folder) else {
+        return;
+    };
+    assert_eq!(started.banners(), ["not_game_folder"]);
+
+    // The player restored it.
+    folder.add("dplayx.dll");
+
+    let status = started.status();
+    assert_eq!(status["banners"], serde_json::json!([]));
+    assert_eq!(status["self_check"]["passed"], true);
+    assert_eq!(status["self_check"]["dll_found"], true);
+}
+
+#[test]
+fn test_self_check_reports_the_folder_it_checked() {
+    let folder = GameFolder::holding(&[]);
+    let Some(started) = start_in(&folder) else {
+        return;
+    };
+
+    let status = started.status();
+
+    assert_eq!(status["self_check"]["folder"], folder.path.to_str().unwrap());
+}
+
+#[test]
+fn test_game_folder_is_where_the_executable_is_not_the_working_directory() {
+    // The folder the built binary is in. No game is installed there.
+    let exe_folder = std::path::Path::new(env!("CARGO_BIN_EXE_datalink-mp"))
+        .parent()
+        .expect("the binary is in a folder")
+        .canonicalize()
+        .expect("the binary's folder should resolve");
+    // Started from a Game folder that would pass, the way a shell sitting in
+    // the Game folder would start a Helper that was left in Downloads.
+    let working_dir = GameFolder::holding(&["dplayx.dll", "thinker.exe"]);
+    let mut helper =
+        UiProcess::spawn_in(&working_dir.path, &ui_args_from(0, true), &[], std::path::Path::new(""));
+
+    let Some(url) = helper.launch_url() else {
+        return;
+    };
+
+    let token = url.split_once("?t=").expect("the URL carries the token").1;
+    let status = http_get(port_of(&url), "/api/status", &[("X-Token", token)]).json();
+    let checked = status["self_check"]["folder"].as_str().expect("status should carry the folder");
+    assert_eq!(
+        std::path::Path::new(checked).canonicalize().expect("the checked folder should resolve"),
+        exe_folder
+    );
+    assert_eq!(status["self_check"]["passed"], false, "the working directory is not what is checked");
+    assert_eq!(status["banners"], serde_json::json!(["not_game_folder"]));
+}
+
+#[test]
+fn test_ticket_is_still_in_status_when_the_self_check_fails() {
+    let Some(status) = status_in_a_folder_holding(&[]) else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["passed"], false);
+    Ticket::parse(status["ticket"].as_str().expect("status should carry a Ticket"))
+        .expect("a failed self-check blocks nothing: the Helper still has a Ticket");
+    assert_eq!(status["state"], "ready");
 }

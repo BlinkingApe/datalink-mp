@@ -13,15 +13,20 @@ mod platform;
 
 pub use controller::{Banner, SessionController, State, Status};
 pub use http::generate_token;
-pub use platform::system_browser_opener;
+pub use platform::{system_browser_opener, SelfCheck};
 
 use iroh_transport::{TransportError, TransportOptions};
+use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::{info, warn};
 
 /// Everything the Helper needs to start.
 pub struct Config {
+    /// The Game folder: where the self-check looks for the DLL and the game.
+    /// The binary passes the folder its own executable is in, never the
+    /// working directory.
+    pub game_folder: PathBuf,
     /// Port to listen on for DLL connections, on 127.0.0.1. Port 0 picks a
     /// free port; [`Helper::ipc_port`] reports the one that was bound.
     ///
@@ -118,8 +123,13 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
         .transpose()?;
 
     let controller = Arc::new(
-        SessionController::new(config.transport_options, ipc_port, listener.is_none())
-            .map_err(StartError::Transport)?,
+        SessionController::new(
+            config.transport_options,
+            config.game_folder,
+            ipc_port,
+            listener.is_none(),
+        )
+        .map_err(StartError::Transport)?,
     );
     let ipc_server =
         listener.map(|listener| ipc_server::spawn(listener, ipc_port, controller.clone()));

@@ -20,6 +20,7 @@ use clap::{Parser, Subcommand};
 use datalink_mp::{Config, Helper, StartError, UiConfig};
 use ipc_protocol::DEFAULT_PORT;
 use iroh_transport::TransportOptions;
+use std::path::PathBuf;
 use tracing::info;
 use tracing_subscriber::prelude::*;
 
@@ -123,6 +124,7 @@ fn run_ui(port: u16, ui_port: u16, no_browser: bool) -> Result<()> {
     info!("datalink-mp starting in UI mode on port {}", ipc_port);
 
     let started = datalink_mp::start(Config {
+        game_folder: game_folder(),
         ipc_port,
         transport_options: TransportOptions::default(),
         ui: Some(UiConfig {
@@ -200,9 +202,23 @@ fn resolve_ipc_port(port: u16) -> u16 {
         .unwrap_or(port)
 }
 
+/// The Game folder: the folder this executable is in, wherever the Helper was
+/// started from. Never the working directory, which is whatever the launcher
+/// or the shell happened to be in.
+///
+/// If the OS cannot say where the executable is, the folder is unknown (an
+/// empty path) and the self-check fails, instead of guessing.
+fn game_folder() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(PathBuf::from))
+        .unwrap_or_default()
+}
+
 /// Start the Helper and print its Ticket
 fn start_helper(ipc_port: u16) -> Result<Helper> {
     let helper = datalink_mp::start(Config {
+        game_folder: game_folder(),
         ipc_port,
         transport_options: TransportOptions::default(),
         ui: None,

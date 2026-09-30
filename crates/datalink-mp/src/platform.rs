@@ -1,10 +1,65 @@
-//! Platform: the parts of the Helper that differ per operating system.
+//! Platform: the Helper's dealings with the machine it runs on.
 //!
-//! Today that is the browser opener. The binary passes it into the library as
-//! a function, so tests can replace it.
+//! That is the Game folder self-check, and the browser opener, which differs
+//! per operating system. The binary passes the opener into the library as a
+//! function, so tests can replace it.
 
 use crate::BrowserOpener;
+use serde::Serialize;
+use std::path::Path;
 use tracing::warn;
+
+/// The DLL's file name.
+const DLL: &str = "dplayx.dll";
+
+/// The file names of the game executables the Helper supports: Thinker's and
+/// PRACX's. One of them is enough.
+const GAME_EXES: [&str; 2] = ["thinker.exe", "terran_PRACX.exe"];
+
+/// What the Game folder self-check found.
+#[derive(Debug, Clone, Serialize)]
+pub struct SelfCheck {
+    /// The folder that was checked: the one the Helper is running from
+    pub folder: String,
+    /// Whether the DLL is in the folder
+    pub dll_found: bool,
+    /// The file name of the game executable in the folder, if there is one
+    pub game_exe: Option<String>,
+    /// Whether this is a Game folder: it holds the DLL and a game executable
+    pub passed: bool,
+}
+
+/// The Game folder self-check: is the Helper sitting next to the DLL and the
+/// game? Only reads the folder's list of files.
+///
+/// An empty path stands for a folder that is not known, and fails the check.
+pub(crate) fn check_game_folder(folder: &Path) -> SelfCheck {
+    // A folder that cannot be read holds nothing the Helper can see. An empty
+    // path is not even tried: taken as a relative path, it would name the
+    // working directory.
+    let file_names = Some(folder)
+        .filter(|folder| !folder.as_os_str().is_empty())
+        .and_then(|folder| std::fs::read_dir(folder).ok())
+        .map(|entries| {
+            entries
+                .flatten()
+                .filter_map(|entry| entry.file_name().into_string().ok())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    // Without regard to case: Windows does not care how a file name is
+    // capitalised, so installs differ, and under Wine the difference shows.
+    let find = |wanted: &str| file_names.iter().find(|name| name.eq_ignore_ascii_case(wanted));
+
+    let dll_found = find(DLL).is_some();
+    let game_exe = GAME_EXES.iter().find_map(|exe| find(exe)).cloned();
+    SelfCheck {
+        folder: folder.display().to_string(),
+        dll_found,
+        passed: dll_found && game_exe.is_some(),
+        game_exe,
+    }
+}
 
 /// The real browser opener for this operating system.
 ///
