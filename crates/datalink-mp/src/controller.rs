@@ -115,11 +115,11 @@ impl SessionController {
     }
 
     /// A snapshot of the Helper's status. Nothing here waits on the Transport
-    /// or the network: safe to call from async code.
+    /// or the network.
     ///
     /// The Game folder self-check is done again for each snapshot, so a file
-    /// the player restores is seen without a restart. It is one short read of
-    /// the folder's list of files.
+    /// the player restores is seen without a restart. It reads the folder's
+    /// list of files: from async code, call this inside `spawn_blocking`.
     pub fn status(&self) -> Status {
         let transport = self.transport();
         // A plain lock read, unlike the Transport's blocking calls.

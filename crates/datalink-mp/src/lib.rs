@@ -122,6 +122,18 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
         })
         .transpose()?;
 
+    // The self-check, once at startup for the log. Status does it again on
+    // every request, and a failed check stops nothing.
+    let self_check = platform::check_game_folder(&config.game_folder);
+    if self_check.passed {
+        info!("Running from the Game folder {}", self_check.folder);
+    } else {
+        warn!(
+            "{} is not the Game folder (DLL found: {}, game executable: {:?})",
+            self_check.folder, self_check.dll_found, self_check.game_exe
+        );
+    }
+
     let controller = Arc::new(
         SessionController::new(
             config.transport_options,

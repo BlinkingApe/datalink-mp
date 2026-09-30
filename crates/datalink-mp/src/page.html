@@ -128,7 +128,7 @@
     <div class="step"><div class="num" id="num4">4</div>
       <div><h2>Play</h2>
         <div class="small" id="peers">No Helpers connected yet.</div>
-        <div class="small muted" id="keep-open" style="margin-top:6px"></div>
+        <div class="small muted gap" id="keep-open"></div>
       </div></div>
   </div>
 
@@ -167,14 +167,15 @@
     linux: 'Keep this browser tab open while you play. Closing it doesn\'t stop the Helper; Quit does.',
     macos: 'Keep this tab and the Terminal window open while you play.'
   };
-  // The peer list the page shows now, to leave the line alone while it is unchanged.
-  var shownPeers = null;
+  // The peer list the page shows now, as one string, to leave the line alone
+  // while it is unchanged.
+  var shownPeersKey = null;
 
   // "Connected", not "players": a Helper can be connected only to look for a game.
   function renderPeers(peers) {
     var key = peers.join(' ');
-    if (key === shownPeers) return;
-    shownPeers = key;
+    if (key === shownPeersKey) return;
+    shownPeersKey = key;
     if (!peers.length) {
       peersLine.textContent = 'No Helpers connected yet.';
       return;
@@ -207,14 +208,15 @@
     // The Helper computes the state; the page only decides which steps are ticked.
     var connected = s.state === 'joined' || s.state === 'hosting';
     var step1Done = s.self_check.passed;
+    // Until step 1 is done it is the only current step: the Game folder comes first.
     setStep(1, step1Done, !step1Done);
-    setStep(2, connected, !connected);
-    setStep(3, s.game_connected, !s.game_connected);
+    setStep(2, connected, step1Done && !connected);
+    setStep(3, s.game_connected, step1Done && !s.game_connected);
     // Step 4 is never ticked: it is the current step once steps 1 and 3 are done.
     setStep(4, false, step1Done && s.game_connected);
 
     renderPeers(s.peers);
-    document.getElementById('keep-open').textContent = KEEP_OPEN[s.os] || '';
+    setText(document.getElementById('keep-open'), KEEP_OPEN[s.os] || '');
 
     // The Helper decides which banners are active; the page has the words.
     document.getElementById('ipc-port').textContent = s.ipc_port;

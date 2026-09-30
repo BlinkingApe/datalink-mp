@@ -78,6 +78,12 @@ fn start(open_browser: bool) -> Option<Started> {
             browser_opener,
         }),
     };
+    start_with(config, opened)
+}
+
+/// Start a Helper with `config`, which asks for free ports. None when a
+/// Transport cannot be created.
+fn start_with(config: Config, opened: OpenedUrls) -> Option<Started> {
     match datalink_mp::start(config) {
         Ok(helper) => Some(Started { helper, opened }),
         Err(StartError::Transport(e)) => {
@@ -1254,18 +1260,11 @@ fn test_connected_friend_sees_the_connection_close_promptly_after_quit() {
     let Some(started) = start(false) else {
         return;
     };
-    let friend = match iroh_transport::Transport::new() {
-        Ok(friend) => friend,
-        Err(e) => return note_transport_unavailable(&e),
+    let Some(friend) = friend() else {
+        return;
     };
-    let status = started.status();
-    let ticket = status["ticket"].as_str().expect("status should carry a Ticket");
-    let helper_id = Ticket::parse(ticket).expect("the Ticket should parse").addr().id;
-    friend.connect_to_peer(ticket).expect("the friend should reach the Helper on loopback");
-    common::poll_until(PEER_NOTICE_DEADLINE, || {
-        friend.connected_peers().contains(&helper_id).then_some(())
-    })
-    .expect("the friend should list the Helper as connected");
+    dial_the_helper(&friend, &started);
+    wait_until_the_friend_lists_the_helper(&friend, &started);
 
     quit(&started);
 
@@ -1365,14 +1364,7 @@ fn start_in(game_folder: &GameFolder) -> Option<Started> {
         game_folder: game_folder.path.clone(),
         ..ui_config_from(0)
     };
-    match datalink_mp::start(config) {
-        Ok(helper) => Some(Started { helper, opened: OpenedUrls::default() }),
-        Err(StartError::Transport(e)) => {
-            note_transport_unavailable(&e);
-            None
-        }
-        Err(e) => panic!("the Helper should start whatever its Game folder holds: {e:?}"),
-    }
+    start_with(config, OpenedUrls::default())
 }
 
 /// The status of a Helper started in a Game folder holding these files. None
@@ -1551,19 +1543,28 @@ fn friend() -> Option<iroh_transport::Transport> {
     }
 }
 
+/// Dial the Helper's Ticket from `friend`, the way a friend who was sent the
+/// Ticket does.
+fn dial_the_helper(friend: &iroh_transport::Transport, started: &Started) {
+    friend
+        .connect_to_peer(&started.ticket())
+        .expect("the friend should reach the Helper on loopback");
+}
+
+/// Wait for `friend` to list the Helper among its connected Helpers.
+fn wait_until_the_friend_lists_the_helper(friend: &iroh_transport::Transport, started: &Started) {
+    let helper_id = Ticket::parse(&started.ticket()).expect("the Ticket should parse").addr().id;
+    common::poll_until(PEER_NOTICE_DEADLINE, || {
+        friend.connected_peers().contains(&helper_id).then_some(())
+    })
+    .expect("the friend should list the Helper as connected");
+}
+
 impl Started {
     /// The Helper's Ticket, as the player would copy it from the page.
     fn ticket(&self) -> String {
         let status = self.status();
         status["ticket"].as_str().expect("status should carry a Ticket").to_string()
-    }
-
-    /// Dial the Helper's Ticket from `friend`, the way a friend who was sent
-    /// the Ticket does.
-    fn is_dialled_by(&self, friend: &iroh_transport::Transport) {
-        friend
-            .connect_to_peer(&self.ticket())
-            .expect("the friend should reach the Helper on loopback");
     }
 
     /// Wait for status to report `state`.
@@ -1590,7 +1591,7 @@ fn test_friend_dialling_the_helpers_ticket_makes_the_state_hosting() {
     };
     assert_eq!(started.status()["state"], "ready");
 
-    started.is_dialled_by(&friend);
+    dial_the_helper(&friend, &started);
 
     started.wait_for_state("hosting");
 }
@@ -1609,15 +1610,11 @@ fn test_connected_friend_is_listed_by_its_short_id_and_lists_the_helper() {
     let Some(friend) = friend() else {
         return;
     };
-    let helper_id = Ticket::parse(&started.ticket()).expect("the Ticket should parse").addr().id;
 
-    started.is_dialled_by(&friend);
+    dial_the_helper(&friend, &started);
 
     started.wait_for_peers(&[short_id(&friend)]);
-    common::poll_until(PEER_NOTICE_DEADLINE, || {
-        friend.connected_peers().contains(&helper_id).then_some(())
-    })
-    .expect("the friend should list the Helper as connected");
+    wait_until_the_friend_lists_the_helper(&friend, &started);
 }
 
 #[test]
@@ -1628,7 +1625,7 @@ fn test_peer_list_empties_and_the_state_returns_to_ready_when_the_friend_goes_aw
     let Some(friend) = friend() else {
         return;
     };
-    started.is_dialled_by(&friend);
+    dial_the_helper(&friend, &started);
     started.wait_for_peers(&[short_id(&friend)]);
 
     // The friend quit their Helper.
@@ -1647,8 +1644,8 @@ fn test_two_friends_give_two_entries_in_the_peer_list() {
         return;
     };
 
-    started.is_dialled_by(&first);
-    started.is_dialled_by(&second);
+    dial_the_helper(&first, &started);
+    dial_the_helper(&second, &started);
 
     // Sorted, so that the page lists them the same way on every poll.
     let mut both = [short_id(&first), short_id(&second)];
@@ -1683,7 +1680,7 @@ fn test_status_is_answered_promptly_while_friends_connect_and_disconnect() {
         let friends_come_and_go = scope.spawn(|| {
             let mut connected = Vec::new();
             for friend in &friends {
-                started.is_dialled_by(friend);
+                dial_the_helper(friend, &started);
                 connected.push(short_id(friend));
                 connected.sort();
                 started.wait_for_peers(&connected);

@@ -167,8 +167,14 @@ async fn page() -> Html<&'static str> {
     Html(PAGE)
 }
 
-async fn status(State(state): State<Arc<AppState>>) -> Json<Status> {
-    Json(state.controller.status())
+async fn status(State(state): State<Arc<AppState>>) -> Result<Json<Status>, StatusCode> {
+    let controller = state.controller.clone();
+    // The snapshot reads the Game folder's list of files. A slow folder (a
+    // network drive) must not hold up an async worker thread.
+    tokio::task::spawn_blocking(move || controller.status())
+        .await
+        .map(Json)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
 /// Quit: answer, and shut the Helper down. Whoever waits on the Helper (the
