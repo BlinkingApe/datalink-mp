@@ -1715,3 +1715,289 @@ fn test_status_is_answered_promptly_while_friends_connect_and_disconnect() {
     );
     assert_eq!(started.status()["state"], "ready");
 }
+
+// ---------------------------------------------------------------------------
+// Ticket 11: step 2, joining a friend's Ticket from the page
+//
+// The player pastes a friend's Ticket and presses Connect: the page sends it
+// to `POST /api/join`. The friend is a second real Transport on loopback; what
+// the page would show is read from the join response and from status.
+// ---------------------------------------------------------------------------
+
+impl Started {
+    /// Send `ticket` to `POST /api/join` the way the page's Connect button does.
+    fn join(&self, ticket: &str) -> common::HttpResponse {
+        let body = serde_json::json!({ "ticket": ticket }).to_string();
+        common::http_request_with_body(
+            self.ui_port(),
+            "POST",
+            "/api/join",
+            &[("X-Token", TOKEN), ("Content-Type", "application/json")],
+            &body,
+        )
+    }
+}
+
+#[test]
+fn test_join_with_text_that_is_not_a_ticket_is_refused_with_the_invalid_ticket_banner() {
+    let Some(started) = start(false) else {
+        return;
+    };
+
+    let response = started.join("hello, this is my ticket");
+
+    assert_eq!(response.status, 400, "a bad Ticket should be refused: {}", response.body);
+    assert_eq!(response.json()["banner"], "invalid_ticket");
+    assert_eq!(response.json()["reason"], "not_a_ticket");
+    assert_eq!(started.banners(), ["invalid_ticket"]);
+    let status = started.status();
+    assert_eq!(status["invalid_ticket"], "not_a_ticket", "the page words the banner by this");
+    assert_eq!(status["state"], "ready");
+}
+
+#[test]
+fn test_join_with_our_own_ticket_is_refused_as_our_own() {
+    let Some(started) = start(false) else {
+        return;
+    };
+
+    let response = started.join(&started.ticket());
+
+    assert_eq!(response.status, 400, "our own Ticket should be refused: {}", response.body);
+    assert_eq!(response.json()["banner"], "invalid_ticket");
+    assert_eq!(response.json()["reason"], "own_ticket");
+    assert_eq!(started.banners(), ["invalid_ticket"]);
+    let status = started.status();
+    assert_eq!(status["invalid_ticket"], "own_ticket", "the page words the banner by this");
+    assert_eq!(status["state"], "ready");
+}
+
+/// Assert that a join was taken up: the dial has started, and the response
+/// carries these warnings.
+fn assert_dial_started(response: &common::HttpResponse, warnings: &[&str]) {
+    assert_eq!(response.status, 202, "the dial should start: {}", response.body);
+    assert_eq!(response.json()["warnings"], serde_json::json!(warnings));
+}
+
+#[test]
+fn test_joining_a_friend_makes_the_state_joined_and_each_lists_the_other() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+
+    let response = started.join(friend.our_ticket());
+
+    // The dial runs off the HTTP server's async threads: made on one of them,
+    // it would panic there (a runtime inside a runtime), and a release build
+    // would abort. The Helper would then not be answering at all.
+    assert_dial_started(&response, &[]);
+    started.wait_for_state("joined");
+    started.wait_for_peers(&[short_id(&friend)]);
+    wait_until_the_friend_lists_the_helper(&friend, &started);
+    assert_eq!(started.banners(), Vec::<String>::new());
+}
+
+/// The dial timeout of a Helper whose dials are meant to fail: short, to keep
+/// the tests short, and long enough to see the dial in progress.
+const SHORT_DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Start a Helper whose dials give up after [`SHORT_DIAL_TIMEOUT`].
+fn start_with_a_short_dial_timeout() -> Option<Started> {
+    let config = Config {
+        game_folder: game_folder_that_passes(),
+        ipc_port: 0,
+        transport_options: TransportOptions {
+            dial_timeout: SHORT_DIAL_TIMEOUT,
+            ..TransportOptions::default()
+        },
+        ui: Some(UiConfig {
+            port: 0,
+            token: TOKEN.to_string(),
+            browser_opener: None,
+        }),
+    };
+    start_with(config, OpenedUrls::default())
+}
+
+/// A Ticket for a Helper that never answers: a new endpoint ID, at a loopback
+/// address where nothing speaks QUIC. A dial to it lasts until its timeout.
+/// The address stays silent for as long as the socket is kept.
+fn silent_ticket() -> (UdpSocket, String) {
+    let silent = UdpSocket::bind("127.0.0.1:0").expect("should bind a loopback UDP port");
+    let addr = silent.local_addr().expect("bound socket should have an address");
+    let id = iroh::SecretKey::generate().public();
+    let ticket = Ticket::new(iroh::EndpointAddr::new(id).with_ip_addr(addr));
+    (silent, ticket.serialize())
+}
+
+#[test]
+fn test_state_is_joining_while_the_dial_is_in_progress_and_a_second_join_is_refused() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let (_silent, ticket) = silent_ticket();
+
+    assert_dial_started(&started.join(&ticket), &[]);
+    assert_eq!(started.status()["state"], "joining");
+
+    // Only one dial from the page at a time.
+    let second = started.join(&ticket);
+    assert_eq!(second.status, 409, "a second join should be refused: {}", second.body);
+    assert_eq!(started.status()["state"], "joining");
+}
+
+#[test]
+fn test_state_returns_to_ready_when_the_dial_fails() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let (_silent, ticket) = silent_ticket();
+
+    assert_dial_started(&started.join(&ticket), &[]);
+
+    // Past the dial timeout, with room to spare.
+    common::poll_until(SHORT_DIAL_TIMEOUT * 3, || (started.status()["state"] == "ready").then_some(()))
+        .unwrap_or_else(|| panic!("the failed dial should leave the state {}", started.status()["state"]));
+    assert_eq!(started.status()["peers"], serde_json::json!([]));
+}
+
+#[test]
+fn test_ticket_padded_with_whitespace_and_a_newline_is_accepted() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+
+    let response = started.join(&format!("  \t{}\r\n", friend.our_ticket()));
+
+    assert_dial_started(&response, &[]);
+    started.wait_for_state("joined");
+}
+
+#[test]
+fn test_ticket_with_no_addresses_gets_a_warning_and_is_dialled_all_the_same() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    // A Helper that exists nowhere, named without an address.
+    let id = iroh::SecretKey::generate().public();
+    let ticket = Ticket::new(iroh::EndpointAddr::new(id)).serialize();
+
+    let response = started.join(&ticket);
+
+    assert_dial_started(&response, &["ticket_no_addresses"]);
+    assert_eq!(started.banners(), Vec::<String>::new(), "the Ticket is not an invalid one");
+    // The dial fails, the Helper having nowhere to find it, and the state
+    // returns to ready. (How the page is told the dial failed is not this
+    // test's business.)
+    common::poll_until(SHORT_DIAL_TIMEOUT * 3, || (started.status()["state"] == "ready").then_some(()))
+        .unwrap_or_else(|| panic!("the dial should end, the state is {}", started.status()["state"]));
+}
+
+#[test]
+fn test_next_join_attempt_clears_the_invalid_ticket_banner() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+    assert_eq!(started.join("not a ticket").status, 400);
+    assert_eq!(started.banners(), ["invalid_ticket"]);
+
+    assert_dial_started(&started.join(friend.our_ticket()), &[]);
+
+    assert_eq!(started.banners(), Vec::<String>::new());
+    assert!(started.status()["invalid_ticket"].is_null());
+}
+
+#[test]
+fn test_invalid_ticket_banner_says_which_case_the_latest_join_was() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    assert_eq!(started.join("not a ticket").status, 400);
+
+    assert_eq!(started.join(&started.ticket()).status, 400);
+
+    assert_eq!(started.banners(), ["invalid_ticket"]);
+    assert_eq!(started.status()["invalid_ticket"], "own_ticket");
+}
+
+#[test]
+fn test_state_returns_to_ready_when_the_joined_friend_goes_away() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+    started.join(friend.our_ticket());
+    started.wait_for_state("joined");
+
+    // The friend quit their Helper.
+    friend.shutdown();
+
+    started.wait_for_peers(&[]);
+    assert_eq!(started.status()["state"], "ready");
+}
+
+#[test]
+fn test_friend_dialling_in_after_a_joined_friend_went_away_makes_the_state_hosting() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let (Some(joined), Some(dialling_in)) = (friend(), friend()) else {
+        return;
+    };
+    started.join(joined.our_ticket());
+    started.wait_for_state("joined");
+    joined.shutdown();
+    started.wait_for_state("ready");
+
+    dial_the_helper(&dialling_in, &started);
+
+    // Our dial was to the friend who left: this one dialled us.
+    started.wait_for_state("hosting");
+}
+
+#[test]
+fn test_join_is_refused_without_the_token_and_from_a_foreign_origin() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+    let port = started.ui_port();
+    let body = serde_json::json!({ "ticket": friend.our_ticket() }).to_string();
+    let json = ("Content-Type", "application/json");
+    let send = |headers: &[(&str, &str)]| {
+        common::http_request_with_body(port, "POST", "/api/join", headers, &body)
+    };
+
+    let no_token = send(&[json]);
+    assert_eq!(no_token.status, 403, "a join without the token should be refused");
+    let wrong_token = send(&[json, ("X-Token", "0000")]);
+    assert_eq!(wrong_token.status, 403, "a join with a wrong token should be refused");
+    let foreign = send(&[json, ("X-Token", TOKEN), ("Origin", "http://rebind.example")]);
+    assert_eq!(foreign.status, 403, "a join from a foreign Origin should be refused");
+
+    // None of them started a dial.
+    assert_eq!(started.status()["state"], "ready");
+    assert_eq!(friend.connected_peers(), Vec::new());
+}
+
+#[test]
+fn test_fresh_helper_has_no_invalid_ticket_reason() {
+    let Some(started) = start(false) else {
+        return;
+    };
+
+    assert!(started.status()["invalid_ticket"].is_null());
+}

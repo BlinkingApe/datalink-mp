@@ -32,8 +32,12 @@
   button:disabled { opacity: .45; cursor: not-allowed; }
   button.danger { color: var(--bad); }
   .bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-  input.ticket { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace;
+  input.ticket, textarea.ticket { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace;
     border: 1px solid var(--line); border-radius: 7px; padding: 8px; background: var(--bg); color: var(--ink); }
+  textarea.ticket { resize: vertical; min-height: 54px; display: block; }
+  /* Side by side, or one above the other in a narrow window. */
+  .pair { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .pair > div { flex: 1; min-width: min(220px, 100%); }
   .step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; margin: 14px 0; }
   .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
     border: 2px solid var(--line); color: var(--muted); }
@@ -48,6 +52,8 @@
   .banner.bad { background: var(--badbg); border-color: var(--bad); }
   .ingame { border-left: 3px solid var(--accent); padding: 4px 0 4px 10px; margin: 8px 0; }
   .step .banner { margin: 0; }
+  .warn { color: var(--warn); }
+  .ok { color: var(--ok); }
   .gap { margin-top: 6px; }
   details summary { cursor: pointer; font-weight: 600; }
   details p { margin: 6px 0; }
@@ -69,6 +75,11 @@
   <div class="banner bad" data-banner="ipc_version_mismatch" hidden>The game's <code>dplayx.dll</code>
     doesn't match this Helper. Extract the whole archive into your Game folder again, then restart
     the game.</div>
+  <div class="banner bad" data-banner="invalid_ticket" hidden>
+    <span data-invalid-ticket="not_a_ticket">That doesn't look like a Ticket. Ask your friend to
+      copy theirs again.</span>
+    <span data-invalid-ticket="own_ticket" hidden>That's your own Ticket. Paste your
+      friend's.</span></div>
 
   <div class="card">
     <div class="step"><div class="num" id="num1">1</div>
@@ -109,17 +120,28 @@
 
     <div class="step"><div class="num" id="num2">2</div>
       <div><h2>Share or paste a Ticket</h2>
-        <div class="small muted">Your Ticket</div>
-        <input class="ticket" id="ticket" readonly>
-        <div class="row" style="margin-top:6px">
-          <button id="copy" disabled>Copy Ticket</button>
+        <!-- While a dial of ours is in progress or has succeeded, its progress
+             takes the place of the two Tickets. -->
+        <p id="join-progress" hidden></p>
+        <div class="pair" id="tickets">
+          <div><b>Hosting:</b> send your Ticket
+            <input class="ticket gap" id="ticket" readonly>
+            <div class="gap"><button id="copy" disabled>Copy Ticket</button></div></div>
+          <div><b>Joining:</b> paste your friend's
+            <textarea class="ticket gap" id="friend-ticket" autocomplete="off" spellcheck="false"
+              placeholder="smac…"></textarea>
+            <div class="gap"><button id="connect" disabled>Connect</button></div></div>
         </div>
+        <div class="small warn gap" id="no-addresses" hidden>Your friend's Ticket has no addresses
+          in it, so connecting may not work. Trying anyway.</div>
       </div></div>
 
     <div class="step"><div class="num" id="num3">3</div>
       <div><h2>Start the game</h2>
-        <div class="ingame">In the game: <b>Multiplayer</b> → <b>Iroh P2P</b> →
+        <div class="ingame" id="menu-hint">In the game: <b>Multiplayer</b> → <b>Iroh P2P</b> →
           <b>Host Game</b> (you) or <b>Join Game</b> (your friends).</div>
+        <div class="ingame" id="menu-hint-joined" hidden>In the game: <b>Multiplayer</b> →
+          <b>Iroh P2P</b> → <b>Join Game</b>.</div>
         <div class="small"><span class="pill idle" id="game-pill">Game not running</span></div>
         <div class="small muted" id="wine-hint" style="margin-top:6px" hidden>If the game is running
           and this never shows “Game connected”, the Wine override is the usual cause.</div>
@@ -161,6 +183,19 @@
   var gamePill = document.getElementById('game-pill');
   var gameFolders = document.querySelectorAll('.game-folder');
   var peersLine = document.getElementById('peers');
+  var invalidTicketWords = document.querySelectorAll('[data-invalid-ticket]');
+  var friendBox = document.getElementById('friend-ticket');
+  var connectButton = document.getElementById('connect');
+  var joinProgress = document.getElementById('join-progress');
+  var ticketPair = document.getElementById('tickets');
+  var noAddresses = document.getElementById('no-addresses');
+  // What step 2 says in place of the Tickets while our dial is in progress,
+  // and once it has succeeded.
+  var JOIN_PROGRESS = { joining: 'Connecting to your friend…', joined: 'Connected to your friend' };
+  // The state status last reported, and whether a join is on its way to the
+  // Helper: Connect waits for either to be over.
+  var shownState = null;
+  var joinSent = false;
   // What to keep open while playing, by the OS the Helper runs on.
   var KEEP_OPEN = {
     windows: 'Keep this browser tab and the console window open while you play.',
@@ -187,6 +222,22 @@
       id.textContent = peers[i];
       peersLine.appendChild(id);
     }
+  }
+
+  // Step 2 while we join a friend: the dial's progress, or the two Tickets.
+  function renderJoin(state) {
+    shownState = state;
+    var progress = JOIN_PROGRESS[state];
+    joinProgress.hidden = !progress;
+    ticketPair.hidden = !!progress;
+    if (progress) setText(joinProgress, progress);
+    // The warning was about whether the dial would work, and it did.
+    if (state === 'joined') noAddresses.hidden = true;
+    updateConnect();
+  }
+
+  function updateConnect() {
+    connectButton.disabled = !friendBox.value.trim() || joinSent || shownState === 'joining';
   }
 
   function setStep(n, done, now) {
@@ -217,11 +268,17 @@
 
     renderPeers(s.peers);
     setText(document.getElementById('keep-open'), KEEP_OPEN[s.os] || '');
+    renderJoin(s.state);
 
     // The Helper decides which banners are active; the page has the words.
     document.getElementById('ipc-port').textContent = s.ipc_port;
     for (var i = 0; i < banners.length; i++) {
       banners[i].hidden = s.banners.indexOf(banners[i].getAttribute('data-banner')) < 0;
+    }
+    // One banner, two ways to word it: status says which one applies.
+    for (i = 0; i < invalidTicketWords.length; i++) {
+      invalidTicketWords[i].hidden =
+        invalidTicketWords[i].getAttribute('data-invalid-ticket') !== s.invalid_ticket;
     }
 
     // Step 1 shows what the self-check found. When the check fails, the
@@ -234,6 +291,10 @@
     // Only Wine has to be told to load our DLL.
     document.getElementById('wine-setup').hidden = s.os === 'windows';
     document.getElementById('wine-macos').hidden = s.os !== 'macos';
+
+    // Joined to a friend, there is only one way into their game.
+    document.getElementById('menu-hint').hidden = s.state === 'joined';
+    document.getElementById('menu-hint-joined').hidden = s.state !== 'joined';
 
     gamePill.className = 'pill ' + (s.game_connected ? 'ok' : 'idle');
     gamePill.textContent = s.game_connected ? 'Game connected' : 'Game not running';
@@ -278,18 +339,25 @@
   var failedPolls = 0;
   var FAILED_POLLS_UNTIL_GONE = 3;
 
-  function poll() {
-    fetch('/api/status', { headers: { 'X-Token': token || '' }, cache: 'no-store' })
+  // Ask for status once and show it. Fails if the Helper gave no status.
+  function fetchStatus() {
+    return fetch('/api/status', { headers: { 'X-Token': token || '' }, cache: 'no-store' })
       .then(function (r) {
         if (r.status === 403) { end('stale'); return null; }
         if (!r.ok) throw new Error('status ' + r.status);
         return r.json();
       })
       .then(function (s) {
-        failedPolls = 0;
         if (!s || ended) return;
         // A status this page cannot show is not a Helper that went away.
         try { render(s); } catch (e) {}
+      });
+  }
+
+  function poll() {
+    fetchStatus()
+      .then(function () {
+        failedPolls = 0;
       }, function () {
         failedPolls++;
         if (failedPolls >= FAILED_POLLS_UNTIL_GONE) end('gone');
@@ -298,6 +366,33 @@
         if (!ended) setTimeout(poll, 1000);
       });
   }
+
+  friendBox.addEventListener('input', updateConnect);
+  connectButton.addEventListener('click', function () {
+    joinSent = true;
+    updateConnect();
+    noAddresses.hidden = true;
+    fetch('/api/join', {
+      method: 'POST',
+      headers: { 'X-Token': token || '', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ticket: friendBox.value })
+    }).then(function (r) {
+      if (r.status === 403) return end('stale');
+      // 400 puts the invalid_ticket banner up, and 409 means a dial is
+      // already in progress: status shows both.
+      if (r.status !== 202) return;
+      return r.json().then(function (body) {
+        noAddresses.hidden = (body.warnings || []).indexOf('ticket_no_addresses') < 0;
+      });
+    }).catch(function () {
+      // No answer: the polls find out whether the Helper is gone.
+    }).then(function () {
+      joinSent = false;
+      updateConnect();
+      // Show the dial in progress, or the banner, without waiting for the next poll.
+      if (!ended) fetchStatus().catch(function () {});
+    });
+  });
 
   var quitButton = document.getElementById('quit');
   quitButton.addEventListener('click', function () {

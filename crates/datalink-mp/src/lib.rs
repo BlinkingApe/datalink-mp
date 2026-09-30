@@ -11,7 +11,9 @@ mod http;
 mod ipc_server;
 mod platform;
 
-pub use controller::{Banner, SessionController, State, Status};
+pub use controller::{
+    Banner, InvalidTicket, JoinError, JoinRefused, SessionController, State, Status,
+};
 pub use http::generate_token;
 pub use platform::{system_browser_opener, SelfCheck};
 

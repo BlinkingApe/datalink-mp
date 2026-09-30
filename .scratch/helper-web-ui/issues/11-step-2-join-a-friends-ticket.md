@@ -21,7 +21,7 @@ Tests use the seam 1 harness plus a friend Transport on loopback, and assert on 
 
 **Blocked by:** 10 (Step 4: hosting and connected Helpers)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] Text that is not a Ticket gets 400 with `invalid_ticket`, and status carries the banner
 - [ ] Our own Ticket gets 400 with `invalid_ticket`, distinguishable as the own-Ticket case

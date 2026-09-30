@@ -159,6 +159,18 @@ pub fn http_request(
     path: &str,
     headers: &[(&str, &str)],
 ) -> HttpResponse {
+    http_request_with_body(ui_port, method, path, headers, "")
+}
+
+/// Send one HTTP/1.1 request with `body` to the UI on `ui_port` and read the
+/// whole reply. An empty body is sent as no body at all.
+pub fn http_request_with_body(
+    ui_port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> HttpResponse {
     let mut stream = TcpStream::connect(("127.0.0.1", ui_port)).expect("the UI should accept connections");
     stream.set_read_timeout(Some(REPLY_DEADLINE)).unwrap();
     stream.set_write_timeout(Some(REPLY_DEADLINE)).unwrap();
@@ -170,7 +182,11 @@ pub fn http_request(
     for (name, value) in headers {
         request.push_str(&format!("{name}: {value}\r\n"));
     }
+    if !body.is_empty() {
+        request.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    }
     request.push_str("\r\n");
+    request.push_str(body);
     stream.write_all(request.as_bytes()).expect("request should be written");
 
     let mut raw = Vec::new();

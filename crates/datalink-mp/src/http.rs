@@ -6,12 +6,14 @@
 
 mod guard;
 
-use crate::controller::{SessionController, Status};
+use crate::controller::{Banner, SessionController, Status};
 use axum::extract::State;
 use axum::http::StatusCode;
-use axum::response::Html;
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router, ServiceExt};
+use serde::Deserialize;
+use serde_json::json;
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
@@ -102,6 +104,7 @@ pub(crate) fn spawn(
     let state = Arc::new(AppState { controller });
     let api = Router::new()
         .route("/status", get(status))
+        .route("/join", post(join))
         .route("/quit", post(quit))
         .with_state(state);
     let app = Router::new().route("/", get(page)).nest("/api", api);
@@ -175,6 +178,47 @@ async fn status(State(state): State<Arc<AppState>>) -> Result<Json<Status>, Stat
         .await
         .map(Json)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+/// The body of `POST /api/join`: the text the player pasted as a friend's Ticket.
+#[derive(Deserialize)]
+struct JoinRequest {
+    ticket: String,
+}
+
+/// Join a friend's Ticket: check it, start the dial and answer at once. How
+/// the dial ends is for status to say.
+///
+/// - 202 with the list of `warnings` when the dial has started;
+/// - 400 with the `invalid_ticket` banner and why, when the text is not a
+///   Ticket or is our own, which also puts the banner up;
+/// - 409 when a dial is already in progress.
+async fn join(State(state): State<Arc<AppState>>, Json(request): Json<JoinRequest>) -> Response {
+    // Parsing and checking the Ticket waits on nothing, so it is done here.
+    let pending = match state.controller.begin_join(&request.ticket) {
+        Ok(pending) => pending,
+        Err(refused) => {
+            let (status, body) = match refused.invalid_ticket() {
+                Some(reason) => (
+                    StatusCode::BAD_REQUEST,
+                    json!({ "banner": Banner::InvalidTicket, "reason": reason }),
+                ),
+                // The only refusal that puts no banner up.
+                None => (StatusCode::CONFLICT, json!({ "error": "dial_in_progress" })),
+            };
+            return (status, Json(body)).into_response();
+        }
+    };
+    let body = json!({ "warnings": pending.warnings() });
+    let controller = state.controller.clone();
+    // The dial blocks on the Transport's runtime, which panics on an async
+    // worker thread like this one. The controller goes with it, so the
+    // blocking thread is where this reference to it is dropped.
+    tokio::task::spawn_blocking(move || {
+        // Status reports how the dial went.
+        let _ = controller.dial(pending);
+    });
+    (StatusCode::ACCEPTED, Json(body)).into_response()
 }
 
 /// Quit: answer, and shut the Helper down. Whoever waits on the Helper (the
