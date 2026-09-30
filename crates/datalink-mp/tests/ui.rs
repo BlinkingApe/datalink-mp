@@ -809,7 +809,9 @@ impl UiProcess {
         if let Some(mut pipe) = self.child.stderr.take() {
             let _ = std::io::Read::read_to_string(&mut pipe, &mut stderr);
         }
-        UiExit { status, stderr }
+        // The reader thread ends at the end of the output, which closes the channel.
+        let stdout = self.stdout_lines.iter().collect::<Vec<_>>().join("\n");
+        UiExit { status, stdout, stderr }
     }
 
     #[cfg(target_os = "linux")]
@@ -820,6 +822,7 @@ impl UiProcess {
 
 struct UiExit {
     status: std::process::ExitStatus,
+    stdout: String,
     stderr: String,
 }
 
@@ -1717,6 +1720,299 @@ fn test_status_is_answered_promptly_while_friends_connect_and_disconnect() {
 }
 
 // ---------------------------------------------------------------------------
+// Ticket 15: single instance
+//
+// Two routes work without the token so that a second Helper can find the
+// first and ask it to show its page. The rest of the rules still apply.
+// ---------------------------------------------------------------------------
+
+/// POST to `/api/show` the way a second Helper does: no token, a JSON content
+/// type, and `extra` headers.
+fn post_show(ui_port: u16, extra: &[(&str, &str)]) -> common::HttpResponse {
+    let mut headers = vec![("Content-Type", "application/json")];
+    headers.extend_from_slice(extra);
+    common::http_request(ui_port, "POST", "/api/show", &headers)
+}
+
+#[test]
+fn test_instance_needs_no_token_and_names_the_application_release_and_ipc_port() {
+    let Some(started) = start(false) else {
+        return;
+    };
+
+    let response = http_get(started.ui_port(), "/api/instance", &[]);
+
+    assert_eq!(response.status, 200, "{}", response.body);
+    let instance = response.json();
+    assert_eq!(instance["app"], "datalink-mp");
+    assert_eq!(instance["release_version"], env!("CARGO_PKG_VERSION"));
+    assert_eq!(instance["ipc_port"], started.helper.ipc_port());
+    assert!(!response.body.contains(TOKEN), "the route must not reveal the token");
+}
+
+#[test]
+fn test_show_needs_no_token_and_opens_the_browser_at_the_launch_url() {
+    let Some(started) = start(true) else {
+        return;
+    };
+    let launch_url = started.helper.launch_url().unwrap();
+    // The opener was called once at startup.
+    assert_eq!(started.opened.lock().unwrap().len(), 1);
+
+    let response = post_show(started.ui_port(), &[]);
+
+    assert_eq!(response.status, 204, "{}", response.body);
+    // The opener runs off the request's thread: wait for it.
+    wait_for_opened(&started, 2);
+    assert_eq!(*started.opened.lock().unwrap(), vec![launch_url.clone(), launch_url]);
+    assert!(!response.body.contains(TOKEN), "the route must not reveal the token");
+}
+
+#[test]
+fn test_show_asked_again_within_the_limit_does_not_open_the_browser_again() {
+    let Some(started) = start(true) else {
+        return;
+    };
+
+    let first = post_show(started.ui_port(), &[]);
+    let second = post_show(started.ui_port(), &[]);
+
+    assert_eq!(first.status, 204);
+    assert_eq!(second.status, 429, "a second request within the limit is refused");
+    wait_for_opened(&started, 2);
+    assert_eq!(started.opened.lock().unwrap().len(), 2, "startup and the first show only");
+}
+
+#[test]
+fn test_show_without_a_browser_opener_changes_nothing_and_does_not_fail() {
+    let Some(started) = start(false) else {
+        return;
+    };
+
+    let response = post_show(started.ui_port(), &[]);
+
+    assert_eq!(response.status, 204);
+    assert!(started.opened.lock().unwrap().is_empty());
+}
+
+#[test]
+fn test_the_single_instance_routes_still_refuse_another_host_name() {
+    let Some(started) = start(true) else {
+        return;
+    };
+    let port = started.ui_port();
+    let host = format!("rebind.example:{port}");
+
+    let instance = http_get(port, "/api/instance", &[("Host", &host)]);
+    let show = post_show(port, &[("Host", &host)]);
+
+    assert_eq!(instance.status, 403);
+    assert_eq!(show.status, 403);
+    assert_eq!(started.opened.lock().unwrap().len(), 1, "a refused request opens nothing");
+}
+
+#[test]
+fn test_show_still_refuses_a_foreign_origin_and_needs_a_json_content_type() {
+    let Some(started) = start(true) else {
+        return;
+    };
+    let port = started.ui_port();
+
+    let foreign = post_show(port, &[("Origin", "http://rebind.example")]);
+    let not_json = common::http_request(port, "POST", "/api/show", &[("Content-Type", "text/plain")]);
+    let by_get = http_get(port, "/api/show", &[]);
+
+    assert_eq!(foreign.status, 403);
+    assert_eq!(not_json.status, 415);
+    assert_eq!(by_get.status, 405);
+    assert_eq!(started.opened.lock().unwrap().len(), 1, "a refused request opens nothing");
+}
+
+#[test]
+fn test_instance_is_read_only_and_other_api_routes_still_need_the_token() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let port = started.ui_port();
+
+    let instance_by_post =
+        common::http_request(port, "POST", "/api/instance", &[("Content-Type", "application/json")]);
+    let status = http_get(port, "/api/status", &[]);
+
+    assert_eq!(instance_by_post.status, 405);
+    assert_eq!(status.status, 403, "only the two single-instance routes are public");
+}
+
+/// Start a Helper on the IPC port `ipc_port`, serving the page from `ui_port`
+/// upwards, with a recording stand-in for the browser opener. Fails with
+/// whatever `start` fails with; None when a Transport cannot be created.
+fn try_start_on(ipc_port: u16, ui_port: u16) -> Option<Result<Started, StartError>> {
+    let opened = OpenedUrls::default();
+    let recorded = opened.clone();
+    let mut config = ui_config_from(ui_port);
+    config.ipc_port = ipc_port;
+    config.ui.as_mut().unwrap().browser_opener = Some(Box::new(move |url: &str| {
+        recorded.lock().unwrap().push(url.to_string())
+    }));
+    match datalink_mp::start(config) {
+        Ok(helper) => Some(Ok(Started { helper, opened })),
+        Err(StartError::Transport(e)) => {
+            note_transport_unavailable(&e);
+            None
+        }
+        Err(e) => Some(Err(e)),
+    }
+}
+
+/// How long the first Helper may take to be asked to open its page.
+const SHOW_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+fn wait_for_opened(started: &Started, count: usize) {
+    common::poll_until(SHOW_DEADLINE, || (started.opened.lock().unwrap().len() >= count).then_some(()))
+        .unwrap_or_else(|| panic!("the opener should have been called {count} times"));
+}
+
+#[test]
+fn test_second_start_on_the_same_ipc_port_is_already_running_and_opens_the_first_ones_page() {
+    let ipc_port = common::free_port();
+    let Some(first) = try_start_on(ipc_port, common::free_port()) else {
+        return;
+    };
+    let first = first.expect("the first Helper should start");
+    let ui_port = first.ui_port();
+    assert_eq!(first.opened.lock().unwrap().len(), 1);
+
+    let Some(second) = try_start_on(ipc_port, ui_port) else {
+        return;
+    };
+
+    assert!(matches!(second, Err(StartError::AlreadyRunning)), "got {:?}", second.err());
+    wait_for_opened(&first, 2);
+    assert_eq!(first.opened.lock().unwrap()[1], first.helper.launch_url().unwrap());
+    assert_eq!(first.status()["state"], "ready", "the first Helper is undisturbed");
+}
+
+#[test]
+fn test_first_helper_is_found_when_it_is_on_a_later_port_of_the_ui_range() {
+    let ipc_port = common::free_port();
+    let (_held, base) = ports_with_only_the_second_free();
+    let Some(first) = try_start_on(ipc_port, base) else {
+        return;
+    };
+    let first = first.expect("the first Helper should start");
+    assert_eq!(first.ui_port(), base + 1);
+
+    let Some(second) = try_start_on(ipc_port, base) else {
+        return;
+    };
+
+    assert!(matches!(second, Err(StartError::AlreadyRunning)), "got {:?}", second.err());
+    wait_for_opened(&first, 2);
+}
+
+#[test]
+fn test_second_start_on_a_different_ipc_port_runs_and_takes_the_next_ui_port() {
+    let (mut held, base) = ports_with_only_the_second_free();
+    let Some(first) = try_start_on(common::free_port(), base) else {
+        return;
+    };
+    let first = first.expect("the first Helper should start");
+    assert_eq!(first.ui_port(), base + 1);
+    // Free the next port too, for the second Helper to walk to.
+    drop(held.remove(1));
+
+    let Some(second) = try_start_on(common::free_port(), base) else {
+        return;
+    };
+
+    let second = second.expect("a Helper on another IPC port is a separate instance");
+    assert_eq!(second.ui_port(), first.ui_port() + 1);
+    assert_eq!(first.opened.lock().unwrap().len(), 1, "the first Helper was not asked to show");
+    assert_eq!(second.opened.lock().unwrap().len(), 1, "the second opens its own page");
+    assert_ne!(first.status()["ticket"], second.status()["ticket"]);
+}
+
+#[test]
+fn test_a_program_holding_the_ipc_port_is_not_mistaken_for_a_running_helper() {
+    // A Helper runs on one IPC port, and another program holds a different one.
+    let Some(first) = try_start_on(common::free_port(), common::free_port()) else {
+        return;
+    };
+    let first = first.expect("the first Helper should start");
+    let (holder, taken_port) = common::hold_port();
+
+    let Some(second) = try_start_on(taken_port, first.ui_port()) else {
+        return;
+    };
+
+    let second = second.expect("a held IPC port is not a running Helper: the UI still starts");
+    assert_eq!(second.banners(), ["ipc_port_in_use"]);
+    assert_eq!(first.opened.lock().unwrap().len(), 1, "the first Helper was not asked to show");
+    drop(holder);
+}
+
+#[test]
+fn test_the_helper_writes_no_lock_or_state_file() {
+    let folder = GameFolder::holding(&[]);
+    let ipc_port = common::free_port();
+    let config = |folder: &GameFolder| Config {
+        game_folder: folder.path.clone(),
+        ipc_port,
+        ..ui_config_from(0)
+    };
+    let Some(first) = start_with(config(&folder), OpenedUrls::default()) else {
+        return;
+    };
+    let second = datalink_mp::start(Config { ui: first.helper.ui_port().map(|port| UiConfig { port, ..ui_config_from(0).ui.unwrap() }), ..config(&folder) });
+    assert!(matches!(second, Err(StartError::AlreadyRunning)));
+
+    let files = std::fs::read_dir(&folder.path).unwrap().count();
+    assert_eq!(files, 0, "the Game folder should hold nothing but what the player put there");
+}
+
+#[test]
+fn test_binary_started_twice_on_the_same_ipc_port_says_already_running_and_exits_with_status_0() {
+    let ipc_port = common::free_port().to_string();
+    let ui_port = common::free_port();
+    let args = |ui_port: u16| {
+        vec!["--ui-port".to_string(), ui_port.to_string(), "--port".into(), ipc_port.clone(), "--no-browser".into()]
+    };
+    let mut first = UiProcess::spawn(&args(ui_port), &[], std::path::Path::new(""));
+    let Some(_) = first.launch_url() else {
+        return;
+    };
+    let mut second = UiProcess::spawn(&args(ui_port), &[], std::path::Path::new(""));
+
+    let exit = second.wait_for_exit();
+
+    assert!(exit.status.success(), "expected status 0, got {:?}: {}", exit.status, exit.stderr);
+    assert!(
+        exit.stdout.contains("datalink-mp is already running"),
+        "stdout was {:?}, stderr {:?}",
+        exit.stdout,
+        exit.stderr
+    );
+    assert!(!exit.stdout.contains("?t="), "no token is printed by the second process");
+}
+
+#[test]
+fn test_helper_that_could_not_bind_the_ipc_port_does_not_claim_it_and_is_not_found_by_a_second_start() {
+    let Some((first, holder)) = start_with_the_ipc_port_taken() else {
+        return;
+    };
+    let taken_port = holder.local_addr().unwrap().port();
+
+    let instance = http_get(first.ui_port(), "/api/instance", &[]).json();
+    assert_eq!(instance["ipc_port"], serde_json::Value::Null, "it does not hold the port");
+
+    let Some(second) = try_start_on(taken_port, first.ui_port()) else {
+        return;
+    };
+    let second = second.expect("a Helper that does not hold the port is not 'already running'");
+    assert_eq!(second.banners(), ["ipc_port_in_use"]);
+    assert_eq!(first.opened.lock().unwrap().len(), 0, "the first Helper was not asked to show");
+}
+
 // Ticket 11: step 2, joining a friend's Ticket from the page
 //
 // The player pastes a friend's Ticket and presses Connect: the page sends it

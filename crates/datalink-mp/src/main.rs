@@ -135,6 +135,11 @@ fn run_ui(port: u16, ui_port: u16, no_browser: bool) -> Result<()> {
     });
     let helper = match started {
         Ok(helper) => helper,
+        // A second double-click: the running Helper has opened its page.
+        Err(e @ StartError::AlreadyRunning) => {
+            println!("{e}");
+            return Ok(());
+        }
         Err(e @ StartError::Transport(_)) => explain_and_wait(&e),
         Err(e) => return Err(e.into()),
     };
