@@ -1,4 +1,4 @@
-//! smac-helper - Native helper process for SMAC DirectPlay networking
+//! datalink-mp - Native helper process for SMAC DirectPlay networking
 //!
 //! This binary runs natively on the host OS and handles all Iroh networking.
 //! The DLL running in Wine connects to this helper via TCP localhost.
@@ -76,7 +76,7 @@ fn init_logging() {
 
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new("debug")
-            .add_directive("smac_helper=debug".parse().unwrap())
+            .add_directive("datalink_mp=debug".parse().unwrap())
             .add_directive("iroh_transport=debug".parse().unwrap())
     });
 
@@ -114,7 +114,7 @@ fn run_host(port: u16) -> Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(port);
 
-    info!("smac-helper starting in HOST mode on port {}", port);
+    info!("datalink-mp starting in HOST mode on port {}", port);
 
     // Create the transport (this starts the Iroh endpoint)
     info!("Initializing Iroh transport...");
@@ -142,7 +142,7 @@ fn run_join(port: u16, host_ticket: String) -> Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(port);
 
-    info!("smac-helper starting in JOIN mode on port {}", port);
+    info!("datalink-mp starting in JOIN mode on port {}", port);
 
     // Create the transport
     info!("Initializing Iroh transport...");

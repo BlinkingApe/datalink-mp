@@ -1,7 +1,7 @@
-//! IPC Client for communicating with smac-helper
+//! IPC Client for communicating with datalink-mp
 //!
 //! This module provides a synchronous TCP client that connects to the
-//! native smac-helper process and proxies all Transport operations.
+//! native datalink-mp process and proxies all Transport operations.
 
 use dp_types::{PlayerName, SessionDesc, DPID, GUID};
 use ipc_protocol::{
@@ -13,7 +13,7 @@ use std::io::Write;
 use std::net::TcpStream;
 use tracing::{debug, error, info, warn};
 
-/// IPC Client that connects to the native smac-helper process
+/// IPC Client that connects to the native datalink-mp process
 pub struct IpcClient {
     /// TCP stream to the helper
     stream: Mutex<TcpStream>,
@@ -36,7 +36,7 @@ impl IpcClient {
 
         let stream = TcpStream::connect(&addr).map_err(|e| {
             if e.kind() == std::io::ErrorKind::ConnectionRefused {
-                error!("IpcClient: connection refused - is smac-helper running?");
+                error!("IpcClient: connection refused - is datalink-mp running?");
                 IpcError::ConnectionRefused
             } else {
                 IpcError::Io(e)

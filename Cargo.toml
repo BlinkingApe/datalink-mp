@@ -4,7 +4,7 @@ members = [
     "crates/dp-types",
     "crates/ipc-protocol",
     "crates/iroh-transport",
-    "crates/smac-helper",
+    "crates/datalink-mp",
     "crates/dplayx",
     "crates/smac-fixes",
     "tools/mock-dp-client",
@@ -14,7 +14,7 @@ members = [
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/hdevalence/smac"
+repository = "https://github.com/BlinkingApe/datalink-mp"
 
 [workspace.dependencies]
 # Networking

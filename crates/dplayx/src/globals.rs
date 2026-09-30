@@ -44,7 +44,7 @@ pub fn get_ipc_client() -> parking_lot::MutexGuard<'static, Option<IpcClient>> {
             return guard;
         }
 
-        info!("get_ipc_client: connecting to smac-helper...");
+        info!("get_ipc_client: connecting to datalink-mp...");
 
         // Try to connect to the helper
         match IpcClient::connect() {
@@ -59,7 +59,7 @@ pub fn get_ipc_client() -> parking_lot::MutexGuard<'static, Option<IpcClient>> {
             }
             Err(e) => {
                 error!("get_ipc_client: Failed to connect to helper: {:?}", e);
-                error!("  Make sure smac-helper is running before launching the game");
+                error!("  Make sure datalink-mp is running before launching the game");
 
                 // Exponential backoff: 1s, 2s, 4s, 8s, ... up to MAX_BACKOFF_MS
                 let failures = FAILURE_COUNT.fetch_add(1, Ordering::SeqCst) + 1;

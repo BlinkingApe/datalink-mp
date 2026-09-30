@@ -643,6 +643,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "datalink-mp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dp-types",
+ "ipc-protocol",
+ "iroh-transport",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "der"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3056,20 +3070,6 @@ version = "0.1.0"
 dependencies = [
  "tracing",
  "windows",
-]
-
-[[package]]
-name = "smac-helper"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "dp-types",
- "ipc-protocol",
- "iroh-transport",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

@@ -1,7 +1,7 @@
 //! IPC Protocol for DLL ↔ Helper communication
 //!
 //! This crate defines the message types exchanged between the dplayx DLL
-//! (running under Wine) and the smac-helper (running natively on macOS).
+//! (running under Wine) and the datalink-mp (running natively on macOS).
 //!
 //! ## Wire Format
 //!
@@ -32,7 +32,7 @@ pub enum IpcError {
     #[error("Protocol version mismatch: expected {expected}, got {got}")]
     VersionMismatch { expected: u32, got: u32 },
 
-    #[error("Connection refused - is smac-helper running?")]
+    #[error("Connection refused - is datalink-mp running?")]
     ConnectionRefused,
 
     #[error("Helper returned error: {0}")]

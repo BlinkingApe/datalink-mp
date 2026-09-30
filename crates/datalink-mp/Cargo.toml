@@ -1,11 +1,11 @@
 [package]
-name = "smac-helper"
+name = "datalink-mp"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "smac-helper"
+name = "datalink-mp"
 path = "src/main.rs"
 
 [dependencies]
