@@ -194,26 +194,6 @@ fn test_helper_without_a_ui_serves_no_page() {
     assert_eq!(helper.launch_url(), None);
 }
 
-#[test]
-fn test_start_fails_with_a_ui_bind_error_when_the_ui_port_is_taken() {
-    let (_holder, taken_port) = common::hold_port();
-    let config = Config {
-        ipc_port: 0,
-        transport_options: TransportOptions::default(),
-        ui: Some(UiConfig {
-            port: taken_port,
-            token: TOKEN.to_string(),
-            browser_opener: None,
-        }),
-    };
-
-    match datalink_mp::start(config) {
-        Err(StartError::UiBind { port, .. }) => assert_eq!(port, taken_port),
-        Err(StartError::Transport(e)) => note_transport_unavailable(&e),
-        other => panic!("start should fail while another program holds the UI port: {:?}", other.err()),
-    }
-}
-
 /// Log output at info level and above, captured process-wide.
 fn captured_logs() -> Arc<Mutex<Vec<u8>>> {
     static LOGS: OnceLock<Arc<Mutex<Vec<u8>>>> = OnceLock::new();
@@ -646,4 +626,292 @@ fn status_of(reply: &str) -> u16 {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| panic!("reply should have a status line: {reply:?}"))
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 06: startup, UI port walk, browser opening
+// ---------------------------------------------------------------------------
+
+/// Hold `count` consecutive loopback ports, the way other programs would.
+/// The ports stay taken for as long as the listeners are kept.
+fn hold_port_range(count: u16) -> Vec<std::net::TcpListener> {
+    loop {
+        let (first_holder, first) = common::hold_port();
+        let mut held = vec![first_holder];
+        for port in first.saturating_add(1)..first.saturating_add(count) {
+            match std::net::TcpListener::bind(("127.0.0.1", port)) {
+                Ok(holder) => held.push(holder),
+                Err(_) => break,
+            }
+        }
+        if held.len() == usize::from(count) {
+            return held;
+        }
+    }
+}
+
+/// A Helper configured to serve the page from `port` upwards.
+fn ui_config_from(port: u16) -> Config {
+    Config {
+        ipc_port: 0,
+        transport_options: TransportOptions::default(),
+        ui: Some(UiConfig {
+            port,
+            token: TOKEN.to_string(),
+            browser_opener: None,
+        }),
+    }
+}
+
+#[test]
+fn test_taken_ui_port_makes_the_helper_bind_the_next_one() {
+    let mut held = hold_port_range(10);
+    let taken = held[0].local_addr().unwrap().port();
+    // The next port is free; the eight after it are not.
+    drop(held.remove(1));
+
+    let helper = match datalink_mp::start(ui_config_from(taken)) {
+        Ok(helper) => helper,
+        Err(StartError::Transport(e)) => return note_transport_unavailable(&e),
+        Err(e) => panic!("the Helper should walk past a taken UI port: {e:?}"),
+    };
+
+    assert_eq!(helper.ui_port(), Some(taken + 1));
+    let expected = format!("http://127.0.0.1:{}/?t={TOKEN}", taken + 1);
+    assert_eq!(helper.launch_url().as_deref(), Some(expected.as_str()));
+    assert_eq!(
+        http_get(taken + 1, "/", &[]).status,
+        200,
+        "the page is served on the port the handle reports"
+    );
+}
+
+#[test]
+fn test_start_fails_with_a_clear_message_when_all_ten_ui_ports_are_taken() {
+    let held = hold_port_range(10);
+    let first = held[0].local_addr().unwrap().port();
+
+    let error = match datalink_mp::start(ui_config_from(first)) {
+        Err(StartError::Transport(e)) => return note_transport_unavailable(&e),
+        Err(e) => e,
+        Ok(_) => panic!("the Helper should not start with every UI port taken"),
+    };
+
+    let message = error.to_string();
+    assert!(
+        message.contains(&first.to_string()) && message.contains(&(first + 9).to_string()),
+        "the message should name the ports that were tried: {message}"
+    );
+    assert!(message.contains("--ui-port"), "the message should say what to do: {message}");
+}
+
+/// A `datalink-mp` process in UI mode.
+struct UiProcess {
+    child: std::process::Child,
+    stdout_lines: std::sync::mpsc::Receiver<String>,
+}
+
+impl UiProcess {
+    /// Start the binary with `args`, `envs` set and `PATH` replaced by `path`,
+    /// so the test decides which programs the Helper can find.
+    fn spawn(args: &[String], envs: &[(&str, &str)], path: &std::path::Path) -> Self {
+        use std::io::{BufRead, BufReader};
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(env!("CARGO_BIN_EXE_datalink-mp"))
+            .args(args)
+            // The developer's own settings must not leak into the test.
+            .env_remove("SMAC_HELPER_PORT")
+            .env_remove("SMAC_HELPER_LOG_FILE")
+            .env_remove("SMAC_UI_PORT")
+            .env("PATH", path)
+            .envs(envs.iter().copied())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("the datalink-mp binary should start");
+        let stdout = child.stdout.take().expect("stdout is piped");
+        let (tx, stdout_lines) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        Self { child, stdout_lines }
+    }
+
+    /// The launch URL, printed on standard output. None when the Helper exited
+    /// first because no Transport could be created (sandboxed environments).
+    fn launch_url(&mut self) -> Option<String> {
+        loop {
+            match self.stdout_lines.recv_timeout(std::time::Duration::from_secs(30)) {
+                Ok(line) if line.starts_with("http://") => return Some(line),
+                Ok(_) => {}
+                Err(_) => {
+                    let exit = self.wait_for_exit();
+                    if exit.stderr.contains("Failed to create transport") {
+                        note_transport_unavailable(&exit.stderr);
+                        return None;
+                    }
+                    panic!("the Helper printed no launch URL and exited with {:?}: {}", exit.status, exit.stderr);
+                }
+            }
+        }
+    }
+
+    /// Wait for the process to end by itself and collect standard error.
+    fn wait_for_exit(&mut self) -> UiExit {
+        let status = common::poll_until(std::time::Duration::from_secs(30), || {
+            self.child.try_wait().expect("should poll the process")
+        })
+        .expect("the Helper should have exited");
+        let mut stderr = String::new();
+        if let Some(mut pipe) = self.child.stderr.take() {
+            let _ = std::io::Read::read_to_string(&mut pipe, &mut stderr);
+        }
+        UiExit { status, stderr }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn is_running(&mut self) -> bool {
+        self.child.try_wait().expect("should poll the process").is_none()
+    }
+}
+
+struct UiExit {
+    status: std::process::ExitStatus,
+    stderr: String,
+}
+
+impl Drop for UiProcess {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn port_of(launch_url: &str) -> u16 {
+    launch_url
+        .strip_prefix("http://127.0.0.1:")
+        .and_then(|rest| rest.split_once("/?t="))
+        .and_then(|(port, _)| port.parse().ok())
+        .unwrap_or_else(|| panic!("not a launch URL: {launch_url}"))
+}
+
+/// The UI-mode command line for the binary, with the IPC port picked by the OS.
+fn ui_args_from(ui_port: u16, no_browser: bool) -> Vec<String> {
+    let mut args = vec!["--ui-port".to_string(), ui_port.to_string(), "--port".into(), "0".into()];
+    if no_browser {
+        args.push("--no-browser".into());
+    }
+    args
+}
+
+/// A fresh empty directory for a test to put files in.
+#[cfg(target_os = "linux")]
+fn scratch_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("datalink-mp-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("should create a scratch directory");
+    dir
+}
+
+/// Hold ten consecutive ports, free the second, and return the holders and the first port.
+fn ports_with_only_the_second_free() -> (Vec<std::net::TcpListener>, u16) {
+    let mut held = hold_port_range(10);
+    let first = held[0].local_addr().unwrap().port();
+    drop(held.remove(1));
+    (held, first)
+}
+
+#[test]
+fn test_ui_port_flag_is_where_the_walk_starts() {
+    let (_held, taken) = ports_with_only_the_second_free();
+    let mut helper = UiProcess::spawn(&ui_args_from(taken, true), &[], std::path::Path::new(""));
+
+    let Some(url) = helper.launch_url() else {
+        return;
+    };
+
+    assert_eq!(port_of(&url), taken + 1);
+}
+
+#[test]
+fn test_smac_ui_port_is_where_the_walk_starts() {
+    let (_held, taken) = ports_with_only_the_second_free();
+    // No --ui-port flag, so that the variable is what names the port.
+    let args = vec!["--port".to_string(), "0".to_string(), "--no-browser".to_string()];
+    let mut helper = UiProcess::spawn(&args, &[("SMAC_UI_PORT", &taken.to_string())], std::path::Path::new(""));
+
+    let Some(url) = helper.launch_url() else {
+        return;
+    };
+
+    assert_eq!(port_of(&url), taken + 1);
+}
+
+#[test]
+fn test_ui_mode_exits_with_the_walk_message_when_all_ten_ui_ports_are_taken() {
+    let held = hold_port_range(10);
+    let first = held[0].local_addr().unwrap().port();
+    let mut helper = UiProcess::spawn(&ui_args_from(first, true), &[], std::path::Path::new(""));
+
+    let exit = helper.wait_for_exit();
+    if exit.stderr.contains("Failed to create transport") {
+        return note_transport_unavailable(&exit.stderr);
+    }
+
+    assert!(!exit.status.success(), "expected an error exit, got {:?}", exit.status);
+    assert!(
+        exit.stderr.contains(&first.to_string()) && exit.stderr.contains(&(first + 9).to_string()),
+        "the message should name the ports that were tried: {}",
+        exit.stderr
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_linux_opens_the_browser_with_xdg_open_at_the_launch_url_on_the_bound_port() {
+    use std::os::unix::fs::PermissionsExt;
+    // A stand-in `xdg-open` that records what it was asked to open.
+    let bin = scratch_dir("xdg-open");
+    let record = bin.join("opened");
+    let script = bin.join("xdg-open");
+    std::fs::write(&script, format!("#!/bin/sh\nprintf '%s' \"$1\" > '{}'\n", record.display())).unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (_held, taken) = ports_with_only_the_second_free();
+    let mut helper = UiProcess::spawn(&ui_args_from(taken, false), &[], &bin);
+
+    let Some(printed) = helper.launch_url() else {
+        return;
+    };
+
+    let opened = common::poll_until(std::time::Duration::from_secs(10), || {
+        std::fs::read_to_string(&record).ok().filter(|url| !url.is_empty())
+    })
+    .expect("xdg-open should have been run with the launch URL");
+    let _ = std::fs::remove_dir_all(&bin);
+    assert_eq!(opened, printed, "the opener and the printed URL should agree");
+    assert_eq!(port_of(&printed), taken + 1, "both should use the port actually bound");
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn test_helper_keeps_running_and_prints_the_url_when_the_opener_fails() {
+    // No xdg-open on PATH: the opener cannot start.
+    let bin = scratch_dir("no-opener");
+    let (_held, taken) = ports_with_only_the_second_free();
+    let mut helper = UiProcess::spawn(&ui_args_from(taken, false), &[], &bin);
+
+    let Some(printed) = helper.launch_url() else {
+        return;
+    };
+    let _ = std::fs::remove_dir_all(&bin);
+
+    assert!(helper.is_running(), "a failed opener must not stop the Helper");
+    let token = printed.split_once("?t=").expect("the URL carries the token").1;
+    let status = http_get(port_of(&printed), "/api/status", &[("X-Token", token)]);
+    assert_eq!(status.status, 200, "the page and API are served at the printed URL");
 }

@@ -31,9 +31,38 @@ pub fn generate_token() -> std::io::Result<String> {
     Ok(hex::encode(bytes))
 }
 
-/// Bind the listener for the page. Port 0 picks a free port.
-pub(crate) fn bind(port: u16) -> std::io::Result<TcpListener> {
-    TcpListener::bind(("127.0.0.1", port))
+/// How many ports the UI port walk tries: the chosen port and the nine after it.
+pub(crate) const PORT_WALK_LEN: u16 = 10;
+
+/// Why the whole UI port walk failed.
+#[derive(Debug)]
+pub(crate) struct PortWalkFailed {
+    pub first: u16,
+    pub last: u16,
+    /// Why the last port could not be bound.
+    pub source: std::io::Error,
+}
+
+/// Bind the listener for the page, walking up from `port` to the next free
+/// one: `port` and the nine after it are tried in turn. Port 0 asks the OS
+/// for a free port and needs no walk. Read the port actually bound from the
+/// listener.
+pub(crate) fn bind_walking(port: u16) -> Result<TcpListener, PortWalkFailed> {
+    let last = port.saturating_add(PORT_WALK_LEN - 1);
+    let mut failure = None;
+    for candidate in port..=last {
+        match TcpListener::bind(("127.0.0.1", candidate)) {
+            Ok(listener) => return Ok(listener),
+            // Not only AddrInUse: Windows refuses ports it has reserved with
+            // a permission error, and the next port may well be fine.
+            Err(e) => failure = Some(e),
+        }
+    }
+    Err(PortWalkFailed {
+        first: port,
+        last,
+        source: failure.expect("the walk tries at least one port"),
+    })
 }
 
 /// A running HTTP server. Stops when dropped.

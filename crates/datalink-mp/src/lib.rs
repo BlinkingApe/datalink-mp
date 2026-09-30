@@ -9,9 +9,11 @@
 mod controller;
 mod http;
 mod ipc_server;
+mod platform;
 
 pub use controller::{SessionController, State, Status};
 pub use http::generate_token;
+pub use platform::system_browser_opener;
 
 use iroh_transport::{TransportError, TransportOptions};
 use std::sync::Arc;
@@ -50,9 +52,10 @@ pub enum StartError {
     #[error("Failed to bind TCP listener")]
     IpcBind(#[source] std::io::Error),
 
-    #[error("Failed to bind UI port {port}: another program may be using it. Close it, or pick another port with --ui-port")]
+    #[error("Could not find a free port for the page: ports {first} to {last} are all taken. Close the programs using them, or pick another port with --ui-port")]
     UiBind {
-        port: u16,
+        first: u16,
+        last: u16,
         #[source]
         source: std::io::Error,
     },
@@ -84,11 +87,18 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
     let ipc_port = listener.local_addr().map_err(StartError::IpcBind)?.port();
     info!("Listening on 127.0.0.1:{}", ipc_port);
 
-    // Likewise the UI port.
+    // Likewise the UI port. A taken port is not fatal: the Helper walks on to
+    // the next free one, and reports the port it bound.
     let ui_listener = config
         .ui
         .as_ref()
-        .map(|ui| http::bind(ui.port).map_err(|source| StartError::UiBind { port: ui.port, source }))
+        .map(|ui| {
+            http::bind_walking(ui.port).map_err(|walk| StartError::UiBind {
+                first: walk.first,
+                last: walk.last,
+                source: walk.source,
+            })
+        })
         .transpose()?;
 
     let controller = Arc::new(

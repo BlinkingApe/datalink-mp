@@ -17,7 +17,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use datalink_mp::{Config, Helper, UiConfig};
+use datalink_mp::{Config, Helper, StartError, UiConfig};
 use ipc_protocol::DEFAULT_PORT;
 use iroh_transport::TransportOptions;
 use tracing::info;
@@ -122,16 +122,20 @@ fn run_ui(port: u16, ui_port: u16, no_browser: bool) -> Result<()> {
     let ipc_port = resolve_ipc_port(port);
     info!("datalink-mp starting in UI mode on port {}", ipc_port);
 
-    let helper = datalink_mp::start(Config {
+    let started = datalink_mp::start(Config {
         ipc_port,
         transport_options: TransportOptions::default(),
         ui: Some(UiConfig {
             port: ui_port,
             token: datalink_mp::generate_token()?,
-            // The per-OS openers come later; for now the player opens the printed URL.
-            browser_opener: (!no_browser).then(|| Box::new(|_: &str| {}) as datalink_mp::BrowserOpener),
+            browser_opener: (!no_browser).then(datalink_mp::system_browser_opener),
         }),
-    })?;
+    });
+    let helper = match started {
+        Ok(helper) => helper,
+        Err(e @ StartError::Transport(_)) => explain_and_wait(&e),
+        Err(e) => return Err(e.into()),
+    };
 
     // The launch URL carries the token: printing it here is the only place it appears.
     println!("datalink-mp {}", env!("CARGO_PKG_VERSION"));
@@ -139,10 +143,29 @@ fn run_ui(port: u16, ui_port: u16, no_browser: bool) -> Result<()> {
         "{}",
         helper.launch_url().expect("a Helper started with a UI has a launch URL")
     );
-    println!("Open the address above in your browser. Press Ctrl+C in this window to quit.");
+    println!("If your browser did not open by itself, open the address above. Press Ctrl+C in this window to quit.");
 
     helper.wait();
     Ok(())
+}
+
+/// The Helper could not start its networking: say so in plain words and wait
+/// for Enter, so that a double-clicked window does not vanish before the player
+/// can read it. Then exit with an error.
+fn explain_and_wait(error: &StartError) -> ! {
+    let mut reasons = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        reasons.push_str(&format!(": {cause}"));
+        source = cause.source();
+    }
+    eprintln!("datalink-mp could not start its networking, so it cannot connect you to your friends.");
+    eprintln!("The reason: {reasons}");
+    eprintln!("Check that this computer is allowed to use the network (a firewall may be blocking datalink-mp), then start it again.");
+    eprintln!();
+    eprintln!("Press Enter to close this window.");
+    let _ = std::io::stdin().read_line(&mut String::new());
+    std::process::exit(1);
 }
 
 /// Run in host mode - start the Helper and serve DLL connections

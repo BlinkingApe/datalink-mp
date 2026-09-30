@@ -325,27 +325,6 @@ fn test_ui_mode_never_writes_the_token_to_the_log_file() {
 }
 
 #[test]
-fn test_ui_mode_exits_with_an_error_when_the_ui_port_is_taken() {
-    let (_holder, taken_port) = hold_port();
-    let args = ui_args(taken_port, free_port());
-    let mut helper = HelperProcess::spawn(&args.iter().map(String::as_str).collect::<Vec<_>>());
-
-    let exit = helper
-        .wait_for_exit()
-        .expect("a taken UI port should be fatal, but the Helper kept running");
-    if exit.transport_unavailable() {
-        return;
-    }
-
-    assert!(!exit.status.success(), "expected an error exit, got {:?}", exit.status);
-    assert!(
-        exit.stderr.contains("Failed to bind UI port"),
-        "the error should say the UI port could not be bound, got: {}",
-        exit.stderr
-    );
-}
-
-#[test]
 fn test_host_exits_with_an_error_when_the_ipc_port_is_taken() {
     let (_holder, taken_port) = hold_port();
     let mut helper = HelperProcess::spawn(&["host", "--port", &taken_port.to_string()]);
