@@ -50,7 +50,7 @@ pub enum StartError {
     #[error("Failed to bind TCP listener")]
     IpcBind(#[source] std::io::Error),
 
-    #[error("Failed to bind UI port {port}")]
+    #[error("Failed to bind UI port {port}: another program may be using it. Close it, or pick another port with --ui-port")]
     UiBind {
         port: u16,
         #[source]
