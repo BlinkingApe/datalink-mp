@@ -20,7 +20,7 @@ Tests use the seam 1 harness plus a friend: a second real Transport on loopback 
 
 **Blocked by:** 03 (Transport: `shutdown()` and `connected_peers()`), 05 (UI mode tracer bullet)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] A friend dialling the Helper's Ticket moves the state to `hosting`
 - [ ] The friend's short ID appears in the status peer list, and the Helper appears in the friend's connected peers

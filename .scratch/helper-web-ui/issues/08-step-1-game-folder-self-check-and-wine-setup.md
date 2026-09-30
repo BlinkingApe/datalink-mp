@@ -24,7 +24,7 @@ Tests use the seam 1 harness with a temporary directory as the Game folder and a
 
 **Blocked by:** 05 (UI mode tracer bullet)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] An empty folder fails the check and status carries `not_game_folder`
 - [ ] A folder with only the DLL fails, and the result says the DLL was found and no game executable was
