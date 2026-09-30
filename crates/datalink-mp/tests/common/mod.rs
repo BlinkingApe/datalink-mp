@@ -53,6 +53,18 @@ impl FakeDll {
             .expect("bytes should be written to the Helper");
     }
 
+    /// Whether the Helper has ended the connection, as the DLL would find on
+    /// its next read. Waits for it up to the reply deadline.
+    pub fn is_closed_by_the_helper(&mut self) -> bool {
+        match self.stream.read(&mut [0u8; 1]) {
+            Ok(read) => read == 0,
+            Err(e) => matches!(
+                e.kind(),
+                std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionAborted
+            ),
+        }
+    }
+
     /// Handshake as a DLL from another build would, with its own IPC version.
     pub fn handshake_with_version(&mut self, ipc_version: u32) -> IpcResponse {
         self.request(&IpcRequest::Handshake {

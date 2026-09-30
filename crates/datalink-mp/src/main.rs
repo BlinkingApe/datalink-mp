@@ -117,7 +117,7 @@ fn main() -> Result<()> {
     }
 }
 
-/// Run the web UI: start the Helper with its page and serve until quit
+/// Run the web UI: start the Helper with its page and serve until Quit
 fn run_ui(port: u16, ui_port: u16, no_browser: bool) -> Result<()> {
     let ipc_port = resolve_ipc_port(port);
     info!("datalink-mp starting in UI mode on port {}", ipc_port);
@@ -143,7 +143,7 @@ fn run_ui(port: u16, ui_port: u16, no_browser: bool) -> Result<()> {
         "{}",
         helper.launch_url().expect("a Helper started with a UI has a launch URL")
     );
-    println!("If your browser did not open by itself, open the address above. Press Ctrl+C in this window to quit.");
+    println!("If your browser did not open by itself, open the address above. To quit, press Quit on the page, or Ctrl+C in this window.");
 
     helper.wait();
     Ok(())

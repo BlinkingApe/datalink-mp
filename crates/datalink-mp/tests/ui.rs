@@ -352,9 +352,9 @@ fn test_absolute_request_target_naming_another_host_is_refused() {
 }
 
 /// POST to `path` with the right Host, the token and a JSON content type, plus
-/// `extra` headers. No POST route exists yet, so the tests aim at a GET route:
-/// a POST that passes the rules reaches routing and gets 405 there, and one
-/// that breaks them gets the rule's own status instead.
+/// `extra` headers. The tests of the rules aim at a GET route, where a POST
+/// changes nothing: one that passes the rules reaches routing and gets 405
+/// there, and one that breaks them gets the rule's own status instead.
 fn post(started: &Started, path: &str, extra: &[(&str, &str)]) -> common::HttpResponse {
     let mut headers = vec![("X-Token", TOKEN), ("Content-Type", "application/json")];
     headers.extend_from_slice(extra);
@@ -1078,21 +1078,30 @@ fn test_later_good_handshake_clears_the_ipc_version_mismatch_banner() {
     assert_eq!(started.status()["game_connected"], true);
 }
 
-#[test]
-fn test_ui_works_with_the_ipc_port_in_use_banner_when_the_ipc_port_is_taken() {
-    // Another program holds the IPC port.
-    let (_holder, taken_port) = common::hold_port();
+/// Start a Helper on an IPC port that another program holds, which is the
+/// listener returned with it. None when a Transport cannot be created.
+fn start_with_the_ipc_port_taken() -> Option<(Started, std::net::TcpListener)> {
+    let (holder, taken_port) = common::hold_port();
     let config = Config {
         ipc_port: taken_port,
         ..ui_config_from(0)
     };
-
-    let helper = match datalink_mp::start(config) {
-        Ok(helper) => helper,
-        Err(StartError::Transport(e)) => return note_transport_unavailable(&e),
+    match datalink_mp::start(config) {
+        Ok(helper) => Some((Started { helper, opened: OpenedUrls::default() }, holder)),
+        Err(StartError::Transport(e)) => {
+            note_transport_unavailable(&e);
+            None
+        }
         Err(e) => panic!("a taken IPC port should not stop the Helper in UI mode: {e:?}"),
+    }
+}
+
+#[test]
+fn test_ui_works_with_the_ipc_port_in_use_banner_when_the_ipc_port_is_taken() {
+    let Some((started, holder)) = start_with_the_ipc_port_taken() else {
+        return;
     };
-    let started = Started { helper, opened: OpenedUrls::default() };
+    let taken_port = holder.local_addr().unwrap().port();
 
     assert_eq!(http_get(started.ui_port(), "/", &[]).status, 200, "the page is served");
     let status = started.status();
@@ -1101,4 +1110,183 @@ fn test_ui_works_with_the_ipc_port_in_use_banner_when_the_ipc_port_is_taken() {
     assert_eq!(status["game_connected"], false);
     Ticket::parse(status["ticket"].as_str().expect("status should carry a Ticket"))
         .expect("the Helper still has a Ticket");
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 14: Quit
+//
+// Quit ends the Helper. In the test process that shows as the Helper's handle
+// finishing; the built binary exits then (see the smoke tests).
+// ---------------------------------------------------------------------------
+
+/// How long the Helper may take to finish once it was told to quit.
+const QUIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Wait on `helper` on another thread, the way the binary's `main` does from
+/// the moment the Helper has started.
+fn wait_in_the_background(helper: Helper) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || helper.wait())
+}
+
+/// Assert that the wait on a Helper ends: the Helper has finished. Panics if
+/// it is still running at the deadline.
+fn assert_finishes(waiting: std::thread::JoinHandle<()>) {
+    common::poll_until(QUIT_DEADLINE, || waiting.is_finished().then_some(()))
+        .expect("the Helper should finish after Quit");
+    waiting.join().expect("the Helper should finish without a panic");
+}
+
+/// Wait on `helper` and return once it has finished.
+fn wait_for_the_helper_to_finish(helper: Helper) {
+    assert_finishes(wait_in_the_background(helper));
+}
+
+#[test]
+fn test_quit_is_answered_and_then_the_helper_finishes() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let ui_port = started.ui_port();
+    // Whatever waits on the Helper stops its servers once it has quit: the
+    // answer to Quit has to get out first.
+    let waiting = wait_in_the_background(started.helper);
+
+    quit_on(ui_port);
+
+    assert_finishes(waiting);
+}
+
+/// Quit the Helper whose page is on `ui_port` with the token, the way the
+/// page does, and assert it was answered.
+fn quit_on(ui_port: u16) {
+    let response = common::http_request(
+        ui_port,
+        "POST",
+        "/api/quit",
+        &[("X-Token", TOKEN), ("Content-Type", "application/json")],
+    );
+    assert_eq!(response.status, 204, "Quit should be answered before the Helper goes away");
+}
+
+fn quit(started: &Started) {
+    quit_on(started.ui_port());
+}
+
+/// Assert that another program could take `port` now.
+fn assert_port_is_released(what: &str, port: u16) {
+    if let Err(e) = std::net::TcpListener::bind(("127.0.0.1", port)) {
+        panic!("the {what} port {port} should be released after Quit: {e}");
+    }
+}
+
+#[test]
+fn test_quit_releases_the_ui_port_and_the_ipc_port() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let (ui_port, ipc_port) = (started.ui_port(), started.helper.ipc_port());
+
+    quit(&started);
+    wait_for_the_helper_to_finish(started.helper);
+
+    assert_port_is_released("UI", ui_port);
+    assert_port_is_released("IPC", ipc_port);
+}
+
+#[test]
+fn test_quit_with_the_game_connected_finishes_and_ends_the_games_link() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    // The game is open, and its DLL is waiting on the Helper.
+    let mut dll = started.connect_fake_dll();
+    dll.handshake();
+    let ipc_port = started.helper.ipc_port();
+
+    quit(&started);
+    wait_for_the_helper_to_finish(started.helper);
+
+    assert!(dll.is_closed_by_the_helper(), "the game's link should end with the Helper");
+    assert_port_is_released("IPC", ipc_port);
+}
+
+/// How long a friend's Transport may take to see a connect, or a graceful
+/// close, on loopback. Well below the 30 s idle timeout, which is how a friend
+/// finds out about a Helper that went away without telling them.
+const PEER_NOTICE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+#[test]
+fn test_connected_friend_sees_the_connection_close_promptly_after_quit() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let friend = match iroh_transport::Transport::new() {
+        Ok(friend) => friend,
+        Err(e) => return note_transport_unavailable(&e),
+    };
+    let status = started.status();
+    let ticket = status["ticket"].as_str().expect("status should carry a Ticket");
+    let helper_id = Ticket::parse(ticket).expect("the Ticket should parse").addr().id;
+    friend.connect_to_peer(ticket).expect("the friend should reach the Helper on loopback");
+    common::poll_until(PEER_NOTICE_DEADLINE, || {
+        friend.connected_peers().contains(&helper_id).then_some(())
+    })
+    .expect("the friend should list the Helper as connected");
+
+    quit(&started);
+
+    // The Helper's handle is still held, so its Transport is not dropped:
+    // the friend can only be seeing a close that was sent to it.
+    let closed = common::poll_until(PEER_NOTICE_DEADLINE, || {
+        friend.connected_peers().is_empty().then_some(())
+    });
+    assert!(
+        closed.is_some(),
+        "the friend should see the close within {PEER_NOTICE_DEADLINE:?}, still lists {:?}",
+        friend.connected_peers()
+    );
+    wait_for_the_helper_to_finish(started.helper);
+}
+
+#[test]
+fn test_quit_is_refused_without_the_token_from_a_foreign_origin_and_by_get() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let port = started.ui_port();
+    let json = ("Content-Type", "application/json");
+
+    let no_token = common::http_request(port, "POST", "/api/quit", &[json]);
+    let wrong_token =
+        common::http_request(port, "POST", "/api/quit", &[json, ("X-Token", "not-the-token")]);
+    let foreign_origin = post(&started, "/api/quit", &[("Origin", "http://rebind.example")]);
+    let opaque_origin = post(&started, "/api/quit", &[("Origin", "null")]);
+    let by_get = started.get_api("/api/quit");
+
+    assert_eq!(no_token.status, 403);
+    assert_eq!(wrong_token.status, 403);
+    assert_eq!(foreign_origin.status, 403);
+    assert_eq!(opaque_origin.status, 403);
+    assert_eq!(by_get.status, 405);
+    // Each was refused before it reached Quit. The Helper is still there for
+    // its own page to quit.
+    assert_eq!(started.status()["state"], "ready");
+    let own_origin = format!("http://127.0.0.1:{port}");
+    let from_the_page = post(&started, "/api/quit", &[("Origin", &own_origin)]);
+    assert_eq!(from_the_page.status, 204, "the page's own Quit should be accepted");
+    wait_for_the_helper_to_finish(started.helper);
+}
+
+#[test]
+fn test_quit_finishes_a_helper_that_has_no_ipc_server() {
+    // The Helper serves only its page: there is no IPC server to wait on.
+    let Some((started, _holder)) = start_with_the_ipc_port_taken() else {
+        return;
+    };
+    let ui_port = started.ui_port();
+
+    quit(&started);
+    wait_for_the_helper_to_finish(started.helper);
+
+    assert_port_is_released("UI", ui_port);
 }

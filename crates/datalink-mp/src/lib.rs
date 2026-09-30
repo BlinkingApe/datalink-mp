@@ -17,7 +17,6 @@ pub use platform::system_browser_opener;
 
 use iroh_transport::{TransportError, TransportOptions};
 use std::sync::Arc;
-use std::thread::JoinHandle;
 use thiserror::Error;
 use tracing::{info, warn};
 
@@ -79,7 +78,7 @@ pub struct Helper {
     http: Option<http::HttpServer>,
     controller: Arc<SessionController>,
     /// None when another program holds the IPC port: there is no IPC server.
-    ipc_thread: Option<JoinHandle<()>>,
+    ipc_server: Option<ipc_server::IpcServer>,
 }
 
 /// Start the Helper: bind the IPC port, create the Transport and serve the DLL.
@@ -122,7 +121,8 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
         SessionController::new(config.transport_options, ipc_port, listener.is_none())
             .map_err(StartError::Transport)?,
     );
-    let ipc_thread = listener.map(|listener| ipc_server::spawn(listener, controller.clone()));
+    let ipc_server =
+        listener.map(|listener| ipc_server::spawn(listener, ipc_port, controller.clone()));
 
     let http = match (config.ui, ui_listener) {
         (Some(ui), Some(listener)) => {
@@ -140,7 +140,7 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
         ipc_port,
         http,
         controller,
-        ipc_thread,
+        ipc_server,
     })
 }
 
@@ -168,26 +168,35 @@ impl Helper {
         &self.controller
     }
 
-    /// Block for as long as the Helper runs, which is the life of the process.
+    /// Block until the Helper has shut down, which is what Quit makes it do,
+    /// then stop its servers, which releases their ports.
+    ///
+    /// A Helper without a UI has no Quit: this blocks for the life of the
+    /// process, unless the IPC server dies, which shuts the Helper down too.
+    /// Its panic is passed on from here.
     pub fn wait(self) {
-        let Some(ipc_thread) = self.ipc_thread else {
-            // No IPC server to wait for. The page is still served, for the
-            // life of the process.
-            loop {
-                std::thread::park();
-            }
-        };
-        if let Err(panic) = ipc_thread.join() {
-            // A Helper whose IPC server died is of no use to the game.
-            std::panic::resume_unwind(panic);
-        }
+        self.controller.wait_for_shutdown();
+        self.stop_servers();
     }
 
-    /// Close every peer connection and the endpoint gracefully (blocking).
+    /// Shut the Helper down (blocking): close every peer connection and the
+    /// endpoint gracefully, then stop its servers, which releases their ports.
     ///
-    /// Takes up to `Transport::SHUTDOWN_TIMEOUT`. The IPC listener, if one was
-    /// bound, stays bound: it lives as long as the process does.
+    /// Closing takes up to `Transport::SHUTDOWN_TIMEOUT`.
     pub fn shutdown(self) {
-        self.controller.transport().shutdown();
+        self.controller.shutdown();
+        self.stop_servers();
+    }
+
+    /// Stop the HTTP server and the IPC server, which releases their ports.
+    fn stop_servers(self) {
+        // The HTTP server first: see the field's declaration.
+        drop(self.http);
+        if let Some(ipc_server) = self.ipc_server {
+            if let Err(panic) = ipc_server.stop() {
+                // The IPC server died, and the Helper shut down because of it.
+                std::panic::resume_unwind(panic);
+            }
+        }
     }
 }

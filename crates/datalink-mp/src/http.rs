@@ -2,26 +2,29 @@
 //!
 //! It runs on its own tokio runtime, owned by the [`HttpServer`], so the rest
 //! of the Helper stays synchronous. Handlers use only non-blocking reads of
-//! the Session controller.
+//! the Session controller; its blocking calls go through `spawn_blocking`.
 
 mod guard;
 
 use crate::controller::{SessionController, Status};
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::response::Html;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router, ServiceExt};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tracing::info;
 
 /// The page, embedded in the binary.
 const PAGE: &str = include_str!("page.html");
 
-/// How long the HTTP server may take to stop.
+/// How long each part of stopping the HTTP server may take: answering the
+/// requests it has taken up, then ending its runtime.
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Make a token: 32 bytes from the OS random source, hex-encoded.
@@ -65,11 +68,15 @@ pub(crate) fn bind_walking(port: u16) -> Result<TcpListener, PortWalkFailed> {
     })
 }
 
-/// A running HTTP server. Stops when dropped.
+/// A running HTTP server. Stops when dropped, which blocks: drop it on a
+/// plain thread.
 pub(crate) struct HttpServer {
     port: u16,
     token: String,
     stop: Option<oneshot::Sender<()>>,
+    /// The task serving requests. It ends once the server was told to stop
+    /// and has answered every request it had taken up.
+    serve_task: Option<JoinHandle<()>>,
     runtime: Option<Runtime>,
 }
 
@@ -95,6 +102,7 @@ pub(crate) fn spawn(
     let state = Arc::new(AppState { controller });
     let api = Router::new()
         .route("/status", get(status))
+        .route("/quit", post(quit))
         .with_state(state);
     let app = Router::new().route("/", get(page)).nest("/api", api);
     // Every request passes the security rules, the token among them, before
@@ -106,7 +114,7 @@ pub(crate) fn spawn(
         let _enter = runtime.enter();
         tokio::net::TcpListener::from_std(listener)?
     };
-    runtime.spawn(async move {
+    let serve_task = runtime.spawn(async move {
         let served = axum::serve(listener, app.into_make_service())
             .with_graceful_shutdown(async {
                 let _ = stopped.await;
@@ -122,6 +130,7 @@ pub(crate) fn spawn(
         port,
         token,
         stop: Some(stop),
+        serve_task: Some(serve_task),
         runtime: Some(runtime),
     })
 }
@@ -141,9 +150,16 @@ impl Drop for HttpServer {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
-        if let Some(runtime) = self.runtime.take() {
-            runtime.shutdown_timeout(STOP_TIMEOUT);
+        let Some(runtime) = self.runtime.take() else {
+            return;
+        };
+        if let Some(serve_task) = self.serve_task.take() {
+            // Ending the runtime cuts off a reply that is still on its way
+            // out, and the reply to Quit is on its way out about now.
+            let _ =
+                runtime.block_on(async { tokio::time::timeout(STOP_TIMEOUT, serve_task).await });
         }
+        runtime.shutdown_timeout(STOP_TIMEOUT);
     }
 }
 
@@ -153,4 +169,14 @@ async fn page() -> Html<&'static str> {
 
 async fn status(State(state): State<Arc<AppState>>) -> Json<Status> {
     Json(state.controller.status())
+}
+
+/// Quit: answer, and shut the Helper down. Whoever waits on the Helper (the
+/// binary's `main`) ends the process once that is done.
+async fn quit(State(state): State<Arc<AppState>>) -> StatusCode {
+    let controller = state.controller.clone();
+    // The shutdown blocks on the Transport's runtime, which panics on an
+    // async worker thread like this one.
+    tokio::task::spawn_blocking(move || controller.shutdown());
+    StatusCode::NO_CONTENT
 }

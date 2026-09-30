@@ -30,6 +30,8 @@
   button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
     border-radius: 7px; padding: 6px 12px; cursor: pointer; }
   button:disabled { opacity: .45; cursor: not-allowed; }
+  button.danger { color: var(--bad); }
+  .bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
   input.ticket { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace;
     border: 1px solid var(--line); border-radius: 7px; padding: 8px; background: var(--bg); color: var(--ink); }
   .step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; margin: 14px 0; }
@@ -49,8 +51,9 @@
 </head>
 <body>
 <main>
-  <div>
+  <div class="bar">
     <h1>datalink-mp</h1>
+    <div class="row"><button class="danger" id="quit">Quit</button></div>
   </div>
 
   <!-- One element per banner code; status says which are shown. -->
@@ -152,33 +155,74 @@
       ' · State: ' + (STATE_WORDS[s.state] || s.state);
   }
 
-  // The running Helper refuses this tab's token: the tab belongs to an
-  // earlier run, and nothing on it can work any more.
-  function showStale() {
+  // The three ways this tab's Helper comes to an end. Each replaces the page
+  // with its text, and nothing on the page works after that.
+  var ENDINGS = {
+    // The player pressed Quit, and the Helper said it is quitting.
+    quit: 'datalink-mp has quit. You can close this tab. Double-click datalink-mp to start it again.',
+    // The Helper stopped answering: its window was closed, or it crashed.
+    gone: 'The Helper isn\'t running any more.',
+    // The running Helper refuses this tab's token: the tab belongs to an earlier run.
+    stale: 'This tab is from an earlier run of datalink-mp. ' +
+      'Use the new tab, or double-click datalink-mp again.'
+  };
+  var ended = false;
+
+  function end(ending) {
+    if (ended) return;
+    ended = true;
     var main = document.createElement('main');
     var card = document.createElement('div');
     card.className = 'card';
-    card.textContent = 'This tab is from an earlier run of datalink-mp. ' +
-      'Use the new tab, or double-click datalink-mp again.';
+    card.textContent = ENDINGS[ending];
     main.appendChild(card);
     document.body.textContent = '';
     document.body.appendChild(main);
   }
 
-  var stale = false;
+  // How many polls in a row got no status from the Helper.
+  var failedPolls = 0;
+  var FAILED_POLLS_UNTIL_GONE = 3;
 
   function poll() {
     fetch('/api/status', { headers: { 'X-Token': token || '' }, cache: 'no-store' })
       .then(function (r) {
-        if (r.status === 403) { stale = true; return null; }
-        return r.ok ? r.json() : null;
+        if (r.status === 403) { end('stale'); return null; }
+        if (!r.ok) throw new Error('status ' + r.status);
+        return r.json();
       })
-      .then(function (s) { if (s) render(s); })
-      .catch(function () {})
+      .then(function (s) {
+        failedPolls = 0;
+        if (!s || ended) return;
+        // A status this page cannot show is not a Helper that went away.
+        try { render(s); } catch (e) {}
+      }, function () {
+        failedPolls++;
+        if (failedPolls >= FAILED_POLLS_UNTIL_GONE) end('gone');
+      })
       .then(function () {
-        if (stale) showStale(); else setTimeout(poll, 1000);
+        if (!ended) setTimeout(poll, 1000);
       });
   }
+
+  var quitButton = document.getElementById('quit');
+  quitButton.addEventListener('click', function () {
+    if (!confirm('Quit datalink-mp? Anyone connected through you will be disconnected.')) return;
+    quitButton.disabled = true;
+    fetch('/api/quit', {
+      method: 'POST',
+      headers: { 'X-Token': token || '', 'Content-Type': 'application/json' },
+      body: '{}'
+    }).then(function (r) {
+      if (r.ok) return end('quit');
+      if (r.status === 403) return end('stale');
+      // The Helper is still running and did not take the Quit.
+      quitButton.disabled = false;
+    }, function () {
+      // No answer at all: the Helper was gone before it could be told.
+      end('gone');
+    });
+  });
 
   ticketBox.addEventListener('click', function () { ticketBox.select(); });
   copyButton.addEventListener('click', function () {

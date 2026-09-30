@@ -305,6 +305,40 @@ fn test_ui_mode_prints_its_name_version_and_how_to_quit() {
     };
     let quit_line = helper.first_stdout_line().expect("a line on how to quit");
     assert!(quit_line.contains("Ctrl+C"), "got: {quit_line}");
+    assert!(
+        quit_line.contains("Quit on the page"),
+        "the line should mention the Quit button, got: {quit_line}"
+    );
+}
+
+#[test]
+fn test_ui_mode_exits_with_status_0_after_quit() {
+    let (ui_port, ipc_port) = (free_port(), free_port());
+    let args = ui_args(ui_port, ipc_port);
+    let mut helper = HelperProcess::spawn(&args.iter().map(String::as_str).collect::<Vec<_>>());
+    let Some(launch_url) = helper.launch_url() else {
+        return;
+    };
+    let (ui_port, token) = parse_launch_url(&launch_url);
+    // The game is open when the player quits.
+    let mut dll = poll_until(STARTUP_DEADLINE, || FakeDll::connect(ipc_port).ok())
+        .expect("the Helper should accept a DLL connection on its IPC port");
+    dll.handshake();
+
+    let answer = common::http_request(
+        ui_port,
+        "POST",
+        "/api/quit",
+        &[("X-Token", &token), ("Content-Type", "application/json")],
+    );
+
+    assert_eq!(answer.status, 204, "Quit should be answered before the Helper goes away");
+    let exit = helper
+        .wait_for_exit()
+        .expect("the Helper should exit after Quit, but it kept running");
+    assert_eq!(exit.status.code(), Some(0), "stderr: {}", exit.stderr);
+    // Release builds abort on a panic; this build only reports it here.
+    assert!(!exit.stderr.contains("panicked"), "Quit panicked: {}", exit.stderr);
 }
 
 #[test]

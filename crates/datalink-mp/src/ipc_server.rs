@@ -1,7 +1,7 @@
 //! IPC server: answers the DLL's requests over TCP localhost.
 //!
-//! The listener is bound once at startup and served on a plain thread for the
-//! life of the process.
+//! The listener is bound once at startup and served on a plain thread until
+//! the Helper shuts down.
 
 use crate::controller::SessionController;
 use anyhow::Result;
@@ -10,38 +10,179 @@ use ipc_protocol::{
     PlayerListEntry, QueuedMessage, SessionListEntry, PROTOCOL_VERSION,
 };
 use std::io::Write;
-use std::net::{TcpListener, TcpStream};
-use std::sync::Arc;
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 use tracing::{debug, debug_span, error, info, warn};
+
+/// How long waking the server's thread to stop it may take.
+const WAKE_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Bind the listener for DLL connections. Port 0 picks a free port.
 pub(crate) fn bind(port: u16) -> std::io::Result<TcpListener> {
     TcpListener::bind(("127.0.0.1", port))
 }
 
-/// Serve DLL connections on their own thread.
-pub(crate) fn spawn(listener: TcpListener, controller: Arc<SessionController>) -> JoinHandle<()> {
-    std::thread::spawn(move || serve(listener, &controller))
+/// A running IPC server. It runs until [`stop`](Self::stop)ped; dropping this
+/// leaves it running.
+pub(crate) struct IpcServer {
+    /// Where the server listens.
+    addr: SocketAddr,
+    stopper: Arc<Stopper>,
+    thread: JoinHandle<()>,
 }
 
-fn serve(listener: TcpListener, controller: &SessionController) {
+/// How the server is told to stop while its thread is blocked on a socket.
+#[derive(Default)]
+struct Stopper {
+    serving: Mutex<Serving>,
+}
+
+/// What the server's thread and whoever stops it agree on.
+#[derive(Default)]
+struct Serving {
+    /// Set once: the server serves no further connection.
+    stop_asked: bool,
+    /// The DLL connection being served, kept to end the read its thread is
+    /// blocked in.
+    client: Option<TcpStream>,
+}
+
+impl Stopper {
+    fn serving(&self) -> MutexGuard<'_, Serving> {
+        self.serving.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// The server's thread is about to serve `client`. False when the server
+    /// was asked to stop instead, and must not.
+    fn begin_serving(&self, client: &TcpStream) -> std::io::Result<bool> {
+        let mut serving = self.serving();
+        if serving.stop_asked {
+            return Ok(false);
+        }
+        serving.client = Some(client.try_clone()?);
+        Ok(true)
+    }
+
+    fn done_serving(&self) {
+        self.serving().client = None;
+    }
+
+    fn stop_asked(&self) -> bool {
+        self.serving().stop_asked
+    }
+
+    /// Serve no further connection, and end the one being served.
+    fn ask_to_stop(&self) {
+        let mut serving = self.serving();
+        serving.stop_asked = true;
+        if let Some(client) = serving.client.take() {
+            // The game's link ends here, as it would when the process exits.
+            let _ = client.shutdown(Shutdown::Both);
+        }
+    }
+}
+
+/// Serve DLL connections on `listener`, which is bound to `port`, on their
+/// own thread.
+pub(crate) fn spawn(
+    listener: TcpListener,
+    port: u16,
+    controller: Arc<SessionController>,
+) -> IpcServer {
+    let stopper = Arc::new(Stopper::default());
+    let thread = {
+        let stopper = stopper.clone();
+        std::thread::spawn(move || {
+            let _ends_the_helper = ShutDownOnPanic(&controller);
+            serve(listener, &controller, &stopper)
+        })
+    };
+    IpcServer {
+        addr: SocketAddr::from(([127, 0, 0, 1], port)),
+        stopper,
+        thread,
+    }
+}
+
+/// A Helper whose IPC server died is of no use to the game: shut it down, so
+/// that whoever waits on the Helper finds the panic instead of waiting on.
+struct ShutDownOnPanic<'a>(&'a SessionController);
+
+impl Drop for ShutDownOnPanic<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.0.shutdown();
+        }
+    }
+}
+
+impl IpcServer {
+    /// Stop serving, end the DLL connection being served and release the port
+    /// (blocking). An error is the panic the server's thread died of.
+    ///
+    /// The thread finishes the request it is answering first. Shut the
+    /// Transport down before this, so that a request waiting on it returns.
+    pub(crate) fn stop(self) -> std::thread::Result<()> {
+        self.stopper.ask_to_stop();
+        // The thread is most likely blocked accepting; a connection is what
+        // wakes it, and it then sees that it was asked to stop.
+        let woken = TcpStream::connect_timeout(&self.addr, WAKE_TIMEOUT).is_ok();
+        if !woken && !self.ends_within(WAKE_TIMEOUT) {
+            // Waiting for a thread that nothing wakes would never end. It
+            // keeps the port.
+            warn!("Could not wake the IPC server to stop it; leaving it behind");
+            return Ok(());
+        }
+        self.thread.join()
+    }
+
+    /// Whether the server's thread ends by itself within `timeout`. Nothing
+    /// listens on its port any more when it is ending on a panic, or has ended.
+    fn ends_within(&self, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while !self.thread.is_finished() {
+            if Instant::now() > deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+}
+
+fn serve(listener: TcpListener, controller: &SessionController, stopper: &Stopper) {
     // Accept connections (single-threaded for simplicity - one DLL at a time)
     for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                info!("Client connected from {:?}", stream.peer_addr());
-                if let Err(e) = handle_client(stream, controller) {
-                    error!("Client error: {:?}", e);
-                }
-                // The connection is over, cleanly or not.
-                controller.dll_disconnected();
-                info!("Client disconnected");
-            }
+        let stream = match stream {
+            Ok(stream) => stream,
             Err(e) => {
                 error!("Accept error: {:?}", e);
+                if stopper.stop_asked() {
+                    break;
+                }
+                continue;
+            }
+        };
+        match stopper.begin_serving(&stream) {
+            Ok(true) => {}
+            // Asked to stop: this is the connection that woke the accept.
+            Ok(false) => break,
+            Err(e) => {
+                // A connection that could not be ended later is not served.
+                error!("Client error: {:?}", e);
+                continue;
             }
         }
+        info!("Client connected from {:?}", stream.peer_addr());
+        if let Err(e) = handle_client(stream, controller) {
+            error!("Client error: {:?}", e);
+        }
+        stopper.done_serving();
+        // The connection is over, cleanly or not.
+        controller.dll_disconnected();
+        info!("Client disconnected");
     }
 }
 

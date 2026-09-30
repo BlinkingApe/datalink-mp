@@ -3,12 +3,13 @@
 //!
 //! The IPC server and the command line both go through the controller, so
 //! there is one place that knows which Transport is current. The IPC server
-//! also reports here what it sees of the game's DLL.
+//! also reports here what it sees of the game's DLL. Shutting the controller
+//! down closes the Transport for good, and is how the Helper ends.
 
 use iroh_transport::{Transport, TransportOptions, TransportResult, STREAM_PROTO_VERSION};
 use serde::Serialize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use tracing::info;
 
 /// The Ticket sequence number of the Ticket the Helper starts with.
@@ -59,6 +60,10 @@ pub struct SessionController {
     ipc_port_in_use: bool,
     game_connected: AtomicBool,
     ipc_version_mismatch: AtomicBool,
+    /// Whether the Helper has shut down. Held while it does, so that a second
+    /// shutdown waits for the first instead of racing it.
+    shut_down: Mutex<bool>,
+    shut_down_signal: Condvar,
 }
 
 impl SessionController {
@@ -84,6 +89,8 @@ impl SessionController {
             ipc_port_in_use,
             game_connected: AtomicBool::new(false),
             ipc_version_mismatch: AtomicBool::new(false),
+            shut_down: Mutex::new(false),
+            shut_down_signal: Condvar::new(),
         })
     }
 
@@ -144,6 +151,37 @@ impl SessionController {
         self.transport().connect_to_peer(ticket)?;
         info!("Connected to host!");
         Ok(())
+    }
+
+    /// Shut the Helper down: close every peer connection and the endpoint
+    /// gracefully, so the connected Helpers notice at once (blocking).
+    ///
+    /// This is what Quit does, and it ends the Helper: whoever waits in
+    /// [`wait_for_shutdown`](Self::wait_for_shutdown) is woken once the
+    /// Transport is closed. Shutting down again does nothing.
+    ///
+    /// Takes up to `Transport::SHUTDOWN_TIMEOUT`, waiting on the Transport's
+    /// runtime: from async code, call it inside `spawn_blocking`.
+    pub fn shutdown(&self) {
+        let mut shut_down = self.shut_down.lock().unwrap_or_else(PoisonError::into_inner);
+        if *shut_down {
+            return;
+        }
+        info!("Shutting down");
+        self.transport.shutdown();
+        *shut_down = true;
+        self.shut_down_signal.notify_all();
+    }
+
+    /// Block until the Helper has shut down.
+    pub(crate) fn wait_for_shutdown(&self) {
+        let mut shut_down = self.shut_down.lock().unwrap_or_else(PoisonError::into_inner);
+        while !*shut_down {
+            shut_down = self
+                .shut_down_signal
+                .wait(shut_down)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
     }
 }
 
