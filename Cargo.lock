@@ -697,6 +697,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "data-encoding",
  "dp-types",
  "getrandom 0.3.4",
  "hex",
@@ -704,9 +705,11 @@ dependencies = [
  "iroh-transport",
  "serde",
  "serde_json",
+ "sha2",
  "subtle",
  "thiserror 2.0.18",
  "tokio",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]
@@ -795,6 +798,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer",
+ "const-oid",
  "crypto-common 0.2.2",
 ]
 

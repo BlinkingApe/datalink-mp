@@ -4,26 +4,22 @@
 //! of the Helper stays synchronous. Handlers use only non-blocking reads of
 //! the Session controller.
 
+mod guard;
+
 use crate::controller::{SessionController, Status};
-use axum::extract::{Request, State};
-use axum::http::{HeaderMap, StatusCode};
-use axum::middleware::{self, Next};
-use axum::response::{Html, Response};
+use axum::extract::State;
+use axum::response::Html;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::{Json, Router, ServiceExt};
 use std::net::TcpListener;
 use std::sync::Arc;
 use std::time::Duration;
-use subtle::ConstantTimeEq;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
 use tracing::info;
 
 /// The page, embedded in the binary.
 const PAGE: &str = include_str!("page.html");
-
-/// The header that carries the token on API requests.
-const TOKEN_HEADER: &str = "x-token";
 
 /// How long the HTTP server may take to stop.
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -50,7 +46,6 @@ pub(crate) struct HttpServer {
 
 struct AppState {
     controller: Arc<SessionController>,
-    token: String,
 }
 
 /// Serve the page and the API on `listener`.
@@ -68,15 +63,14 @@ pub(crate) fn spawn(
         .enable_all()
         .build()?;
 
-    let state = Arc::new(AppState {
-        controller,
-        token: token.clone(),
-    });
+    let state = Arc::new(AppState { controller });
     let api = Router::new()
         .route("/status", get(status))
-        .layer(middleware::from_fn_with_state(state.clone(), require_token))
         .with_state(state);
     let app = Router::new().route("/", get(page)).nest("/api", api);
+    // Every request passes the security rules, the token among them, before
+    // it reaches any of the routes above. See `guard`.
+    let app = guard::protect(app, guard::Guard::new(port, &token, PAGE));
 
     let (stop, stopped) = oneshot::channel::<()>();
     let listener = {
@@ -84,7 +78,7 @@ pub(crate) fn spawn(
         tokio::net::TcpListener::from_std(listener)?
     };
     runtime.spawn(async move {
-        let served = axum::serve(listener, app)
+        let served = axum::serve(listener, app.into_make_service())
             .with_graceful_shutdown(async {
                 let _ = stopped.await;
             })
@@ -121,25 +115,6 @@ impl Drop for HttpServer {
         if let Some(runtime) = self.runtime.take() {
             runtime.shutdown_timeout(STOP_TIMEOUT);
         }
-    }
-}
-
-/// Refuse API requests that do not carry the token.
-async fn require_token(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    request: Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    let given = headers
-        .get(TOKEN_HEADER)
-        .map(|v| v.as_bytes())
-        .unwrap_or_default();
-    // Constant time in the token's bytes; a length difference is not a secret.
-    if bool::from(given.ct_eq(state.token.as_bytes())) {
-        Ok(next.run(request).await)
-    } else {
-        Err(StatusCode::FORBIDDEN)
     }
 }
 

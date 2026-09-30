@@ -24,3 +24,9 @@ subtle = "2.6.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 hex = { workspace = true }
+tower = { version = "0.5", default-features = false }
+sha2 = "0.11"
+data-encoding = { workspace = true }
+
+[dev-dependencies]
+tower = { version = "0.5", default-features = false, features = ["util"] }

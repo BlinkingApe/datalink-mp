@@ -69,6 +69,9 @@
 </main>
 
 <script>
+// The Content-Security-Policy lets this one script block run, by its hash,
+// and nothing else: no inline event handlers (onclick="…"), no scripts with
+// attributes, no eval, and fetch() only to this server.
 (function () {
   'use strict';
 
@@ -111,12 +114,32 @@
       ' · State: ' + (STATE_WORDS[s.state] || s.state);
   }
 
+  // The running Helper refuses this tab's token: the tab belongs to an
+  // earlier run, and nothing on it can work any more.
+  function showStale() {
+    var main = document.createElement('main');
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.textContent = 'This tab is from an earlier run of datalink-mp. ' +
+      'Use the new tab, or double-click datalink-mp again.';
+    main.appendChild(card);
+    document.body.textContent = '';
+    document.body.appendChild(main);
+  }
+
+  var stale = false;
+
   function poll() {
     fetch('/api/status', { headers: { 'X-Token': token || '' }, cache: 'no-store' })
-      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (r) {
+        if (r.status === 403) { stale = true; return null; }
+        return r.ok ? r.json() : null;
+      })
       .then(function (s) { if (s) render(s); })
       .catch(function () {})
-      .then(function () { setTimeout(poll, 1000); });
+      .then(function () {
+        if (stale) showStale(); else setTimeout(poll, 1000);
+      });
   }
 
   ticketBox.addEventListener('click', function () { ticketBox.select(); });
