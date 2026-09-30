@@ -14,6 +14,7 @@ fn test_config(ipc_port: u16) -> Config {
     Config {
         ipc_port,
         transport_options: TransportOptions::default(),
+        ui: None,
     }
 }
 
@@ -116,5 +117,6 @@ fn test_start_fails_with_an_ipc_bind_error_when_the_ipc_port_is_taken() {
         Err(StartError::IpcBind(_)) => {}
         Err(StartError::Transport(e)) => note_transport_unavailable(&e),
         Ok(_) => panic!("start should fail while another program holds the IPC port"),
+        Err(e) => panic!("expected an IPC bind error, got {e:?}"),
     }
 }

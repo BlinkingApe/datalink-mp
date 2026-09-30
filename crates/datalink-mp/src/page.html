@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>datalink-mp</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --ink: #1c2330; --muted: #5d6778; --line: #dde1e8;
+    --accent: #1f6feb; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e;
+    --okbg: #dafbe1; --warnbg: #fff8c5; --badbg: #ffebe9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1419; --card: #182029; --ink: #e6edf3; --muted: #8d98a8; --line: #2b3440;
+      --accent: #4c8dff; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
+      --okbg: #12301c; --warnbg: #332a0e; --badbg: #3a1418;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 18px; margin: 0; }
+  h2 { font-size: 15px; margin: 3px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+  .muted { color: var(--muted); }
+  .small { font-size: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  input.ticket { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace;
+    border: 1px solid var(--line); border-radius: 7px; padding: 8px; background: var(--bg); color: var(--ink); }
+  .step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; margin: 14px 0; }
+  .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
+    border: 2px solid var(--line); color: var(--muted); }
+  .num.done { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .num.now { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>datalink-mp</h1>
+  </div>
+
+  <div class="card">
+    <div class="step"><div class="num" id="num1">1</div>
+      <div><h2>Game folder</h2></div></div>
+
+    <div class="step"><div class="num" id="num2">2</div>
+      <div><h2>Share or paste a Ticket</h2>
+        <div class="small muted">Your Ticket</div>
+        <input class="ticket" id="ticket" readonly>
+        <div class="row" style="margin-top:6px">
+          <button id="copy" disabled>Copy Ticket</button>
+        </div>
+      </div></div>
+
+    <div class="step"><div class="num" id="num3">3</div>
+      <div><h2>Start the game</h2></div></div>
+
+    <div class="step"><div class="num" id="num4">4</div>
+      <div><h2>Play</h2></div></div>
+  </div>
+
+  <p class="small muted" id="footer">Loading…</p>
+</main>
+
+<script>
+(function () {
+  'use strict';
+
+  // The token comes in the address as ?t=. Keep it for reloads, and take it
+  // out of the address bar and the history.
+  var token = null;
+  try {
+    var fromUrl = new URLSearchParams(location.search).get('t');
+    if (fromUrl) {
+      sessionStorage.setItem('token', fromUrl);
+      history.replaceState(null, '', location.pathname);
+    }
+    token = sessionStorage.getItem('token');
+  } catch (e) {}
+
+  var STATE_WORDS = { ready: 'Ready', joining: 'Connecting…', joined: 'Joined', hosting: 'Hosting' };
+  var ticketBox = document.getElementById('ticket');
+  var copyButton = document.getElementById('copy');
+
+  function setStep(n, done, now) {
+    var el = document.getElementById('num' + n);
+    el.className = 'num' + (done ? ' done' : now ? ' now' : '');
+    el.textContent = done ? '✓' : String(n);
+  }
+
+  function render(s) {
+    if (ticketBox.value !== s.ticket) ticketBox.value = s.ticket;
+    copyButton.disabled = !s.ticket;
+
+    // The Helper computes the state; the page only decides which steps are ticked.
+    var connected = s.state === 'joined' || s.state === 'hosting';
+    setStep(1, false, false);
+    setStep(2, connected, !connected);
+    setStep(3, false, false);
+    setStep(4, false, false);
+
+    document.getElementById('footer').textContent =
+      'Release ' + s.release_version +
+      ' (IPC v' + s.ipc_version + ' · Peer protocol v' + s.peer_protocol_version + ')' +
+      ' · State: ' + (STATE_WORDS[s.state] || s.state);
+  }
+
+  function poll() {
+    fetch('/api/status', { headers: { 'X-Token': token || '' }, cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) { if (s) render(s); })
+      .catch(function () {})
+      .then(function () { setTimeout(poll, 1000); });
+  }
+
+  ticketBox.addEventListener('click', function () { ticketBox.select(); });
+  copyButton.addEventListener('click', function () {
+    var text = ticketBox.value;
+    var done = function () {
+      copyButton.textContent = 'Copied ✓';
+      setTimeout(function () { copyButton.textContent = 'Copy Ticket'; }, 1200);
+    };
+    // Where the clipboard is blocked, leave the Ticket selected to copy by hand.
+    var fallback = function () { ticketBox.focus(); ticketBox.select(); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
+  });
+
+  poll();
+})();
+</script>
+</body>
+</html>

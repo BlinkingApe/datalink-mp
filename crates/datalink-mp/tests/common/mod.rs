@@ -6,7 +6,7 @@
 use ipc_protocol::{
     decode_response, encode_request, read_message, IpcRequest, IpcResponse, PROTOCOL_VERSION,
 };
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
@@ -94,4 +94,91 @@ pub fn free_port() -> u16 {
 /// expected in sandboxed environments.
 pub fn note_transport_unavailable(detail: &dyn std::fmt::Debug) {
     eprintln!("Transport creation failed (expected in sandboxed environments): {detail:?}");
+}
+
+/// What an HTTP client sees of one response.
+pub struct HttpResponse {
+    pub status: u16,
+    /// Header names lowercased.
+    pub headers: Vec<(String, String)>,
+    pub body: String,
+}
+
+impl HttpResponse {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// The body parsed as JSON.
+    pub fn json(&self) -> serde_json::Value {
+        serde_json::from_str(&self.body)
+            .unwrap_or_else(|e| panic!("body should be JSON ({e}): {}", self.body))
+    }
+}
+
+/// GET `path` from the UI on `ui_port`, with the given extra headers.
+pub fn http_get(ui_port: u16, path: &str, headers: &[(&str, &str)]) -> HttpResponse {
+    http_request(ui_port, "GET", path, headers)
+}
+
+/// Send one HTTP/1.1 request to the UI on `ui_port` and read the whole reply.
+///
+/// A raw client on purpose: tests need to control headers such as `Host`.
+pub fn http_request(
+    ui_port: u16,
+    method: &str,
+    path: &str,
+    headers: &[(&str, &str)],
+) -> HttpResponse {
+    let mut stream = TcpStream::connect(("127.0.0.1", ui_port)).expect("the UI should accept connections");
+    stream.set_read_timeout(Some(REPLY_DEADLINE)).unwrap();
+    stream.set_write_timeout(Some(REPLY_DEADLINE)).unwrap();
+
+    let mut request = format!("{method} {path} HTTP/1.1\r\nConnection: close\r\n");
+    if !headers.iter().any(|(n, _)| n.eq_ignore_ascii_case("host")) {
+        request.push_str(&format!("Host: 127.0.0.1:{ui_port}\r\n"));
+    }
+    for (name, value) in headers {
+        request.push_str(&format!("{name}: {value}\r\n"));
+    }
+    request.push_str("\r\n");
+    stream.write_all(request.as_bytes()).expect("request should be written");
+
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).expect("response should be read to the end");
+    let raw = String::from_utf8_lossy(&raw).into_owned();
+
+    let (head, body) = raw.split_once("\r\n\r\n").expect("response should have a head");
+    let mut lines = head.split("\r\n");
+    let status = lines
+        .next()
+        .and_then(|l| l.split(' ').nth(1))
+        .and_then(|s| s.parse().ok())
+        .expect("response should have a status line");
+    let headers = lines
+        .filter_map(|l| l.split_once(':'))
+        .map(|(n, v)| (n.trim().to_ascii_lowercase(), v.trim().to_string()))
+        .collect::<Vec<_>>();
+    let body = if headers.iter().any(|(n, v)| n == "transfer-encoding" && v == "chunked") {
+        dechunk(body)
+    } else {
+        body.to_string()
+    };
+    HttpResponse { status, headers, body }
+}
+
+fn dechunk(mut rest: &str) -> String {
+    let mut out = String::new();
+    while let Some((size, after)) = rest.split_once("\r\n") {
+        let size = usize::from_str_radix(size.trim(), 16).expect("chunk size");
+        if size == 0 {
+            break;
+        }
+        out.push_str(&after[..size]);
+        rest = &after[size + 2..];
+    }
+    out
 }

@@ -4,9 +4,10 @@
 //! The DLL running in Wine connects to this helper via TCP localhost.
 //! It is a thin command line over the `datalink_mp` library.
 //!
-//! ## Subcommands
+//! ## Modes
 //!
-//! - `host`: Host a multiplayer session (default behavior)
+//! - no subcommand: start the web UI (the player's browser opens the page)
+//! - `host`: Host a multiplayer session and print the Ticket
 //! - `join`: Join an existing session via ticket
 //!
 //! ## Logging
@@ -16,7 +17,7 @@
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use datalink_mp::{Config, Helper};
+use datalink_mp::{Config, Helper, UiConfig};
 use ipc_protocol::DEFAULT_PORT;
 use iroh_transport::TransportOptions;
 use tracing::info;
@@ -28,7 +29,22 @@ use tracing_subscriber::prelude::*;
 struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
+
+    /// Port to serve the page on (UI mode)
+    #[arg(long, env = "SMAC_UI_PORT", default_value_t = DEFAULT_UI_PORT)]
+    ui_port: u16,
+
+    /// Port to listen on for DLL connections (UI mode)
+    #[arg(short, long, default_value_t = DEFAULT_PORT)]
+    port: u16,
+
+    /// Do not open the browser (UI mode)
+    #[arg(long)]
+    no_browser: bool,
 }
+
+/// The port the page is served on unless told otherwise
+const DEFAULT_UI_PORT: u16 = 47700;
 
 #[derive(Subcommand, Debug)]
 enum Command {
@@ -95,11 +111,38 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        // Default to host mode if no subcommand given (backwards compatibility)
-        None => run_host(DEFAULT_PORT),
+        None => run_ui(cli.port, cli.ui_port, cli.no_browser),
         Some(Command::Host { port }) => run_host(port),
         Some(Command::Join { port, ticket }) => run_join(port, ticket),
     }
+}
+
+/// Run the web UI: start the Helper with its page and serve until quit
+fn run_ui(port: u16, ui_port: u16, no_browser: bool) -> Result<()> {
+    let ipc_port = resolve_ipc_port(port);
+    info!("datalink-mp starting in UI mode on port {}", ipc_port);
+
+    let helper = datalink_mp::start(Config {
+        ipc_port,
+        transport_options: TransportOptions::default(),
+        ui: Some(UiConfig {
+            port: ui_port,
+            token: datalink_mp::generate_token()?,
+            // The per-OS openers come later; for now the player opens the printed URL.
+            browser_opener: (!no_browser).then(|| Box::new(|_: &str| {}) as datalink_mp::BrowserOpener),
+        }),
+    })?;
+
+    // The launch URL carries the token: printing it here is the only place it appears.
+    println!("datalink-mp {}", env!("CARGO_PKG_VERSION"));
+    println!(
+        "{}",
+        helper.launch_url().expect("a Helper started with a UI has a launch URL")
+    );
+    println!("Open the address above in your browser. Press Ctrl+C in this window to quit.");
+
+    helper.wait();
+    Ok(())
 }
 
 /// Run in host mode - start the Helper and serve DLL connections
@@ -139,6 +182,7 @@ fn start_helper(ipc_port: u16) -> Result<Helper> {
     let helper = datalink_mp::start(Config {
         ipc_port,
         transport_options: TransportOptions::default(),
+        ui: None,
     })?;
 
     // Print ticket to stdout (NOT to log file) so it can be captured

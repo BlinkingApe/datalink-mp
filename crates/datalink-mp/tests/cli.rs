@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::{free_port, hold_port, note_transport_unavailable, poll_until, FakeDll};
+use common::{free_port, hold_port, http_get, note_transport_unavailable, poll_until, FakeDll};
 use iroh_transport::{Ticket, Transport};
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -113,6 +113,19 @@ impl HelperProcess {
         }
     }
 
+    /// The launch URL, printed on standard output in UI mode.
+    ///
+    /// None when the Helper could not create a Transport (sandboxed
+    /// environments); the test then returns early.
+    fn launch_url(&mut self) -> Option<String> {
+        loop {
+            let line = self.first_stdout_line()?;
+            if line.starts_with("http://") {
+                return Some(line);
+            }
+        }
+    }
+
     /// Wait for the process to exit by itself, and collect what it wrote to
     /// standard error. None if it is still running at the deadline.
     fn wait_for_exit(&mut self) -> Option<Exit> {
@@ -179,18 +192,157 @@ fn test_host_prefers_smac_helper_port_over_the_port_flag() {
     assert_handshake_carries_ticket(env_port, &ticket);
 }
 
+/// The UI-mode command line: page served on `ui_port`, DLL connections on `ipc_port`.
+fn ui_args(ui_port: u16, ipc_port: u16) -> Vec<String> {
+    vec![
+        "--no-browser".into(),
+        "--ui-port".into(),
+        ui_port.to_string(),
+        "--port".into(),
+        ipc_port.to_string(),
+    ]
+}
+
+/// Split a launch URL into the UI port and the token.
+fn parse_launch_url(url: &str) -> (u16, String) {
+    let rest = url
+        .strip_prefix("http://127.0.0.1:")
+        .unwrap_or_else(|| panic!("the launch URL should be on 127.0.0.1, got {url}"));
+    let (port, query) = rest.split_once("/?t=").expect("the launch URL should carry ?t=");
+    (port.parse().expect("the launch URL should name a port"), query.to_string())
+}
+
+/// Assert that the page is served at the launch URL and the token opens the API.
+fn assert_page_and_status_are_served(launch_url: &str) -> serde_json::Value {
+    let (ui_port, token) = parse_launch_url(launch_url);
+    let page = poll_until(STARTUP_DEADLINE, || {
+        std::panic::catch_unwind(|| http_get(ui_port, "/", &[])).ok()
+    })
+    .expect("the page should be served");
+    assert_eq!(page.status, 200);
+    assert!(page.body.contains("datalink-mp"));
+
+    let status = http_get(ui_port, "/api/status", &[("X-Token", &token)]);
+    assert_eq!(status.status, 200);
+    status.json()
+}
+
 #[test]
-fn test_no_subcommand_behaves_as_host() {
-    let ipc_port = free_port();
-    let mut helper =
-        HelperProcess::spawn_with_env(&[], &[("SMAC_HELPER_PORT", &ipc_port.to_string())]);
+fn test_no_subcommand_starts_the_ui_and_prints_the_launch_url() {
+    let (ui_port, ipc_port) = (free_port(), free_port());
+    let args = ui_args(ui_port, ipc_port);
+    let mut helper = HelperProcess::spawn(&args.iter().map(String::as_str).collect::<Vec<_>>());
+
+    let Some(launch_url) = helper.launch_url() else {
+        return;
+    };
+
+    let status = assert_page_and_status_are_served(&launch_url);
+    assert_eq!(status["ipc_port"], ipc_port);
+    assert_eq!(parse_launch_url(&launch_url).0, ui_port);
+    // The DLL side is served too.
+    let printed = status["ticket"].as_str().unwrap().to_string();
+    assert_handshake_carries_ticket(ipc_port, &printed);
+}
+
+#[test]
+fn test_ui_port_flag_wins_over_smac_ui_port() {
+    // The port in the environment stays taken for the whole test: a Helper
+    // that preferred it over the flag could not start.
+    let (_holder, env_port) = hold_port();
+    let (flag_port, ipc_port) = (free_port(), free_port());
+    let args = ui_args(flag_port, ipc_port);
+    let mut helper = HelperProcess::spawn_with_env(
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+        &[("SMAC_UI_PORT", &env_port.to_string())],
+    );
+
+    let Some(launch_url) = helper.launch_url() else {
+        return;
+    };
+
+    assert_eq!(parse_launch_url(&launch_url).0, flag_port);
+    assert_page_and_status_are_served(&launch_url);
+}
+
+#[test]
+fn test_smac_ui_port_chooses_the_ui_port() {
+    let (env_port, ipc_port) = (free_port(), free_port());
+    let mut helper = HelperProcess::spawn_with_env(
+        &["--no-browser", "--port", &ipc_port.to_string()],
+        &[("SMAC_UI_PORT", &env_port.to_string())],
+    );
+
+    let Some(launch_url) = helper.launch_url() else {
+        return;
+    };
+
+    assert_eq!(parse_launch_url(&launch_url).0, env_port);
+    assert_page_and_status_are_served(&launch_url);
+}
+
+#[test]
+fn test_ui_mode_prints_its_name_version_and_how_to_quit() {
+    let (ui_port, ipc_port) = (free_port(), free_port());
+    let args = ui_args(ui_port, ipc_port);
+    let mut helper = HelperProcess::spawn(&args.iter().map(String::as_str).collect::<Vec<_>>());
 
     let Some(first_line) = helper.first_stdout_line() else {
         return;
     };
-    Ticket::parse(&first_line).expect("the first line of standard output should be a Ticket");
+    assert_eq!(first_line, format!("datalink-mp {}", env!("CARGO_PKG_VERSION")));
+    let Some(_) = helper.launch_url() else {
+        return;
+    };
+    let quit_line = helper.first_stdout_line().expect("a line on how to quit");
+    assert!(quit_line.contains("Ctrl+C"), "got: {quit_line}");
+}
 
-    assert_handshake_carries_ticket(ipc_port, &first_line);
+#[test]
+fn test_ui_mode_never_writes_the_token_to_the_log_file() {
+    let (ui_port, ipc_port) = (free_port(), free_port());
+    let log_path = std::env::temp_dir().join(format!("datalink-mp-test-{ipc_port}.log"));
+    let _ = std::fs::remove_file(&log_path);
+    let args = ui_args(ui_port, ipc_port);
+    let mut helper = HelperProcess::spawn_with_env(
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+        &[("SMAC_HELPER_LOG_FILE", log_path.to_str().unwrap())],
+    );
+
+    let Some(launch_url) = helper.launch_url() else {
+        return;
+    };
+    let (_, token) = parse_launch_url(&launch_url);
+    assert_page_and_status_are_served(&launch_url);
+    // A request with the wrong token is logged too, whatever the level.
+    http_get(ui_port, "/api/status", &[("X-Token", "wrong")]);
+    drop(helper);
+
+    let log = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&log_path);
+    assert!(!log.is_empty(), "the log file should have been written");
+    assert!(!log.contains(&token), "the token was logged");
+}
+
+#[test]
+fn test_ui_mode_exits_with_an_error_when_the_ui_port_is_taken() {
+    let (_holder, taken_port) = hold_port();
+    let args = ui_args(taken_port, free_port());
+    let mut helper = HelperProcess::spawn(&args.iter().map(String::as_str).collect::<Vec<_>>());
+
+    let exit = helper
+        .wait_for_exit()
+        .expect("a taken UI port should be fatal, but the Helper kept running");
+    if exit.transport_unavailable() {
+        return;
+    }
+
+    assert!(!exit.status.success(), "expected an error exit, got {:?}", exit.status);
+    assert!(
+        exit.stderr.contains("Failed to bind UI port"),
+        "the error should say the UI port could not be bound, got: {}",
+        exit.stderr
+    );
 }
 
 #[test]
