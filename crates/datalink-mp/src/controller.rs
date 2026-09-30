@@ -23,6 +23,8 @@ const FIRST_TICKET_SEQ: u64 = 1;
 pub enum State {
     /// No peers, no dial in progress
     Ready,
+    /// At least one peer is connected and we did not dial
+    Hosting,
 }
 
 /// Something the page must tell the player, as a code the page has the words for.
@@ -53,7 +55,8 @@ pub struct Status {
     pub self_check: SelfCheck,
     /// Whether the game's DLL is connected to the Helper
     pub game_connected: bool,
-    /// Short IDs of the connected Helpers
+    /// Short IDs of the connected Helpers: iroh's short form of each endpoint
+    /// ID, sorted
     pub peers: Vec<String>,
     /// Codes of the active banners
     pub banners: Vec<Banner>,
@@ -119,6 +122,15 @@ impl SessionController {
     /// the folder's list of files.
     pub fn status(&self) -> Status {
         let transport = self.transport();
+        // A plain lock read, unlike the Transport's blocking calls.
+        let mut peers = transport
+            .connected_peers()
+            .iter()
+            .map(|id| id.fmt_short().to_string())
+            .collect::<Vec<_>>();
+        // The Transport lists them in no particular order; sorted, the page
+        // shows them the same way on every poll.
+        peers.sort();
         let mut banners = Vec::new();
         let self_check = platform::check_game_folder(&self.game_folder);
         if !self_check.passed {
@@ -135,14 +147,26 @@ impl SessionController {
             ipc_version: ipc_protocol::PROTOCOL_VERSION,
             peer_protocol_version: STREAM_PROTO_VERSION,
             os: OS,
-            state: State::Ready,
+            state: self.state(!peers.is_empty()),
             ticket: transport.our_ticket().to_string(),
             ticket_seq: FIRST_TICKET_SEQ,
             ipc_port: self.ipc_port,
             self_check,
             game_connected: self.game_connected.load(Ordering::Relaxed),
-            peers: Vec::new(),
+            peers,
             banners,
+        }
+    }
+
+    /// Where the Helper is in a session, given whether any Helper is connected
+    /// right now.
+    fn state(&self, peer_connected: bool) -> State {
+        if !peer_connected {
+            State::Ready
+        } else {
+            // Nothing records yet that we dialled, so whoever is connected
+            // counts as having dialled our Ticket.
+            State::Hosting
         }
     }
 

@@ -126,7 +126,10 @@
       </div></div>
 
     <div class="step"><div class="num" id="num4">4</div>
-      <div><h2>Play</h2></div></div>
+      <div><h2>Play</h2>
+        <div class="small" id="peers">No Helpers connected yet.</div>
+        <div class="small muted" id="keep-open" style="margin-top:6px"></div>
+      </div></div>
   </div>
 
   <p class="small muted" id="footer">Loading…</p>
@@ -157,6 +160,33 @@
   var banners = document.querySelectorAll('[data-banner]');
   var gamePill = document.getElementById('game-pill');
   var gameFolders = document.querySelectorAll('.game-folder');
+  var peersLine = document.getElementById('peers');
+  // What to keep open while playing, by the OS the Helper runs on.
+  var KEEP_OPEN = {
+    windows: 'Keep this browser tab and the console window open while you play.',
+    linux: 'Keep this browser tab open while you play. Closing it doesn\'t stop the Helper; Quit does.',
+    macos: 'Keep this tab and the Terminal window open while you play.'
+  };
+  // The peer list the page shows now, to leave the line alone while it is unchanged.
+  var shownPeers = null;
+
+  // "Connected", not "players": a Helper can be connected only to look for a game.
+  function renderPeers(peers) {
+    var key = peers.join(' ');
+    if (key === shownPeers) return;
+    shownPeers = key;
+    if (!peers.length) {
+      peersLine.textContent = 'No Helpers connected yet.';
+      return;
+    }
+    peersLine.textContent = peers.length + (peers.length === 1 ? ' Helper' : ' Helpers') + ' connected: ';
+    for (var i = 0; i < peers.length; i++) {
+      if (i > 0) peersLine.appendChild(document.createTextNode(', '));
+      var id = document.createElement('code');
+      id.textContent = peers[i];
+      peersLine.appendChild(id);
+    }
+  }
 
   function setStep(n, done, now) {
     var el = document.getElementById('num' + n);
@@ -180,7 +210,11 @@
     setStep(1, step1Done, !step1Done);
     setStep(2, connected, !connected);
     setStep(3, s.game_connected, !s.game_connected);
-    setStep(4, false, false);
+    // Step 4 is never ticked: it is the current step once steps 1 and 3 are done.
+    setStep(4, false, step1Done && s.game_connected);
+
+    renderPeers(s.peers);
+    document.getElementById('keep-open').textContent = KEEP_OPEN[s.os] || '';
 
     // The Helper decides which banners are active; the page has the words.
     document.getElementById('ipc-port').textContent = s.ipc_port;

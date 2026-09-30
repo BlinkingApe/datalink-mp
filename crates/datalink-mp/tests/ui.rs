@@ -1530,3 +1530,191 @@ fn test_ticket_is_still_in_status_when_the_self_check_fails() {
         .expect("a failed self-check blocks nothing: the Helper still has a Ticket");
     assert_eq!(status["state"], "ready");
 }
+
+// ---------------------------------------------------------------------------
+// Ticket 10: step 4, hosting and the connected Helpers
+//
+// A friend is a second real Transport on loopback that dials the Helper's
+// Ticket, the way a friend's Helper does; what the page would show of it is
+// read from status.
+// ---------------------------------------------------------------------------
+
+/// A friend's Transport. None when one cannot be created (sandboxed
+/// environments); the test then returns early.
+fn friend() -> Option<iroh_transport::Transport> {
+    match iroh_transport::Transport::new() {
+        Ok(friend) => Some(friend),
+        Err(e) => {
+            note_transport_unavailable(&e);
+            None
+        }
+    }
+}
+
+impl Started {
+    /// The Helper's Ticket, as the player would copy it from the page.
+    fn ticket(&self) -> String {
+        let status = self.status();
+        status["ticket"].as_str().expect("status should carry a Ticket").to_string()
+    }
+
+    /// Dial the Helper's Ticket from `friend`, the way a friend who was sent
+    /// the Ticket does.
+    fn is_dialled_by(&self, friend: &iroh_transport::Transport) {
+        friend
+            .connect_to_peer(&self.ticket())
+            .expect("the friend should reach the Helper on loopback");
+    }
+
+    /// Wait for status to report `state`.
+    fn wait_for_state(&self, state: &str) {
+        common::poll_until(PEER_NOTICE_DEADLINE, || (self.status()["state"] == state).then_some(()))
+            .unwrap_or_else(|| panic!("expected the state {state}, got {}", self.status()["state"]));
+    }
+
+    /// Wait for status to list exactly these short IDs as the connected Helpers.
+    fn wait_for_peers(&self, expected: &[String]) {
+        let expected = serde_json::json!(expected);
+        common::poll_until(PEER_NOTICE_DEADLINE, || (self.status()["peers"] == expected).then_some(()))
+            .unwrap_or_else(|| panic!("expected the peers {expected}, got {}", self.status()["peers"]));
+    }
+}
+
+#[test]
+fn test_friend_dialling_the_helpers_ticket_makes_the_state_hosting() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+    assert_eq!(started.status()["state"], "ready");
+
+    started.is_dialled_by(&friend);
+
+    started.wait_for_state("hosting");
+}
+
+/// The short ID the page shows for `transport`'s Helper: iroh's short form of
+/// its endpoint ID.
+fn short_id(transport: &iroh_transport::Transport) -> String {
+    transport.endpoint_id().fmt_short().to_string()
+}
+
+#[test]
+fn test_connected_friend_is_listed_by_its_short_id_and_lists_the_helper() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+    let helper_id = Ticket::parse(&started.ticket()).expect("the Ticket should parse").addr().id;
+
+    started.is_dialled_by(&friend);
+
+    started.wait_for_peers(&[short_id(&friend)]);
+    common::poll_until(PEER_NOTICE_DEADLINE, || {
+        friend.connected_peers().contains(&helper_id).then_some(())
+    })
+    .expect("the friend should list the Helper as connected");
+}
+
+#[test]
+fn test_peer_list_empties_and_the_state_returns_to_ready_when_the_friend_goes_away() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+    started.is_dialled_by(&friend);
+    started.wait_for_peers(&[short_id(&friend)]);
+
+    // The friend quit their Helper.
+    friend.shutdown();
+
+    started.wait_for_peers(&[]);
+    assert_eq!(started.status()["state"], "ready");
+}
+
+#[test]
+fn test_two_friends_give_two_entries_in_the_peer_list() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let (Some(first), Some(second)) = (friend(), friend()) else {
+        return;
+    };
+
+    started.is_dialled_by(&first);
+    started.is_dialled_by(&second);
+
+    // Sorted, so that the page lists them the same way on every poll.
+    let mut both = [short_id(&first), short_id(&second)];
+    both.sort();
+    started.wait_for_peers(&both);
+
+    // One friend leaves: the other is still connected, and still hosted.
+    first.shutdown();
+    started.wait_for_peers(&[short_id(&second)]);
+    assert_eq!(started.status()["state"], "hosting");
+}
+
+/// How long one status request may take. The page asks once a second, so a
+/// slower answer leaves it behind; an answer that waited on the Transport
+/// would be slower than this, or would not come at all.
+const STATUS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(1);
+
+#[test]
+fn test_status_is_answered_promptly_while_friends_connect_and_disconnect() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let (Some(first), Some(second), Some(third)) = (friend(), friend(), friend()) else {
+        return;
+    };
+    let friends = [first, second, third];
+    // Each friend's arrival and each departure may take this long to show.
+    let coming_and_going = PEER_NOTICE_DEADLINE * (2 * friends.len() as u32 + 1);
+
+    let (slowest, seen_hosting) = std::thread::scope(|scope| {
+        // The friends arrive one by one, then leave one by one.
+        let friends_come_and_go = scope.spawn(|| {
+            let mut connected = Vec::new();
+            for friend in &friends {
+                started.is_dialled_by(friend);
+                connected.push(short_id(friend));
+                connected.sort();
+                started.wait_for_peers(&connected);
+            }
+            for friend in &friends {
+                friend.shutdown();
+                connected.retain(|id| *id != short_id(friend));
+                started.wait_for_peers(&connected);
+            }
+        });
+
+        // Meanwhile the page keeps asking, as it does about once a second;
+        // here much more often.
+        let mut slowest = std::time::Duration::ZERO;
+        let mut seen_hosting = false;
+        common::poll_until(coming_and_going, || {
+            let asked = std::time::Instant::now();
+            let status = started.status();
+            slowest = slowest.max(asked.elapsed());
+            seen_hosting |= status["state"] == "hosting";
+            friends_come_and_go.is_finished().then_some(())
+        })
+        .expect("the friends should have come and gone by now");
+        friends_come_and_go.join().expect("the friends should come and go as status says");
+        (slowest, seen_hosting)
+    });
+
+    assert!(seen_hosting, "the page should have asked while the friends were connected");
+    assert!(
+        slowest <= STATUS_DEADLINE,
+        "a status request took {slowest:?} while friends connected and disconnected"
+    );
+    assert_eq!(started.status()["state"], "ready");
+}
