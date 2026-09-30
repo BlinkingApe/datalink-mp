@@ -8,6 +8,7 @@
 
 mod controller;
 mod http;
+mod instance;
 mod ipc_server;
 mod platform;
 
@@ -42,6 +43,10 @@ pub struct Config {
 /// Called with the launch URL to open the player's browser on it.
 pub type BrowserOpener = Box<dyn Fn(&str) + Send + Sync>;
 
+/// The application's name, as `GET /api/instance` reports it and as the
+/// binary prints it.
+pub const APP_NAME: &str = "datalink-mp";
+
 /// The web UI's configuration.
 pub struct UiConfig {
     /// Port to serve the page on, on 127.0.0.1. Port 0 picks a free port;
@@ -69,6 +74,11 @@ pub enum StartError {
 
     #[error("Failed to start the HTTP server")]
     HttpServer(#[source] std::io::Error),
+
+    /// Another Helper is running on this IPC port, and it has been asked to
+    /// show its page. Not a failure: the binary says so and exits with status 0.
+    #[error("datalink-mp is already running")]
+    AlreadyRunning,
 
     #[error("Failed to create transport")]
     Transport(#[source] TransportError),
@@ -102,6 +112,13 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
         // With a page to say so on, a port held by another program is not
         // fatal: the Helper runs without the game and shows a banner.
         Err(e) if config.ui.is_some() && e.kind() == std::io::ErrorKind::AddrInUse => {
+            // Unless the program holding it is a Helper: then the player has
+            // double-clicked a second time, and gets the running Helper's page.
+            if let Some(ui) = &config.ui {
+                if instance::show_running_helper(config.ipc_port, ui.port) {
+                    return Err(StartError::AlreadyRunning);
+                }
+            }
             warn!("IPC port {} is in use by another program", config.ipc_port);
             (None, config.ipc_port)
         }
@@ -148,9 +165,10 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
 
     let http = match (config.ui, ui_listener) {
         (Some(ui), Some(listener)) => {
-            let server = http::spawn(listener, controller.clone(), ui.token)
+            let opener = ui.browser_opener.map(Arc::new);
+            let server = http::spawn(listener, controller.clone(), ipc_port, ui.token, opener.clone())
                 .map_err(StartError::HttpServer)?;
-            if let Some(open) = ui.browser_opener {
+            if let Some(open) = opener {
                 open(&server.launch_url());
             }
             Some(server)

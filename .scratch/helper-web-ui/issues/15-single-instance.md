@@ -18,16 +18,16 @@ Tests use the seam 1 harness with the recording browser opener.
 
 **Blocked by:** 06 (Startup: browser opening, UI port walk, readable startup failure), 09 (Step 3: game link status)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] `GET /api/instance` without a token returns the application name, the Release version and the IPC port
-- [ ] `POST /api/show` without a token calls the browser opener with the launch URL
-- [ ] A second `POST /api/show` within the limit does not call the opener again
-- [ ] Both routes reject a wrong `Host`; `POST /api/show` rejects a foreign `Origin`
-- [ ] Neither route's response contains the token
-- [ ] A second start on the same IPC port returns "already running" and triggers the first Helper's opener
-- [ ] The built binary in that case prints "datalink-mp is already running" and exits with status 0
-- [ ] A second start on a different IPC port runs and takes the next UI port
-- [ ] A start while a non-Helper program holds the IPC port still gives a working UI with `ipc_port_in_use`
-- [ ] The first Helper is found when it is on a later port in the UI range, not only the default
-- [ ] The Helper writes no lock or state file
+- [x] `GET /api/instance` without a token returns the application name, the Release version and the IPC port
+- [x] `POST /api/show` without a token calls the browser opener with the launch URL
+- [x] A second `POST /api/show` within the limit does not call the opener again
+- [x] Both routes reject a wrong `Host`; `POST /api/show` rejects a foreign `Origin`
+- [x] Neither route's response contains the token
+- [x] A second start on the same IPC port returns "already running" and triggers the first Helper's opener
+- [x] The built binary in that case prints "datalink-mp is already running" and exits with status 0
+- [x] A second start on a different IPC port runs and takes the next UI port
+- [x] A start while a non-Helper program holds the IPC port still gives a working UI with `ipc_port_in_use`
+- [x] The first Helper is found when it is on a later port in the UI range, not only the default
+- [x] The Helper writes no lock or state file

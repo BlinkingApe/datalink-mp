@@ -7,14 +7,15 @@
 mod guard;
 
 use crate::controller::{SessionController, Status};
+use crate::BrowserOpener;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::Html;
 use axum::routing::{get, post};
 use axum::{Json, Router, ServiceExt};
 use std::net::TcpListener;
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -26,6 +27,11 @@ const PAGE: &str = include_str!("page.html");
 /// How long each part of stopping the HTTP server may take: answering the
 /// requests it has taken up, then ending its runtime.
 const STOP_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// The least time between two `POST /api/show` requests that are answered by
+/// opening the browser. The route needs no token, so this keeps a local
+/// program from opening tabs in a loop.
+const SHOW_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Make a token: 32 bytes from the OS random source, hex-encoded.
 pub fn generate_token() -> std::io::Result<String> {
@@ -82,13 +88,22 @@ pub(crate) struct HttpServer {
 
 struct AppState {
     controller: Arc<SessionController>,
+    /// The application name, the Release version and the IPC port, as
+    /// `GET /api/instance` answers them.
+    instance: serde_json::Value,
+    launch_url: String,
+    browser_opener: Option<Arc<BrowserOpener>>,
+    /// When the browser was last opened because a request asked for it.
+    last_shown: Mutex<Option<Instant>>,
 }
 
 /// Serve the page and the API on `listener`.
 pub(crate) fn spawn(
     listener: TcpListener,
     controller: Arc<SessionController>,
+    ipc_port: u16,
     token: String,
+    browser_opener: Option<Arc<BrowserOpener>>,
 ) -> std::io::Result<HttpServer> {
     let port = listener.local_addr()?.port();
     listener.set_nonblocking(true)?;
@@ -99,9 +114,21 @@ pub(crate) fn spawn(
         .enable_all()
         .build()?;
 
-    let state = Arc::new(AppState { controller });
+    let state = Arc::new(AppState {
+        instance: serde_json::json!({
+            "app": crate::APP_NAME,
+            "release_version": env!("CARGO_PKG_VERSION"),
+            "ipc_port": ipc_port,
+        }),
+        launch_url: launch_url(port, &token),
+        browser_opener,
+        last_shown: Mutex::new(None),
+        controller,
+    });
     let api = Router::new()
         .route("/status", get(status))
+        .route("/instance", get(instance))
+        .route("/show", post(show))
         .route("/quit", post(quit))
         .with_state(state);
     let app = Router::new().route("/", get(page)).nest("/api", api);
@@ -135,13 +162,17 @@ pub(crate) fn spawn(
     })
 }
 
+fn launch_url(port: u16, token: &str) -> String {
+    format!("http://127.0.0.1:{port}/?t={token}")
+}
+
 impl HttpServer {
     pub(crate) fn port(&self) -> u16 {
         self.port
     }
 
     pub(crate) fn launch_url(&self) -> String {
-        format!("http://127.0.0.1:{}/?t={}", self.port, self.token)
+        launch_url(self.port, &self.token)
     }
 }
 
@@ -184,5 +215,30 @@ async fn quit(State(state): State<Arc<AppState>>) -> StatusCode {
     // The shutdown blocks on the Transport's runtime, which panics on an
     // async worker thread like this one.
     tokio::task::spawn_blocking(move || controller.shutdown());
+    StatusCode::NO_CONTENT
+}
+
+/// Who is answering: the way a second Helper on the same IPC port finds this one.
+async fn instance(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(state.instance.clone())
+}
+
+/// Open the browser at this Helper's own launch URL, for a second Helper that
+/// was started on the same IPC port. The token never leaves this process.
+/// Answers 429 when it opened the browser less than [`SHOW_INTERVAL`] ago.
+async fn show(State(state): State<Arc<AppState>>) -> StatusCode {
+    {
+        let mut last_shown = state.last_shown.lock().unwrap();
+        let now = Instant::now();
+        if last_shown.is_some_and(|last| now.duration_since(last) < SHOW_INTERVAL) {
+            return StatusCode::TOO_MANY_REQUESTS;
+        }
+        *last_shown = Some(now);
+    }
+    if let Some(open) = state.browser_opener.clone() {
+        // The opener may start a program: keep it off the async worker.
+        let url = state.launch_url.clone();
+        tokio::task::spawn_blocking(move || open(&url));
+    }
     StatusCode::NO_CONTENT
 }
