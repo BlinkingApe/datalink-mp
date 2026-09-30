@@ -16,4 +16,5 @@ tokio = { workspace = true, features = ["net", "io-util", "fs", "process"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 clap = { version = "4", features = ["derive"] }
