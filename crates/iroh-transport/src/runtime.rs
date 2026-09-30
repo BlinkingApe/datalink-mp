@@ -952,6 +952,64 @@ impl Transport {
     pub fn get_player_data(&self, player_id: DPID, local: bool) -> Option<Vec<u8>> {
         self.session_manager.get_player_data(player_id, local)
     }
+
+    /// Endpoint IDs of the Helpers currently connected to this one.
+    ///
+    /// A plain lock read: it never enters the Transport's runtime, so unlike the
+    /// blocking calls above it is safe to call from async code (status requests).
+    /// These are connected Helpers, not players: a peer connected only for
+    /// session discovery is listed too.
+    pub fn connected_peers(&self) -> Vec<EndpointId> {
+        self.connection_manager.get_connected_peers()
+    }
+
+    /// Upper bound on how long `shutdown` blocks.
+    pub const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+    /// Close every peer connection and the endpoint gracefully (blocking).
+    ///
+    /// "Gracefully" means the connected Helpers are told: each gets a QUIC close
+    /// and sees the connection end at once, instead of waiting out the 30 s idle
+    /// timeout. Messages still queued for a peer are not flushed first.
+    ///
+    /// Blocks for at most `SHUTDOWN_TIMEOUT`; with a peer connected, expect about
+    /// a second while the closed connections drain, and the whole bound if a
+    /// peer vanished without closing. It waits on the Transport's
+    /// runtime, so it must NOT be called on an async worker thread (tokio panics,
+    /// and release builds abort on panic): from async code, call it inside
+    /// `spawn_blocking`. The same goes for dropping the last reference to a
+    /// Transport, before or after shutdown.
+    ///
+    /// Returns nothing because there is nothing for a caller to act on: the local
+    /// side is closed either way, and running out of time only means a close may
+    /// not have reached some peer (logged). Calling it again is a no-op.
+    ///
+    /// Afterwards this Transport is finished: `connected_peers()` is empty, dials
+    /// fail and nothing is accepted, though the plain reads (`our_ticket`,
+    /// `endpoint_id`, `session_manager`) still answer. A Transport cannot be
+    /// reopened; Stop creates a new one, which has a new Ticket.
+    pub fn shutdown(&self) {
+        // Close the connections ourselves first so peers get our close code and
+        // reason; the endpoint would otherwise close them with code 0 and no reason.
+        self.connection_manager.disconnect_all();
+
+        // Endpoint::close sends the close frames and waits until every connection
+        // has drained; without the wait they would be lost with the socket.
+        // It also ends the accept loop and fails any dial still in flight, so the
+        // per-connection tasks wind down on their own. iroh makes only the first
+        // close do anything, which is what makes a repeated shutdown safe.
+        // The close frames go out at once, so the timeout only cuts the drain
+        // short; left alone it can run slightly past 3 s for a vanished peer.
+        let closed = self.runtime.block_on(async {
+            tokio::time::timeout(Self::SHUTDOWN_TIMEOUT, self.endpoint.close()).await
+        });
+        if closed.is_err() {
+            warn!(
+                "Shutdown hit its {:?} bound before every connection drained",
+                Self::SHUTDOWN_TIMEOUT
+            );
+        }
+    }
 }
 
 impl Default for Transport {

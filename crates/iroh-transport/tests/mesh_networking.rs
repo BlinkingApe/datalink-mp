@@ -785,3 +785,246 @@ fn test_mesh_networking() {
     assert!(!host_ticket.is_empty());
     assert!(!client.our_ticket().is_empty());
 }
+
+/// How long a Helper may take to see a connect, or a graceful close, on loopback.
+/// Far below the 30 s QUIC idle timeout, which is the only way a peer learns of a
+/// close that was never delivered — so a poll with this deadline fails if
+/// `shutdown()` does not actually tell the other side.
+const PEER_NOTICE_DEADLINE: Duration = Duration::from_secs(2);
+
+/// Poll until `transport.connected_peers()` is exactly `expected`.
+fn peers_become(transport: &Transport, expected: &[iroh::EndpointId]) -> bool {
+    poll_until(PEER_NOTICE_DEADLINE, || {
+        (transport.connected_peers() == expected).then_some(())
+    })
+    .is_some()
+}
+
+/// Two Transports with `dialler` connected to `acceptor` by Ticket, each already
+/// listing the other as a connected Helper.
+fn create_connected_pair() -> Option<(Transport, Transport)> {
+    let acceptor = create_transport()?;
+    let dialler = create_transport()?;
+
+    dialler
+        .connect_to_peer(acceptor.our_ticket())
+        .expect("dial by Ticket should succeed on loopback");
+
+    assert!(
+        peers_become(&dialler, &[acceptor.endpoint_id()]),
+        "dialling side should list the Helper it dialled, got {:?}",
+        dialler.connected_peers()
+    );
+    // The accepting side registers the peer from its accept loop, slightly later.
+    assert!(
+        peers_become(&acceptor, &[dialler.endpoint_id()]),
+        "accepting side should list the Helper that dialled it, got {:?}",
+        acceptor.connected_peers()
+    );
+
+    Some((dialler, acceptor))
+}
+
+#[test]
+fn test_connected_peers_lists_peer_after_connect_on_both_sides() {
+    let acceptor = match create_transport() {
+        Some(t) => t,
+        None => return,
+    };
+    assert!(
+        acceptor.connected_peers().is_empty(),
+        "a fresh Transport has no connected Helpers"
+    );
+    drop(acceptor);
+
+    // The pair helper asserts both sides against the other's endpoint_id().
+    let _pair = create_connected_pair();
+}
+
+/// Status requests read the peer list from async code, where entering the
+/// Transport's own runtime would panic ("Cannot start a runtime from within a
+/// runtime"). The Transports are created and dropped outside the async block:
+/// both of those do block.
+#[test]
+fn test_connected_peers_can_be_called_from_async_context() {
+    let (dialler, acceptor) = match create_connected_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+
+    let status_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("test runtime");
+    let seen = status_runtime.block_on(async { dialler.connected_peers() });
+
+    assert_eq!(seen, vec![acceptor.endpoint_id()]);
+}
+
+/// Stop and Quit rely on the other Helper being told, not left to time out.
+#[test]
+fn test_connected_peer_notices_shutdown_promptly() {
+    let (dialler, acceptor) = match create_connected_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+
+    acceptor.shutdown();
+
+    // `acceptor` stays alive below, so this can only be the delivered close.
+    assert!(
+        peers_become(&dialler, &[]),
+        "peer should see the close within {:?}, still lists {:?}",
+        PEER_NOTICE_DEADLINE,
+        dialler.connected_peers()
+    );
+}
+
+#[test]
+fn test_shutdown_returns_within_its_bound_with_a_peer_connected() {
+    // The bound is 3 seconds; the slack covers scheduling, not a longer wait.
+    let bound = Duration::from_secs(3) + Duration::from_millis(500);
+
+    let (dialler, acceptor) = match create_connected_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+    let started = std::time::Instant::now();
+    dialler.shutdown();
+    let took = started.elapsed();
+    assert!(took <= bound, "shutdown took {:?}, over its 3 s bound", took);
+    drop(acceptor);
+
+    // The harder case: the peer vanished without closing (its Helper was
+    // killed), so the connection still looks open and nothing answers the close.
+    let (dialler, acceptor) = match create_connected_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+    drop(acceptor);
+    let started = std::time::Instant::now();
+    dialler.shutdown();
+    let took = started.elapsed();
+    assert!(
+        took <= bound,
+        "shutdown with a vanished peer took {:?}, over its 3 s bound",
+        took
+    );
+}
+
+#[test]
+fn test_connected_peers_drops_peer_after_disconnect_on_both_sides() {
+    // The dialling side goes away: the accepting side must stop listing it.
+    let (dialler, acceptor) = match create_connected_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+    dialler.shutdown();
+    assert!(
+        peers_become(&acceptor, &[]),
+        "accepting side still lists {:?} after the dialler disconnected",
+        acceptor.connected_peers()
+    );
+    assert!(
+        peers_become(&dialler, &[]),
+        "a shut-down Transport still lists {:?}",
+        dialler.connected_peers()
+    );
+
+    // The accepting side goes away: the dialling side must stop listing it.
+    let (dialler, acceptor) = match create_connected_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+    acceptor.shutdown();
+    assert!(
+        peers_become(&dialler, &[]),
+        "dialling side still lists {:?} after the acceptor disconnected",
+        dialler.connected_peers()
+    );
+    assert!(
+        peers_become(&acceptor, &[]),
+        "a shut-down Transport still lists {:?}",
+        acceptor.connected_peers()
+    );
+}
+
+/// What Stop does: the Helper shuts its Transport down and carries on with a new
+/// one in the same process, under a new Ticket.
+#[test]
+fn test_new_transport_can_be_created_and_dialled_after_shutdown() {
+    let (first, friend) = match create_connected_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+    let first_ticket = first.our_ticket().to_string();
+    first.shutdown();
+    assert!(peers_become(&friend, &[]), "friend should see the first Transport go");
+
+    let second = match create_transport() {
+        Some(t) => t,
+        None => return,
+    };
+    assert_ne!(
+        second.our_ticket(),
+        first_ticket,
+        "a Transport created after a shutdown must have a new Ticket"
+    );
+
+    // The new Transport works in both directions: it can dial, and be dialled
+    // by its new Ticket.
+    second
+        .connect_to_peer(friend.our_ticket())
+        .expect("new Transport should dial after the earlier one was shut down");
+    assert!(peers_become(&second, &[friend.endpoint_id()]));
+    assert!(peers_become(&friend, &[second.endpoint_id()]));
+
+    let late_joiner = match create_transport() {
+        Some(t) => t,
+        None => return,
+    };
+    late_joiner
+        .connect_to_peer(second.our_ticket())
+        .expect("new Transport should be reachable by its new Ticket");
+    assert!(peers_become(&late_joiner, &[second.endpoint_id()]));
+
+    // Still true once the first Transport is gone altogether.
+    drop(first);
+    assert_eq!(late_joiner.connected_peers(), vec![second.endpoint_id()]);
+}
+
+/// Quit shuts down and exits; Stop shuts down and later drops. Neither a second
+/// shutdown nor the drop may hang or panic, with or without a peer connected.
+#[test]
+fn test_shutdown_twice_then_drop_neither_hangs_nor_panics() {
+    let (dialler, acceptor) = match create_connected_pair() {
+        Some(pair) => pair,
+        None => return,
+    };
+
+    // Run on a side thread so that a hang fails the test instead of stalling it.
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        dialler.shutdown();
+        dialler.shutdown();
+        drop(dialler);
+
+        // No peer left on this one by now, and never shut down before.
+        assert!(peers_become(&acceptor, &[]));
+        acceptor.shutdown();
+        acceptor.shutdown();
+        drop(acceptor);
+
+        let _ = done_tx.send(());
+    });
+
+    // Two real shutdowns at most 3 s each; the repeats and drops add nothing.
+    // A panic on the side thread drops the sender, which also fails this.
+    let finished = done_rx.recv_timeout(Duration::from_secs(2 * 3) + PEER_NOTICE_DEADLINE);
+    assert!(
+        finished.is_ok(),
+        "repeated shutdown and drop hung or panicked: {:?}",
+        finished
+    );
+}
