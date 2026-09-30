@@ -28,7 +28,7 @@ const TOKEN_HEADER: &str = "x-token";
 
 /// The only methods any route may answer. State-changing routes are POST; a
 /// route that takes other methods still never sees them.
-const ALLOWED_METHODS: &str = "GET, HEAD, POST";
+const ALLOWED_METHODS: [Method; 3] = [Method::GET, Method::HEAD, Method::POST];
 
 /// Why a request was refused. The response says which rule it broke and
 /// nothing more.
@@ -45,11 +45,10 @@ impl IntoResponse for Rejection {
     fn into_response(self) -> Response {
         match self {
             Rejection::Forbidden => StatusCode::FORBIDDEN.into_response(),
-            Rejection::MethodNotAllowed => (
-                StatusCode::METHOD_NOT_ALLOWED,
-                [(header::ALLOW, ALLOWED_METHODS)],
-            )
-                .into_response(),
+            Rejection::MethodNotAllowed => {
+                let allow = ALLOWED_METHODS.map(|m| m.to_string()).join(", ");
+                (StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, allow)]).into_response()
+            }
             Rejection::NotJson => StatusCode::UNSUPPORTED_MEDIA_TYPE.into_response(),
         }
     }
@@ -85,7 +84,7 @@ impl Guard {
             return Err(Rejection::Forbidden);
         }
         let method = request.method();
-        if ![Method::GET, Method::HEAD, Method::POST].contains(method) {
+        if !ALLOWED_METHODS.contains(method) {
             return Err(Rejection::MethodNotAllowed);
         }
         if method == Method::POST && !is_json(headers) {

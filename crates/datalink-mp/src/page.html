@@ -78,14 +78,14 @@
   // The token comes in the address as ?t=. Keep it for reloads, and take it
   // out of the address bar and the history.
   var token = null;
-  try {
-    var fromUrl = new URLSearchParams(location.search).get('t');
-    if (fromUrl) {
-      sessionStorage.setItem('token', fromUrl);
-      history.replaceState(null, '', location.pathname);
-    }
-    token = sessionStorage.getItem('token');
-  } catch (e) {}
+  try { token = new URLSearchParams(location.search).get('t'); } catch (e) {}
+  if (token) {
+    // Storage can be blocked; the token from the address is still good for this load.
+    try { sessionStorage.setItem('token', token); } catch (e) {}
+    try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  } else {
+    try { token = sessionStorage.getItem('token'); } catch (e) {}
+  }
 
   var STATE_WORDS = { ready: 'Ready', joining: 'Connecting…', joined: 'Joined', hosting: 'Hosting' };
   var ticketBox = document.getElementById('ticket');
