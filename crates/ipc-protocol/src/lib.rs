@@ -1,7 +1,7 @@
 //! IPC Protocol for DLL ↔ Helper communication
 //!
 //! This crate defines the message types exchanged between the dplayx DLL
-//! (running under Wine) and the datalink-mp (running natively on macOS).
+//! (running under Wine) and the datalink-mp Helper (running natively on macOS).
 //!
 //! ## Wire Format
 //!

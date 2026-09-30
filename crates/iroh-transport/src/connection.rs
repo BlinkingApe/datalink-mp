@@ -288,27 +288,9 @@ impl Clone for ConnectionManager {
 }
 
 impl ConnectionManager {
-    /// Create a new connection manager
+    /// Create a new connection manager. The endpoint must advertise
+    /// `peer_protocol_alpn(options.peer_protocol_version)`.
     pub fn new(
-        endpoint: Endpoint,
-        session_manager: Arc<SessionManager>,
-        message_tx: mpsc::UnboundedSender<ReceivedMessage>,
-        our_ticket: String,
-        network_mode: NetworkMode,
-    ) -> Self {
-        Self::with_options(
-            endpoint,
-            session_manager,
-            message_tx,
-            our_ticket,
-            network_mode,
-            TransportOptions::default(),
-        )
-    }
-
-    /// Create a new connection manager with non-default options. The endpoint
-    /// must advertise `peer_protocol_alpn(options.peer_protocol_version)`.
-    pub fn with_options(
         endpoint: Endpoint,
         session_manager: Arc<SessionManager>,
         message_tx: mpsc::UnboundedSender<ReceivedMessage>,
@@ -783,7 +765,7 @@ async fn read_ordered_stream(
     let their_version = u16::from_le_bytes([preamble[4], preamble[5]]);
     if their_version != our_version {
         error!(peer = %peer_label, their_version, our_version,
-               "PROTOCOL VERSION MISMATCH — one machine has a stale build");
+               "PEER PROTOCOL VERSION MISMATCH — one machine has a stale build");
         return Err(TransportError::ProtocolMismatch(their_version, our_version));
     }
 

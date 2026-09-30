@@ -161,7 +161,7 @@ impl Transport {
         let (message_tx, message_rx) = mpsc::unbounded_channel();
 
         let connection_manager =
-            ConnectionManager::with_options(endpoint.clone(), session_manager.clone(), message_tx, our_ticket.clone(), NetworkMode::default(), options);
+            ConnectionManager::new(endpoint.clone(), session_manager.clone(), message_tx, our_ticket.clone(), NetworkMode::default(), options);
 
         // Spawn connection acceptor
         let endpoint_clone = endpoint.clone();
@@ -964,7 +964,7 @@ impl Transport {
     }
 
     /// Upper bound on how long `shutdown` blocks.
-    pub const SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+    pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
     /// Close every peer connection and the endpoint gracefully (blocking).
     ///
