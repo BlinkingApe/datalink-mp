@@ -1762,6 +1762,8 @@ fn test_show_needs_no_token_and_opens_the_browser_at_the_launch_url() {
     let response = post_show(started.ui_port(), &[]);
 
     assert_eq!(response.status, 204, "{}", response.body);
+    // The opener runs off the request's thread: wait for it.
+    wait_for_opened(&started, 2);
     assert_eq!(*started.opened.lock().unwrap(), vec![launch_url.clone(), launch_url]);
     assert!(!response.body.contains(TOKEN), "the route must not reveal the token");
 }
@@ -1777,6 +1779,7 @@ fn test_show_asked_again_within_the_limit_does_not_open_the_browser_again() {
 
     assert_eq!(first.status, 204);
     assert_eq!(second.status, 429, "a second request within the limit is refused");
+    wait_for_opened(&started, 2);
     assert_eq!(started.opened.lock().unwrap().len(), 2, "startup and the first show only");
 }
 
@@ -1990,4 +1993,22 @@ fn test_binary_started_twice_on_the_same_ipc_port_says_already_running_and_exits
         exit.stderr
     );
     assert!(!exit.stdout.contains("?t="), "no token is printed by the second process");
+}
+
+#[test]
+fn test_helper_that_could_not_bind_the_ipc_port_does_not_claim_it_and_is_not_found_by_a_second_start() {
+    let Some((first, holder)) = start_with_the_ipc_port_taken() else {
+        return;
+    };
+    let taken_port = holder.local_addr().unwrap().port();
+
+    let instance = http_get(first.ui_port(), "/api/instance", &[]).json();
+    assert_eq!(instance["ipc_port"], serde_json::Value::Null, "it does not hold the port");
+
+    let Some(second) = try_start_on(taken_port, first.ui_port()) else {
+        return;
+    };
+    let second = second.expect("a Helper that does not hold the port is not 'already running'");
+    assert_eq!(second.banners(), ["ipc_port_in_use"]);
+    assert_eq!(first.opened.lock().unwrap().len(), 0, "the first Helper was not asked to show");
 }

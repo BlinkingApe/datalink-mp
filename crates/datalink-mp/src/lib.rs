@@ -166,7 +166,7 @@ pub fn start(config: Config) -> Result<Helper, StartError> {
     let http = match (config.ui, ui_listener) {
         (Some(ui), Some(listener)) => {
             let opener = ui.browser_opener.map(Arc::new);
-            let server = http::spawn(listener, controller.clone(), ipc_port, ui.token, opener.clone())
+            let server = http::spawn(listener, controller.clone(), ipc_server.as_ref().map(|_| ipc_port), ui.token, opener.clone())
                 .map_err(StartError::HttpServer)?;
             if let Some(open) = opener {
                 open(&server.launch_url());

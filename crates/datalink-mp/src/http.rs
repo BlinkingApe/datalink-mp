@@ -88,7 +88,7 @@ pub(crate) struct HttpServer {
 
 struct AppState {
     controller: Arc<SessionController>,
-    /// The application name, the Release version and the IPC port, as
+    /// The application name, the Release version and the IPC port (null when another program holds it), as
     /// `GET /api/instance` answers them.
     instance: serde_json::Value,
     launch_url: String,
@@ -101,7 +101,7 @@ struct AppState {
 pub(crate) fn spawn(
     listener: TcpListener,
     controller: Arc<SessionController>,
-    ipc_port: u16,
+    ipc_port: Option<u16>,
     token: String,
     browser_opener: Option<Arc<BrowserOpener>>,
 ) -> std::io::Result<HttpServer> {

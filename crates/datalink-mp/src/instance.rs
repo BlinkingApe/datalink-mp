@@ -7,7 +7,7 @@
 use crate::http::PORT_WALK_LEN;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::info;
 
 /// How long to wait for a port to accept a connection. Loopback answers at
@@ -49,7 +49,6 @@ fn answers_for(ipc_port: u16, ui_port: u16) -> bool {
 fn request(port: u16, method: &str, path: &str) -> Option<(u16, String)> {
     let addr = SocketAddr::from(([127, 0, 0, 1], port));
     let mut stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT).ok()?;
-    stream.set_read_timeout(Some(REPLY_TIMEOUT)).ok()?;
     stream.set_write_timeout(Some(REPLY_TIMEOUT)).ok()?;
     // POST routes need a JSON content type; a GET ignores it.
     let request = format!(
@@ -57,9 +56,21 @@ fn request(port: u16, method: &str, path: &str) -> Option<(u16, String)> {
          Content-Type: application/json\r\nContent-Length: 0\r\n\r\n"
     );
     stream.write_all(request.as_bytes()).ok()?;
+    // One deadline for the whole reply: a program that accepts the connection
+    // and then stays silent, or trickles bytes, must not hold up startup.
+    let deadline = Instant::now() + REPLY_TIMEOUT;
     let mut raw = Vec::new();
-    // A reply cut short by the timeout is still read as far as it got.
-    let _ = stream.read_to_end(&mut raw);
+    let mut chunk = [0u8; 1024];
+    loop {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() || stream.set_read_timeout(Some(left)).is_err() {
+            break;
+        }
+        match stream.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => raw.extend_from_slice(&chunk[..n]),
+        }
+    }
     let raw = String::from_utf8_lossy(&raw);
     let (head, body) = raw.split_once("\r\n\r\n")?;
     let status = head.split(' ').nth(1)?.parse().ok()?;
