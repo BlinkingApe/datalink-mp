@@ -10,14 +10,14 @@ Run ADR-0002 section 4 (the gate) and the per-release items of section 3 (VirusT
 
 The gate, on the archives of one `-rc.N` draft:
 
-- [x] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
-- [x] Windows file properties of the exe and the DLL show `0.1.0`
-- [x] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
+- [ ] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
+- [ ] Windows file properties of the exe and the DLL show `0.1.0`
+- [ ] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
 - [ ] The same game with a Windows-using friend over the internet
 
 Trust checks:
 
-- [x] VirusTotal scan of the exe and the DLL; report links saved for the release notes
+- [ ] VirusTotal scan of the exe and the DLL; report links saved for the release notes
 - [ ] If Defender flags either: a WDSI "software developer" submission is filed, and `docs/releasing.md` says how to file and follow one up
 
 Publish:
@@ -69,3 +69,10 @@ Publish:
 - DLL (0/71): https://www.virustotal.com/gui/file/203a2ba0e63132759bc4dc095e6cb77650cb7434e60301219d868c326b9a097c
 - The WDSI box doesn't apply: Defender flagged neither file.
 - The SmartScreen screenshots from this gate are now in `README.md`'s Windows quickstart (ADR-0002 section 3 asks for them).
+
+**2026-10-01 (agent):** `v0.1.0-rc.2` is superseded; the gate starts again on `-rc.3`, so the boxes ticked for rc.2 are unticked.
+
+- The maintainer chose to ship the new Datalink look in the first release (helper-web-ui ticket 18). The page is compiled into the Helper, so the exe's bytes change.
+- Defect found while doing that: the archives' licence files lacked the `datalink-mp-` prefix the archive layout requires (ticket 05). Fixed in `release.yml` for rc.3.
+- The DLL's source didn't change, but rc.3 rebuilds it, so its hash changes too. Both files need a new VirusTotal scan.
+- Still valid from rc.2: the gotchas in `docs/releasing.md` (USB copies skip SmartScreen, the firewall alert is per path). The README's SmartScreen screenshots stay.
