@@ -5,7 +5,7 @@
 #   scripts/release-version.sh <tag>
 #
 # Accepts vX.Y.Z and vX.Y.Z-rc.N, where X.Y.Z is the workspace version, so an
-# RC's binaries already report the version it becomes. Any other tag fails.
+# RC's binaries already report the Release version it becomes. Any other tag fails.
 # On success prints, in the form $GITHUB_OUTPUT takes:
 #   version=X.Y.Z
 #   prerelease=true|false

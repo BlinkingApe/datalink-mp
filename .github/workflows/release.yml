@@ -69,14 +69,17 @@ jobs:
           DLL=target/i686-pc-windows-gnu/release/dplayx.dll
           EXE=target/x86_64-pc-windows-gnu/release/datalink-mp.exe
           LINUX=target/x86_64-unknown-linux-musl/release/datalink-mp
-          for f in "$DLL" "$EXE"; do
+          # Each binary is read by its own target's windres: the DLL is 32-bit.
+          for pair in "$DLL i686" "$EXE x86_64"; do
+            read -r f arch <<< "$pair"
             echo "== $f"
             objdump -p "$f" | grep 'DLL Name' | sort -u
             if objdump -p "$f" | grep -qiE 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
               echo "::error::$f links a mingw runtime DLL"; exit 1
             fi
-            x86_64-w64-mingw32-windres -J coff -i "$f" -O rc | grep -E 'VALUE "(ProductName|FileVersion)"'
-            x86_64-w64-mingw32-windres -J coff -i "$f" -O rc | grep -q "VALUE \"FileVersion\", \"$VERSION\"" \
+            RC="$("$arch-w64-mingw32-windres" -J coff -i "$f" -O rc)"
+            grep -E 'VALUE "(ProductName|FileVersion)"' <<< "$RC"
+            grep -q "VALUE \"FileVersion\", \"$VERSION\"" <<< "$RC" \
               || { echo "::error::$f has no VERSIONINFO for $VERSION"; exit 1; }
           done
           file "$LINUX"
@@ -218,7 +221,7 @@ jobs:
           - Linux (static, any x86_64 distro): \`datalink-mp-$VERSION-linux-x86_64.tar.gz\`
           - macOS (Apple silicon): \`datalink-mp-$VERSION-macos-aarch64.zip\`. Built in CI and untested: nobody has run it on a Mac.
 
-          Built by CI from $GITHUB_REF_NAME ($GITHUB_SHA), run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID.
+          Archives built by CI from $GITHUB_REF_NAME ($GITHUB_SHA), run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID.
 
           Verify a download:
 

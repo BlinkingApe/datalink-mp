@@ -15,9 +15,9 @@ Verify through seam 2: the local cross-builds in `docs/building.md`, then inspec
 
 **Status:** resolved
 
-- [ ] The cross-built `datalink-mp.exe` (`x86_64-pc-windows-gnu`) contains a VERSIONINFO resource with the workspace version as its file and product version
-- [ ] The cross-built `dplayx.dll` (`i686-pc-windows-gnu`) contains the same
-- [ ] The version is read from the workspace version at build time; nothing hard-codes `0.1.0`
-- [ ] The product name in both resources is `datalink-mp`
-- [ ] A native Linux build of the workspace builds and tests exactly as before
-- [ ] The DLL still exports what `dplayx.def` lists (compare the export table before and after)
+- [x] The cross-built `datalink-mp.exe` (`x86_64-pc-windows-gnu`) contains a VERSIONINFO resource with the workspace version as its file and product version
+- [x] The cross-built `dplayx.dll` (`i686-pc-windows-gnu`) contains the same
+- [x] The version is read from the workspace version at build time; nothing hard-codes `0.1.0`
+- [x] The product name in both resources is `datalink-mp`
+- [x] A native Linux build of the workspace builds and tests exactly as before
+- [x] The DLL still exports what `dplayx.def` lists (compare the export table before and after)

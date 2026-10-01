@@ -32,7 +32,7 @@ git push origin v0.1.0-rc.1
   Anything else (`-rc`, `-beta`, `-rc.1-fix`) fails the run's first job and
   no draft appears. `scripts/release-version.sh <tag>` runs the same check
   locally.
-- An RC's binaries already report the final version (`0.1.0`, not
+- An RC's binaries already report the Release version it becomes (`0.1.0`, not
   `0.1.0-rc.1`), in the page and in Windows file properties. That is what
   lets the gated RC's archives become the release (section 4).
 - Number RCs from 1 and never reuse a number: a new defect means a new
@@ -107,6 +107,9 @@ Run the gate (ADR-0002 section 4) on one RC's archives. Then:
   gh release upload v0.1.0 gated/* --clobber
   ```
 
+- The draft's notes still name the `v<version>` run as the archives' source.
+  Change that line to the gated RC's tag and run, which built the bytes and
+  holds their attestations.
 - Add the VirusTotal report links to the notes, then publish by hand.
 
 ## Cleaning up test runs

@@ -90,9 +90,6 @@ CC_x86_64_unknown_linux_musl=musl-gcc \
   cargo build --release --target x86_64-unknown-linux-musl -p datalink-mp
 ```
 
-Without `musl-gcc` (Fedora, RHEL), `CC_x86_64_unknown_linux_musl=gcc` also
-links, for local experiments.
-
 These cross-builds are for experiments. The archives players download are
 built by CI from a tag; see [releasing.md](releasing.md).
 
