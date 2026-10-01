@@ -852,7 +852,6 @@ dependencies = [
 name = "dplayx"
 version = "0.1.0"
 dependencies = [
- "cc",
  "dp-types",
  "embed-resource",
  "ipc-protocol",
