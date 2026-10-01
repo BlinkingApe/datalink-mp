@@ -45,6 +45,10 @@ follow the section for your system.
 2. Double-click `datalink-mp.exe`. Windows will say it doesn't recognise the
    app: choose **More info** → **Run anyway**. If the firewall asks, allow
    access.
+
+   <img src="docs/images/smartscreen-more-info.png" width="260" alt="Windows protected your PC, with the More info link">
+   <img src="docs/images/smartscreen-run-anyway.png" width="260" alt="Windows protected your PC after More info, with the Run anyway button">
+
 3. Your browser opens the datalink-mp page. Follow the four steps.
 4. Keep the console window open while you play.
 

@@ -146,6 +146,11 @@ report links for the release notes.
 - `0.1.0`: the DLL was clean (0/71). The exe got one hit out of about 70:
   Acronis (Static ML), a machine-learning verdict on the file's shape, not a
   known signature. Expect that kind of hit on unsigned binaries.
+  Reports:
+  [exe](https://www.virustotal.com/gui/file/f5ef73aba1ece90811eda33bcc714d767278614ff0cf127fce98d1b6be50b725),
+  [DLL](https://www.virustotal.com/gui/file/203a2ba0e63132759bc4dc095e6cb77650cb7434e60301219d868c326b9a097c).
+  The report URL is the file's SHA-256, so it can be searched before
+  uploading.
 - What matters for WDSI is the **Microsoft** row, which is Defender. It said
   Undetected for `0.1.0`, so nothing was submitted. If it ever flags the exe
   or the DLL, file a WDSI "software developer" submission before publishing.

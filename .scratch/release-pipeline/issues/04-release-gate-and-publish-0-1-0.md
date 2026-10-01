@@ -17,7 +17,7 @@ The gate, on the archives of one `-rc.N` draft:
 
 Trust checks:
 
-- [ ] VirusTotal scan of the exe and the DLL; report links saved for the release notes
+- [x] VirusTotal scan of the exe and the DLL; report links saved for the release notes
 - [ ] If Defender flags either: a WDSI "software developer" submission is filed, and `docs/releasing.md` says how to file and follow one up
 
 Publish:
@@ -62,3 +62,10 @@ Publish:
 - A later try showed the blue "Windows protected your PC" SmartScreen prompt, and More info → Run anyway got through. Box ticked. What made the earlier tries skip the prompt wasn't pinned down.
 - The phone-hotspot internet test couldn't run: USB tethering from the phone's mobile data didn't give the laptop a connection. The internet game waits for the friend game, a few days out. The gate isn't complete until then.
 - Still to come: the VirusTotal report links (exe: 1 hit, Acronis Static ML; DLL: 0/71).
+
+**2026-10-01 (maintainer, recorded by agent):** VirusTotal reports, for the release notes. Box ticked.
+
+- exe (1 hit, Acronis Static ML; Microsoft Undetected): https://www.virustotal.com/gui/file/f5ef73aba1ece90811eda33bcc714d767278614ff0cf127fce98d1b6be50b725
+- DLL (0/71): https://www.virustotal.com/gui/file/203a2ba0e63132759bc4dc095e6cb77650cb7434e60301219d868c326b9a097c
+- The WDSI box doesn't apply: Defender flagged neither file.
+- The SmartScreen screenshots from this gate are now in `README.md`'s Windows quickstart (ADR-0002 section 3 asks for them).
