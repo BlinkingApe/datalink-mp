@@ -4,6 +4,8 @@ Play **Sid Meier's Alpha Centauri** (1999) online with your friends. No port
 forwarding, no VPN, no IPX emulator: one of you shares a Ticket, the others
 paste it, and you are connected.
 
+<p align="center"><img src="docs/images/page-connected.png" width="600" alt="The datalink-mp page with steps 1 to 3 ticked green, the game connected and three friends' Helpers connected"></p>
+
 You extract one archive into your Game folder and double-click `datalink-mp`.
 Your browser opens a page with four numbered steps that tick off as you go.
 You never need a terminal to play.
@@ -89,13 +91,24 @@ Nobody has run these steps on a Mac. They are what should work.
 1. **Game folder.** The page confirms that `dplayx.dll` and your game
    executable are next to `datalink-mp`. On Linux and macOS this step also
    shows the Wine override.
+
+   <img src="docs/images/step-1-game-folder.png" width="560" alt="Step 1, Game folder: Game folder OK, found dplayx.dll and thinker.exe">
+
 2. **Share or paste a Ticket.** Your own Ticket is there from the start, with a
    Copy button. To host, send it to your friends. To join, paste your friend's
    Ticket into the box and press Connect.
+
+   <img src="docs/images/step-2-ticket.png" width="560" alt="Step 2, Share or paste a Ticket: your Ticket with a Copy Ticket button, and a box to paste your friend's">
+
 3. **Start the game.** Choose Multiplayer → Iroh P2P → Host Game (if you are
    hosting) or Join Game (if you are joining). A pill on the page shows "Game
    connected" once the game has found datalink-mp.
+
+   <img src="docs/images/step-3-start-the-game.png" width="560" alt="Step 3, Start the game: the menu path in the game, and the Game connected pill">
+
 4. **Play.** The page shows who is connected.
+
+   <img src="docs/images/step-4-play.png" width="560" alt="Step 4, Play: three Helpers connected, with their short IDs">
 
 Your Ticket is new every time datalink-mp starts and every time you press
 **Stop**, so share it again after either. Stop ends your current connections
