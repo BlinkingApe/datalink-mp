@@ -48,6 +48,7 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
 |---|---|
 | `datalink-mp-<version>-windows-x86_64.zip` | Windows Helper, DLL, README, licences |
 | `datalink-mp-<version>-linux-x86_64.tar.gz` | static musl Linux Helper, the same DLL, README, licences |
+| `datalink-mp-<version>-macos-aarch64.zip` | Apple silicon Helper, the same DLL, README, licences; untested |
 | `SHA256SUMS` | checksums of the archives |
 | `attestation.sigstore.json` | the archives' build provenance, for offline checks |
 
@@ -70,6 +71,22 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
   reports a `multiple definition of '_Unwind_Resume'` clash (see
   [building.md](building.md)). The run then shows a warning annotation; the
   retry is a fallback, not the expected path.
+- All three archives hold the DLL built once by the Ubuntu job; the release
+  job fails if their `dplayx.dll` hashes differ. So the macOS job waits for
+  the Ubuntu job, and a run takes about as long as both back to back.
+- The macOS archive is built on `macos-15` (arm64, free for public
+  repositories; the `-large`/`-xlarge` runners are billed). Its log shows
+  `codesign --verify` on the Helper; if the linker's ad-hoc signature didn't
+  survive stripping, the job re-signs ad-hoc and verifies again, with a
+  notice annotation. That only satisfies Gatekeeper's basic checks: players
+  still go through Open Anyway (README).
+- The macOS archive is packed with `ditto -c -k`, never `zip` or
+  `upload-artifact` alone, which drop the executable bit. The job extracts
+  it again with `ditto -x -k` and fails if the Helper isn't executable. To
+  check by hand on a Mac, extract with Archive Utility or `ditto -x -k`, not
+  `unzip`.
+- The draft notes say macOS is built in CI and untested. Keep that wording
+  until someone has run the gate on a Mac.
 - The Ubuntu job checks the binaries before packing them: neither Windows
   binary may import a mingw runtime DLL, both must carry VERSIONINFO for the
   version, and the Linux Helper must be static. A failure there means the

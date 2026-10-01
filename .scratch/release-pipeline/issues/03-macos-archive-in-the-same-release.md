@@ -25,3 +25,11 @@ Verify through seam 1, as in ticket 02: you may push and delete `-rc.N` tags, an
 - [ ] The draft release text says macOS is built in CI and untested
 - [ ] `docs/releasing.md` covers the macOS archive
 - [ ] Test tags and drafts are cleaned up; one good `-rc.N` draft remains
+
+## Comments
+
+**2026-10-01 (agent):** Written and linted; seam 1 not yet run, for the same reason as ticket 02 (no `gh` on the dev host to inspect and clean up drafts, and a tag push publishes `main`'s unpushed commits). No Mac to try the job locally either, so the first real run is also the first time the macOS steps execute.
+
+- The `macos` job needs the Ubuntu job, downloads its `dplayx-dll` artifact, and packs with `ditto -c -k --norsrc --noextattr --noacl` (no AppleDouble entries in the zip). It re-extracts with `ditto -x -k` and fails if the Helper isn't executable, and logs `codesign --verify` (re-signing ad-hoc on failure).
+- The release job now waits for it, fails if the three archives' `dplayx.dll` hashes differ, and the draft notes say macOS is built in CI and untested.
+- Simulated locally with `gh` stubbed and a stand-in macOS zip: the DLL check passes on matching DLLs and fails on different ones; the notes render as Markdown; `--prerelease` appears only for `-rc.N`.

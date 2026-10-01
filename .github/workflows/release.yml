@@ -115,9 +115,62 @@ jobs:
           path: target/i686-pc-windows-gnu/release/dplayx.dll
           if-no-files-found: error
 
+  macos:
+    name: Build the macOS archive
+    # Needs the Ubuntu job's DLL: one DLL, and one hash, in every archive.
+    needs: [version, ubuntu]
+    # arm64; not the billed -large/-xlarge runners.
+    runs-on: macos-15
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      HELPER: target/aarch64-apple-darwin/release/datalink-mp
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --target aarch64-apple-darwin
+          rustup default stable
+
+      - name: Build the macOS Helper
+        run: cargo build --release --locked --target aarch64-apple-darwin -p datalink-mp
+
+      - name: Check the signature
+        run: |
+          if ! codesign --verify --verbose "$HELPER"; then
+            echo "::notice::codesign --verify failed; re-signing ad-hoc"
+            codesign --force --sign - "$HELPER"
+            codesign --verify --verbose "$HELPER"
+          fi
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: dplayx-dll
+          path: stage
+
+      # ditto, not zip: it keeps the properties zip and upload-artifact drop,
+      # the executable bit among them. The finished .zip goes to the release
+      # as-is (upload-artifact wraps it, and download-artifact unwraps it).
+      - name: Pack the archive
+        run: |
+          cp "$HELPER" datalink-mp-README.txt LICENSE-MIT LICENSE-APACHE stage/
+          chmod 755 stage/datalink-mp
+          mkdir dist
+          ARCHIVE="dist/datalink-mp-$VERSION-macos-aarch64.zip"
+          ditto -c -k --norsrc --noextattr --noacl stage "$ARCHIVE"
+          zipinfo "$ARCHIVE"
+          ditto -x -k "$ARCHIVE" unpacked
+          test -x unpacked/datalink-mp || { echo "::error::the Helper lost its executable bit"; exit 1; }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: archives-macos
+          path: dist/
+          if-no-files-found: error
+
   release:
     name: Draft the GitHub Release
-    needs: [version, ubuntu]
+    needs: [version, ubuntu, macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -132,6 +185,16 @@ jobs:
           pattern: archives-*
           merge-multiple: true
           path: dist
+
+      - name: Check one DLL in every archive
+        run: |
+          mkdir dlls
+          unzip -p dist/*-windows-x86_64.zip dplayx.dll > dlls/windows
+          tar -xzOf dist/*-linux-x86_64.tar.gz dplayx.dll > dlls/linux
+          unzip -p dist/*-macos-aarch64.zip dplayx.dll > dlls/macos
+          sha256sum dlls/*
+          [[ $(sha256sum dlls/* | cut -d' ' -f1 | sort -u | wc -l) -eq 1 ]] \
+            || { echo "::error::the archives hold different DLLs"; exit 1; }
 
       - name: Write SHA256SUMS
         run: |
@@ -151,6 +214,10 @@ jobs:
         run: |
           cp "$BUNDLE" dist/attestation.sigstore.json
           NOTES="$(cat <<EOF
+          - Windows: \`datalink-mp-$VERSION-windows-x86_64.zip\`
+          - Linux (static, any x86_64 distro): \`datalink-mp-$VERSION-linux-x86_64.tar.gz\`
+          - macOS (Apple silicon): \`datalink-mp-$VERSION-macos-aarch64.zip\`. Built in CI and untested: nobody has run it on a Mac.
+
           Built by CI from $GITHUB_REF_NAME ($GITHUB_SHA), run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID.
 
           Verify a download:
