@@ -272,7 +272,8 @@ fn handle_request(request: &IpcRequest, controller: &SessionController) -> IpcRe
         },
 
         IpcRequest::JoinSessionByTicket { host_ticket } => {
-            match transport.join_session_by_ticket(host_ticket) {
+            // Through the controller, so that the page hears how it went.
+            match controller.join_session(host_ticket) {
                 Ok(player_id) => IpcResponse::SessionJoined { player_id },
                 Err(e) => IpcResponse::Error {
                     message: format!("Failed to join session: {:?}", e),

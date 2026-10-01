@@ -6,7 +6,7 @@
 
 mod guard;
 
-use crate::controller::{Banner, SessionController, Status};
+use crate::controller::{Banner, SessionController, Status, StopError};
 use crate::BrowserOpener;
 use axum::extract::State;
 use axum::http::StatusCode;
@@ -130,6 +130,7 @@ pub(crate) fn spawn(
     let api = Router::new()
         .route("/status", get(status))
         .route("/join", post(join))
+        .route("/stop", post(stop))
         .route("/instance", get(instance))
         .route("/show", post(show))
         .route("/quit", post(quit))
@@ -250,6 +251,36 @@ async fn join(State(state): State<Arc<AppState>>, Json(request): Json<JoinReques
         let _ = controller.dial(pending);
     });
     (StatusCode::ACCEPTED, Json(body)).into_response()
+}
+
+/// Stop: end the connections and carry on with a new Ticket. Answered once
+/// the new Ticket is in place:
+///
+/// - 200 with the new `ticket_seq`, for the page to ask status for the Ticket;
+/// - 500 with the `error` when the new Transport could not be created, which
+///   changes nothing;
+/// - 503 when the Helper has shut down (Quit came first).
+async fn stop(State(state): State<Arc<AppState>>) -> Response {
+    let controller = state.controller.clone();
+    // Creating the new Transport and shutting the old one down block on a
+    // Transport's runtime, and dropping the old one ends its runtime: each
+    // panics on an async worker thread like this one. All three happen in
+    // `stop`, and the answer brings no Transport back.
+    let stopped = tokio::task::spawn_blocking(move || controller.stop()).await;
+    match stopped {
+        Ok(Ok(ticket_seq)) => (StatusCode::OK, Json(json!({ "ticket_seq": ticket_seq }))).into_response(),
+        Ok(Err(e)) => {
+            let (status, error) = match &e {
+                // The page shows it to the player, who may be asked for it.
+                StopError::Transport(source) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}: {source}"))
+                }
+                StopError::ShutDown => (StatusCode::SERVICE_UNAVAILABLE, e.to_string()),
+            };
+            (status, Json(json!({ "error": error }))).into_response()
+        }
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
 
 /// Quit: answer, and shut the Helper down. Whoever waits on the Helper (the

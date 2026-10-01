@@ -2102,13 +2102,18 @@ const SHORT_DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3
 
 /// Start a Helper whose dials give up after [`SHORT_DIAL_TIMEOUT`].
 fn start_with_a_short_dial_timeout() -> Option<Started> {
+    start_with_transport_options(TransportOptions {
+        dial_timeout: SHORT_DIAL_TIMEOUT,
+        ..TransportOptions::default()
+    })
+}
+
+/// Start a Helper on free ports whose Transport is built with `transport_options`.
+fn start_with_transport_options(transport_options: TransportOptions) -> Option<Started> {
     let config = Config {
         game_folder: game_folder_that_passes(),
         ipc_port: 0,
-        transport_options: TransportOptions {
-            dial_timeout: SHORT_DIAL_TIMEOUT,
-            ..TransportOptions::default()
-        },
+        transport_options,
         ui: Some(UiConfig {
             port: 0,
             token: TOKEN.to_string(),
@@ -2296,4 +2301,562 @@ fn test_fresh_helper_has_no_invalid_ticket_reason() {
     };
 
     assert!(started.status()["invalid_ticket"].is_null());
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 12: dial failure banners
+//
+// A join fails because the friend's Helper can't be reached, or because it
+// runs another release: either way the joiner gets a banner saying which,
+// whether the join came from the page or from the game's DLL. The friends are
+// real Transports on loopback, one of them built with another Peer protocol
+// version; what the page would show is read from status.
+// ---------------------------------------------------------------------------
+
+/// The options of a Transport from another release: it speaks another Peer
+/// protocol version, so this build's Helpers refuse it, and it them.
+fn options_of_another_release() -> TransportOptions {
+    TransportOptions {
+        peer_protocol_version: iroh_transport::STREAM_PROTO_VERSION + 1,
+        ..TransportOptions::default()
+    }
+}
+
+/// A friend's Transport from another release. None when one cannot be
+/// created (sandboxed environments); the test then returns early.
+fn friend_of_another_release() -> Option<iroh_transport::Transport> {
+    match iroh_transport::Transport::with_options(options_of_another_release()) {
+        Ok(friend) => Some(friend),
+        Err(e) => {
+            note_transport_unavailable(&e);
+            None
+        }
+    }
+}
+
+/// The Ticket of a friend whose Helper has since shut down, the way a Ticket
+/// goes stale when its Helper quits. None when no friend can be created.
+fn ticket_of_a_friend_who_shut_down() -> Option<String> {
+    let friend = friend()?;
+    let ticket = friend.our_ticket().to_string();
+    friend.shutdown();
+    Some(ticket)
+}
+
+impl Started {
+    /// Wait for the dial a join started to end, whichever way it went, and
+    /// return the banners status reports then. The dial gives up after
+    /// [`SHORT_DIAL_TIMEOUT`] at the latest.
+    fn wait_for_the_dial_to_end(&self) -> Vec<String> {
+        common::poll_until(SHORT_DIAL_TIMEOUT * 3, || (self.status()["state"] != "joining").then_some(()))
+            .expect("the dial should end within its timeout");
+        self.banners()
+    }
+
+    /// Ask the Helper to join `ticket` from a fake DLL, the way the game does
+    /// when the player picks Join Game, and return the reply.
+    fn join_from_the_game(&self, ticket: &str) -> ipc_protocol::IpcResponse {
+        let mut dll = self.connect_fake_dll();
+        dll.handshake();
+        dll.request(&ipc_protocol::IpcRequest::JoinSessionByTicket {
+            host_ticket: ticket.to_string(),
+        })
+    }
+}
+
+/// Assert that the game's join was answered with an error, and return its message.
+fn join_failed(reply: ipc_protocol::IpcResponse) -> String {
+    match reply {
+        ipc_protocol::IpcResponse::Error { message } => message,
+        other => panic!("the join should fail, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_join_to_a_ticket_whose_helper_shut_down_gives_cant_reach_host_and_ready() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let Some(ticket) = ticket_of_a_friend_who_shut_down() else {
+        return;
+    };
+
+    assert_dial_started(&started.join(&ticket), &[]);
+
+    // Within the shortened timeout: the deadline is well below the 15 s default.
+    assert_eq!(started.wait_for_the_dial_to_end(), ["cant_reach_host"]);
+    assert_eq!(started.status()["state"], "ready");
+}
+
+#[test]
+fn test_join_whose_dial_times_out_gives_cant_reach_host() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    // Nothing answers there, so the dial lasts until its timeout instead of
+    // failing at once.
+    let (_silent, ticket) = silent_ticket();
+
+    assert_dial_started(&started.join(&ticket), &[]);
+
+    assert_eq!(started.wait_for_the_dial_to_end(), ["cant_reach_host"]);
+    assert_eq!(started.status()["state"], "ready");
+}
+
+#[test]
+fn test_join_to_a_friend_of_another_release_gives_peer_version_mismatch() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let Some(friend) = friend_of_another_release() else {
+        return;
+    };
+
+    assert_dial_started(&started.join(friend.our_ticket()), &[]);
+
+    // Not cant_reach_host: the friend was reached, and refused us.
+    assert_eq!(started.wait_for_the_dial_to_end(), ["peer_version_mismatch"]);
+    assert_eq!(started.status()["state"], "ready");
+}
+
+#[test]
+fn test_game_join_to_an_unreachable_ticket_sets_cant_reach_host() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let Some(ticket) = ticket_of_a_friend_who_shut_down() else {
+        return;
+    };
+
+    join_failed(started.join_from_the_game(&ticket));
+
+    // The reply comes once the join is over, so its banner is up by now.
+    assert_eq!(started.banners(), ["cant_reach_host"]);
+}
+
+#[test]
+fn test_game_join_to_a_friend_of_another_release_sets_peer_version_mismatch() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let Some(friend) = friend_of_another_release() else {
+        return;
+    };
+
+    join_failed(started.join_from_the_game(friend.our_ticket()));
+
+    assert_eq!(started.banners(), ["peer_version_mismatch"]);
+}
+
+#[test]
+fn test_game_join_to_a_host_with_no_session_sets_no_banner() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    // Reachable and of this release, but hosting no game.
+    let Some(friend) = friend() else {
+        return;
+    };
+
+    let message = join_failed(started.join_from_the_game(friend.our_ticket()));
+
+    assert!(message.contains("SessionNotFound"), "the join should fail for the missing session: {message}");
+    assert_eq!(started.banners(), Vec::<String>::new());
+}
+
+#[test]
+fn test_later_join_attempt_clears_both_banners() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let (Some(of_another_release), Some(ticket_that_is_stale), Some(friend)) =
+        (friend_of_another_release(), ticket_of_a_friend_who_shut_down(), friend())
+    else {
+        return;
+    };
+    started.join(of_another_release.our_ticket());
+    assert_eq!(started.wait_for_the_dial_to_end(), ["peer_version_mismatch"]);
+
+    assert_dial_started(&started.join(&ticket_that_is_stale), &[]);
+    assert_eq!(started.banners(), Vec::<String>::new(), "the join attempt clears the banner at once");
+    assert_eq!(started.wait_for_the_dial_to_end(), ["cant_reach_host"]);
+
+    assert_dial_started(&started.join(friend.our_ticket()), &[]);
+    assert_eq!(started.banners(), Vec::<String>::new());
+    started.wait_for_state("joined");
+    assert_eq!(started.banners(), Vec::<String>::new());
+}
+
+#[test]
+fn test_game_join_attempt_clears_the_banner_of_the_join_before_it() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let (Some(of_another_release), Some(ticket_that_is_stale), Some(friend)) =
+        (friend_of_another_release(), ticket_of_a_friend_who_shut_down(), friend())
+    else {
+        return;
+    };
+    started.join(of_another_release.our_ticket());
+    assert_eq!(started.wait_for_the_dial_to_end(), ["peer_version_mismatch"]);
+
+    join_failed(started.join_from_the_game(&ticket_that_is_stale));
+    assert_eq!(started.banners(), ["cant_reach_host"]);
+
+    // Fails too, for no reason a banner speaks of.
+    join_failed(started.join_from_the_game(friend.our_ticket()));
+    assert_eq!(started.banners(), Vec::<String>::new());
+}
+
+#[test]
+fn test_helper_that_refused_a_mismatched_dial_reports_no_banner_of_its_own() {
+    let Some(joiner) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let Some(refusing) = start_with_transport_options(options_of_another_release()) else {
+        return;
+    };
+
+    joiner.join(&refusing.ticket());
+    assert_eq!(joiner.wait_for_the_dial_to_end(), ["peer_version_mismatch"]);
+
+    assert_eq!(refusing.banners(), Vec::<String>::new());
+    let status = refusing.status();
+    assert_eq!(status["state"], "ready");
+    assert_eq!(status["peers"], serde_json::json!([]));
+}
+
+/// The words of the banner element for `code` on the page: its text with the
+/// markup taken out and runs of white space made one space.
+fn banner_words(page: &str, code: &str) -> String {
+    let attribute = format!("data-banner=\"{code}\"");
+    let start = page.find(&attribute).unwrap_or_else(|| panic!("the page should have the {code} banner"));
+    let element = &page[start..];
+    let element = &element[element.find('>').expect("the banner's tag should close") + 1..];
+    let element = &element[..element.find("</div>").expect("the banner should end")];
+    let mut text = String::new();
+    let mut in_tag = false;
+    for c in element.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => text.push(c),
+            _ => {}
+        }
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+#[test]
+fn test_page_has_the_words_of_both_dial_failure_banners_under_the_header() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let page = http_get(started.ui_port(), "/", &[]).body;
+
+    assert_eq!(
+        banner_words(&page, "cant_reach_host"),
+        "Couldn't reach your friend's Helper. Ask them for their current Ticket: it changes \
+         every time they start the Helper or press Stop."
+    );
+    assert_eq!(
+        banner_words(&page, "peer_version_mismatch"),
+        "Your friend has a different release of datalink-mp. You both need the same one."
+    );
+    // Under the header, with the page's other banners, before the steps.
+    let header_end = page.find("</h1>").expect("the page should have its header");
+    let steps = page.find("class=\"card\"").expect("the page should have its steps");
+    for code in ["cant_reach_host", "peer_version_mismatch"] {
+        let at = page.find(&format!("data-banner=\"{code}\"")).unwrap();
+        assert!(header_end < at && at < steps, "the {code} banner should sit under the header");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 13: Stop
+//
+// A player in a session presses Stop: the page sends `POST /api/stop`, and the
+// Helper ends its connections and comes back with a new Ticket, without
+// quitting. The friends are real Transports on loopback and the game is a fake
+// DLL; what the page would show is read from the Stop response and status.
+// ---------------------------------------------------------------------------
+
+impl Started {
+    /// Press Stop the way the page does, and assert it was answered with the
+    /// new Ticket in place. Returns the new Ticket's sequence number.
+    fn stop(&self) -> u64 {
+        let response = post(self, "/api/stop", &[]);
+        assert_eq!(response.status, 200, "Stop should be answered once it is done: {}", response.body);
+        let ticket_seq = response.json()["ticket_seq"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("the answer should carry the new sequence number: {}", response.body));
+        assert_eq!(
+            self.status()["ticket_seq"], ticket_seq,
+            "the new Ticket should be in place when Stop is answered"
+        );
+        ticket_seq
+    }
+}
+
+/// Start a Helper with a friend's Helper connected to it: a player hosting.
+/// None when a Transport cannot be created.
+fn start_hosting_a_friend() -> Option<(Started, iroh_transport::Transport)> {
+    let started = start(false)?;
+    let friend = friend()?;
+    dial_the_helper(&friend, &started);
+    wait_until_the_friend_lists_the_helper(&friend, &started);
+    started.wait_for_state("hosting");
+    Some((started, friend))
+}
+
+#[test]
+fn test_stop_gives_a_new_ticket_with_the_next_sequence_number_and_the_state_ready() {
+    let Some((started, _friend)) = start_hosting_a_friend() else {
+        return;
+    };
+    let before = started.ticket();
+
+    // Answered at all: Stop made a Transport, shut one down and dropped it,
+    // each of which panics on the HTTP server's async threads.
+    assert_eq!(started.stop(), 2);
+
+    let status = started.status();
+    let after = status["ticket"].as_str().expect("status should carry a Ticket");
+    assert_ne!(after, before, "Stop should give a new Ticket");
+    Ticket::parse(after).expect("the new Ticket should parse");
+    assert_eq!(status["state"], "ready");
+    assert_eq!(status["peers"], serde_json::json!([]));
+}
+
+#[test]
+fn test_each_stop_puts_the_sequence_number_up_by_one() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let first = started.ticket();
+
+    assert_eq!(started.stop(), 2);
+    let second = started.ticket();
+    assert_eq!(started.stop(), 3);
+
+    let third = started.ticket();
+    assert!(first != second && second != third && first != third, "each Stop should give a new Ticket");
+}
+
+#[test]
+fn test_connected_friend_sees_the_connection_close_promptly_after_stop() {
+    let Some((started, friend)) = start_hosting_a_friend() else {
+        return;
+    };
+
+    started.stop();
+
+    // The old Transport was closed for the friend, not left to time out.
+    let closed = common::poll_until(PEER_NOTICE_DEADLINE, || {
+        friend.connected_peers().is_empty().then_some(())
+    });
+    assert!(
+        closed.is_some(),
+        "the friend should see the close within {PEER_NOTICE_DEADLINE:?}, still lists {:?}",
+        friend.connected_peers()
+    );
+}
+
+#[test]
+fn test_stop_clears_a_dial_failure_banner() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let Some(of_another_release) = friend_of_another_release() else {
+        return;
+    };
+    started.join(of_another_release.our_ticket());
+    assert_eq!(started.wait_for_the_dial_to_end(), ["peer_version_mismatch"]);
+
+    started.stop();
+
+    assert_eq!(started.banners(), Vec::<String>::new());
+}
+
+#[test]
+fn test_stop_clears_the_invalid_ticket_banner() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    assert_eq!(started.join("not a ticket").status, 400);
+    assert_eq!(started.banners(), ["invalid_ticket"]);
+
+    started.stop();
+
+    assert_eq!(started.banners(), Vec::<String>::new());
+    assert!(started.status()["invalid_ticket"].is_null());
+}
+
+#[test]
+fn test_stop_clears_the_banner_of_the_games_join() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    let Some(ticket) = ticket_of_a_friend_who_shut_down() else {
+        return;
+    };
+    join_failed(started.join_from_the_game(&ticket));
+    assert_eq!(started.banners(), ["cant_reach_host"]);
+
+    started.stop();
+
+    assert_eq!(started.banners(), Vec::<String>::new());
+}
+
+#[test]
+fn test_stop_leaves_the_condition_banners_alone() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let mut dll = started.connect_fake_dll();
+    dll.handshake_with_version(ipc_protocol::PROTOCOL_VERSION + 1);
+    started.wait_for_banners(&["ipc_version_mismatch"]);
+
+    started.stop();
+
+    assert_eq!(started.banners(), ["ipc_version_mismatch"]);
+}
+
+#[test]
+fn test_stop_during_a_dial_ends_it_with_no_banner_and_the_state_ready() {
+    let Some(started) = start_with_a_short_dial_timeout() else {
+        return;
+    };
+    // The dial would last until its timeout and then put up cant_reach_host.
+    let (_silent, ticket) = silent_ticket();
+    assert_dial_started(&started.join(&ticket), &[]);
+
+    started.stop();
+
+    // The dial was on the Transport Stop replaced: how it ended is no news
+    // to the player, who pressed Stop.
+    assert_eq!(started.wait_for_the_dial_to_end(), Vec::<String>::new());
+    assert_eq!(started.status()["state"], "ready");
+}
+
+#[test]
+fn test_games_link_survives_stop_and_its_requests_are_answered_by_the_new_transport() {
+    let Some((started, _friend)) = start_hosting_a_friend() else {
+        return;
+    };
+    // The game is open, and its DLL connected before Stop.
+    let mut dll = started.connect_fake_dll();
+    let (_, old_ticket) = dll.handshake();
+    assert_eq!(started.status()["game_connected"], true);
+
+    started.stop();
+
+    let answer = dll.request(&ipc_protocol::IpcRequest::GetOurTicket);
+    let ipc_protocol::IpcResponse::StringValue { value: ticket } = answer else {
+        panic!("the game's request after Stop should be answered, got {answer:?}");
+    };
+    assert_ne!(ticket, old_ticket, "the game should be talking to the new Transport");
+    assert_eq!(ticket, started.ticket());
+    assert_eq!(started.status()["game_connected"], true);
+}
+
+#[test]
+fn test_friend_can_dial_the_new_ticket_after_stop() {
+    let Some((started, _old_friend)) = start_hosting_a_friend() else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+
+    started.stop();
+    dial_the_helper(&friend, &started);
+
+    started.wait_for_state("hosting");
+    started.wait_for_peers(&[short_id(&friend)]);
+    wait_until_the_friend_lists_the_helper(&friend, &started);
+}
+
+#[test]
+fn test_join_from_the_page_after_stop_works() {
+    let Some((started, _hosted)) = start_hosting_a_friend() else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+
+    started.stop();
+    assert_dial_started(&started.join(friend.our_ticket()), &[]);
+
+    started.wait_for_state("joined");
+    started.wait_for_peers(&[short_id(&friend)]);
+}
+
+#[test]
+fn test_stop_from_the_page_leaves_the_helper_running_and_it_still_quits_cleanly() {
+    let Some((started, _friend)) = start_hosting_a_friend() else {
+        return;
+    };
+    let mut dll = started.connect_fake_dll();
+    dll.handshake();
+
+    started.stop();
+
+    // A panic on one of the HTTP server's async threads would abort a release
+    // build. Here it would have cut off the answer, or the server: the
+    // Helper still answers the page and the game, and still quits cleanly.
+    assert_eq!(started.status()["state"], "ready");
+    dll.handshake();
+    quit(&started);
+    wait_for_the_helper_to_finish(started.helper);
+}
+
+#[test]
+fn test_stop_is_refused_without_the_token_from_a_foreign_origin_and_by_get() {
+    let Some((started, friend)) = start_hosting_a_friend() else {
+        return;
+    };
+    let port = started.ui_port();
+    let ticket = started.ticket();
+    let json = ("Content-Type", "application/json");
+
+    let no_token = common::http_request(port, "POST", "/api/stop", &[json]);
+    let wrong_token =
+        common::http_request(port, "POST", "/api/stop", &[json, ("X-Token", "not-the-token")]);
+    let foreign_origin = post(&started, "/api/stop", &[("Origin", "http://rebind.example")]);
+    let by_get = started.get_api("/api/stop");
+
+    assert_eq!(no_token.status, 403);
+    assert_eq!(wrong_token.status, 403);
+    assert_eq!(foreign_origin.status, 403);
+    assert_eq!(by_get.status, 405);
+    // None of them reached Stop.
+    let status = started.status();
+    assert_eq!(status["ticket"], ticket.as_str());
+    assert_eq!(status["ticket_seq"], 1);
+    assert_eq!(status["state"], "hosting");
+    assert_eq!(friend.connected_peers().len(), 1);
+}
+
+#[test]
+fn test_page_has_stop_hidden_as_it_loads_and_the_words_for_after_stop() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let page = http_get(started.ui_port(), "/", &[]).body;
+
+    // In the header, beside Quit, and hidden until status says the Helper is
+    // in a session. Which states show it is page logic, checked by hand.
+    let header = &page[..page.find("data-banner").expect("the page should have its banners")];
+    let stop = header.find("id=\"stop\"").expect("the header should have a Stop button");
+    let tag = &header[header[..stop].rfind('<').unwrap()..];
+    let tag = &tag[..=tag.find('>').unwrap()];
+    assert!(tag.contains(" hidden"), "Stop should be hidden as the page loads: {tag}");
+    assert!(header.contains("id=\"quit\""));
+    assert!(page.contains("Your Ticket changed. Share it again."));
+    assert!(
+        page.contains("Return to the game\\'s main menu first"),
+        "Stop should ask the player to return to the game's main menu first"
+    );
 }

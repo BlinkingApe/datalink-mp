@@ -16,7 +16,7 @@ Tests use the seam 1 harness, a friend Transport on loopback and the fake DLL.
 
 **Blocked by:** 02 (Transport: versioned ALPN, distinguishable dial errors, dial timeout), 11 (Step 2: join a friend's Ticket from the page)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] A UI join to a Ticket whose Transport has been shut down gives `cant_reach_host` within the shortened timeout, and the state returns to `ready`
 - [ ] A UI join to a friend built with a different Peer protocol version gives `peer_version_mismatch`, not `cant_reach_host`

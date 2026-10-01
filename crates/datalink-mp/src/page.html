@@ -65,7 +65,9 @@
 <main>
   <div class="bar">
     <h1>datalink-mp</h1>
-    <div class="row"><button class="danger" id="quit">Quit</button></div>
+    <!-- Stop is for a player in a session: hidden in ready. -->
+    <div class="row"><button id="stop" hidden>Stop</button>
+      <button class="danger" id="quit">Quit</button></div>
   </div>
 
   <!-- One element per banner code; status says which are shown. -->
@@ -80,6 +82,11 @@
       copy theirs again.</span>
     <span data-invalid-ticket="own_ticket" hidden>That's your own Ticket. Paste your
       friend's.</span></div>
+  <div class="banner bad" data-banner="cant_reach_host" hidden>Couldn't reach your friend's Helper.
+    Ask them for their current Ticket: it changes every time they start the Helper or press
+    Stop.</div>
+  <div class="banner bad" data-banner="peer_version_mismatch" hidden>Your friend has a different
+    release of datalink-mp. You both need the same one.</div>
 
   <div class="card">
     <div class="step"><div class="num" id="num1">1</div>
@@ -126,6 +133,7 @@
         <div class="pair" id="tickets">
           <div><b>Hosting:</b> send your Ticket
             <input class="ticket gap" id="ticket" readonly>
+            <div class="small warn gap" id="ticket-changed" hidden>Your Ticket changed. Share it again.</div>
             <div class="gap"><button id="copy" disabled>Copy Ticket</button></div></div>
           <div><b>Joining:</b> paste your friend's
             <textarea class="ticket gap" id="friend-ticket" autocomplete="off" spellcheck="false"
@@ -205,6 +213,15 @@
   // The peer list the page shows now, as one string, to leave the line alone
   // while it is unchanged.
   var shownPeersKey = null;
+  var stopButton = document.getElementById('stop');
+  var ticketChanged = document.getElementById('ticket-changed');
+  // The Ticket sequence number status last reported. Stop puts it up, and the
+  // page then tells the player to share the new Ticket until they copy it.
+  var shownTicketSeq = null;
+  // Whether the game was connected at the last status: Stop asks first then.
+  var gameConnected = false;
+  // Whether a Stop is on its way to the Helper.
+  var stopSent = false;
 
   // "Connected", not "players": a Helper can be connected only to look for a game.
   function renderPeers(peers) {
@@ -255,6 +272,11 @@
   function render(s) {
     if (ticketBox.value !== s.ticket) ticketBox.value = s.ticket;
     copyButton.disabled = !s.ticket;
+    if (shownTicketSeq !== null && s.ticket_seq !== shownTicketSeq) ticketChanged.hidden = false;
+    shownTicketSeq = s.ticket_seq;
+    gameConnected = s.game_connected;
+    stopButton.hidden = s.state === 'ready';
+    stopButton.disabled = stopSent;
 
     // The Helper computes the state; the page only decides which steps are ticked.
     var connected = s.state === 'joined' || s.state === 'hosting';
@@ -394,6 +416,35 @@
     });
   });
 
+  stopButton.addEventListener('click', function () {
+    // The game keeps its link to the Helper, but a game in progress is not
+    // told that the session it is in has ended.
+    if (gameConnected && !confirm('Return to the game\'s main menu first. Stop disconnects ' +
+        'everyone connected through you and gives you a new Ticket. Stop now?')) return;
+    stopSent = true;
+    stopButton.disabled = true;
+    fetch('/api/stop', {
+      method: 'POST',
+      headers: { 'X-Token': token || '', 'Content-Type': 'application/json' },
+      body: '{}'
+    }).then(function (r) {
+      if (r.status === 403) return end('stale');
+      if (r.ok) return;
+      return r.json().then(function (body) { return body.error; }, function () {})
+        .then(function (error) {
+          alert('Stop didn\'t work, so nothing has changed: your Ticket and connections are ' +
+            'as they were.' + (error ? '\n\n' + error : ''));
+        });
+    }).catch(function () {
+      // No answer: the polls find out whether the Helper is gone.
+    }).then(function () {
+      stopSent = false;
+      stopButton.disabled = false;
+      // Show the new Ticket without waiting for the next poll.
+      if (!ended) fetchStatus().catch(function () {});
+    });
+  });
+
   var quitButton = document.getElementById('quit');
   quitButton.addEventListener('click', function () {
     if (!confirm('Quit datalink-mp? Anyone connected through you will be disconnected.')) return;
@@ -414,12 +465,18 @@
   });
 
   // Make `button` copy what the read-only `box` holds. A click on the box
-  // selects its text.
-  function wireCopy(button, box) {
+  // selects its text. `copied`, if given, is called once the text is copied,
+  // by the button or by hand.
+  function wireCopy(button, box, copied) {
     var label = button.textContent;
+    copied = copied || function () {};
     box.addEventListener('click', function () { box.select(); });
+    // A copy by hand, where the clipboard is blocked. The button's own copy
+    // does not raise this event.
+    box.addEventListener('copy', copied);
     button.addEventListener('click', function () {
       var done = function () {
+        copied();
         button.textContent = 'Copied ✓';
         setTimeout(function () { button.textContent = label; }, 1200);
       };
@@ -433,7 +490,8 @@
     });
   }
 
-  wireCopy(copyButton, ticketBox);
+  // Copying the new Ticket is how the player shares it again.
+  wireCopy(copyButton, ticketBox, function () { ticketChanged.hidden = true; });
   // A button with data-copy names the box it copies.
   var copyButtons = document.querySelectorAll('[data-copy]');
   for (var i = 0; i < copyButtons.length; i++) {

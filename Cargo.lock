@@ -704,6 +704,7 @@ dependencies = [
  "ipc-protocol",
  "iroh",
  "iroh-transport",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

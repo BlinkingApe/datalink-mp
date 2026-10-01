@@ -3,10 +3,12 @@
 //!
 //! The IPC server and the command line both go through the controller, so
 //! there is one place that knows which Transport is current. The IPC server
-//! also reports here what it sees of the game's DLL. Shutting the controller
+//! also reports here what it sees of the game's DLL. Stop replaces the
+//! Transport with a new one, which has a new Ticket. Shutting the controller
 //! down closes the Transport for good, and is how the Helper ends.
 
 use crate::platform::{self, SelfCheck};
+use dp_types::DPID;
 use iroh_transport::{
     Ticket, TicketError, Transport, TransportError, TransportOptions, TransportResult,
     STREAM_PROTO_VERSION,
@@ -71,6 +73,16 @@ impl JoinRefused {
     }
 }
 
+/// Why Stop changed nothing.
+#[derive(Debug, Error)]
+pub(crate) enum StopError {
+    #[error("Failed to create the new Transport")]
+    Transport(#[source] TransportError),
+
+    #[error("The Helper has shut down")]
+    ShutDown,
+}
+
 /// Why a join failed.
 #[derive(Debug, Error)]
 pub enum JoinError {
@@ -127,9 +139,43 @@ struct Joins {
     dialling: bool,
     /// A dial of ours succeeded, and peers have been connected ever since
     dialled: bool,
-    /// The most recent join was refused because its text is not a Ticket to
-    /// dial: the `invalid_ticket` banner
-    invalid_ticket: Option<InvalidTicket>,
+    /// How the most recent join attempt failed, if it did in a way the page
+    /// has a banner for. These are the event banners: one field, so that a
+    /// join attempt (and anything else that clears them) clears them all.
+    failure: Option<JoinFailure>,
+}
+
+/// How a join attempt failed, as the page tells the player. Each is one of
+/// the event banners.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JoinFailure {
+    /// The text given is not a Ticket to dial
+    InvalidTicket(InvalidTicket),
+    /// The dial timed out or could not connect
+    CantReachHost,
+    /// The friend's Helper rejected the dial for its ALPN: another release
+    PeerVersionMismatch,
+}
+
+impl JoinFailure {
+    /// The banner for a join whose dial, or whatever followed it, failed with
+    /// `error`. None for the failures no banner speaks of, such as a host
+    /// that has no session yet.
+    fn of_dial(error: &TransportError) -> Option<Self> {
+        match error {
+            TransportError::CantReach => Some(Self::CantReachHost),
+            TransportError::PeerProtocolMismatch => Some(Self::PeerVersionMismatch),
+            _ => None,
+        }
+    }
+
+    fn banner(self) -> Banner {
+        match self {
+            Self::InvalidTicket(_) => Banner::InvalidTicket,
+            Self::CantReachHost => Banner::CantReachHost,
+            Self::PeerVersionMismatch => Banner::PeerVersionMismatch,
+        }
+    }
 }
 
 /// Something the page must tell the player, as a code the page has the words for.
@@ -145,6 +191,11 @@ pub enum Banner {
     /// The most recent join was given text that is not a Ticket, or our own
     /// Ticket. [`Status::invalid_ticket`] says which.
     InvalidTicket,
+    /// The most recent join's dial could not reach the friend's Helper
+    CantReachHost,
+    /// The most recent join's dial was refused by a friend's Helper of
+    /// another release
+    PeerVersionMismatch,
 }
 
 /// A snapshot of the Helper's status, as the page shows it.
@@ -172,9 +223,20 @@ pub struct Status {
     pub invalid_ticket: Option<InvalidTicket>,
 }
 
+/// The current Transport, and the sequence number of its Ticket.
+struct Current {
+    transport: Arc<Transport>,
+    ticket_seq: u64,
+}
+
 /// Owns the current Transport, and therefore the Helper's Ticket.
 pub struct SessionController {
-    transport: Arc<Transport>,
+    /// Replaced by Stop. Both fields change under one lock, so the Ticket
+    /// status shows always goes with its sequence number. Where the joins are
+    /// locked too, they are locked first.
+    current: Mutex<Current>,
+    /// What each Transport is built with, the one Stop builds included.
+    transport_options: TransportOptions,
     game_folder: PathBuf,
     ipc_port: u16,
     ipc_port_in_use: bool,
@@ -182,8 +244,8 @@ pub struct SessionController {
     ipc_version_mismatch: AtomicBool,
     /// Shared with the dial in progress, which ends itself: see [`PendingDial`].
     joins: Arc<Mutex<Joins>>,
-    /// Whether the Helper has shut down. Held while it does, so that a second
-    /// shutdown waits for the first instead of racing it.
+    /// Whether the Helper has shut down. Held while it does, and while Stop
+    /// replaces the Transport, so that neither races a shutdown or a Stop.
     shut_down: Mutex<bool>,
     shut_down_signal: Condvar,
 }
@@ -207,7 +269,11 @@ impl SessionController {
         );
 
         Ok(Self {
-            transport: Arc::new(transport),
+            current: Mutex::new(Current {
+                transport: Arc::new(transport),
+                ticket_seq: FIRST_TICKET_SEQ,
+            }),
+            transport_options: options,
             game_folder,
             ipc_port,
             ipc_port_in_use,
@@ -224,7 +290,16 @@ impl SessionController {
     /// Ask each time one is needed instead of keeping the result: the current
     /// Transport is replaced by Stop.
     pub fn transport(&self) -> Arc<Transport> {
-        self.transport.clone()
+        self.current().transport.clone()
+    }
+
+    fn current(&self) -> MutexGuard<'_, Current> {
+        self.current.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Whether `transport` is still the current one: Stop has not replaced it.
+    fn is_current(&self, transport: &Arc<Transport>) -> bool {
+        Arc::ptr_eq(transport, &self.current().transport)
     }
 
     /// A snapshot of the Helper's status. Nothing here waits on the Transport
@@ -234,11 +309,15 @@ impl SessionController {
     /// the player restores is seen without a restart. It reads the folder's
     /// list of files: from async code, call this inside `spawn_blocking`.
     pub fn status(&self) -> Status {
-        let transport = self.transport();
         // The peers are read with the joins locked: a dial that succeeded has
         // put its peer in the Transport's list before it records its success,
-        // so what is read here always agrees with what the joins say.
+        // so what is read here always agrees with what the joins say. So is
+        // the Transport, which Stop replaces with the joins locked.
         let mut joins = self.joins();
+        let (transport, ticket_seq) = {
+            let current = self.current();
+            (current.transport.clone(), current.ticket_seq)
+        };
         // A plain lock read, unlike the Transport's blocking calls.
         let mut peers = transport
             .connected_peers()
@@ -246,7 +325,7 @@ impl SessionController {
             .map(|id| id.fmt_short().to_string())
             .collect::<Vec<_>>();
         let state = session_state(&mut joins, !peers.is_empty());
-        let invalid_ticket = joins.invalid_ticket;
+        let failure = joins.failure;
         drop(joins);
         // The Transport lists them in no particular order; sorted, the page
         // shows them the same way on every poll.
@@ -262,9 +341,11 @@ impl SessionController {
         if self.ipc_version_mismatch.load(Ordering::Relaxed) {
             banners.push(Banner::IpcVersionMismatch);
         }
-        if invalid_ticket.is_some() {
-            banners.push(Banner::InvalidTicket);
-        }
+        banners.extend(failure.map(JoinFailure::banner));
+        let invalid_ticket = match failure {
+            Some(JoinFailure::InvalidTicket(reason)) => Some(reason),
+            _ => None,
+        };
         Status {
             release_version: env!("CARGO_PKG_VERSION"),
             ipc_version: ipc_protocol::PROTOCOL_VERSION,
@@ -272,7 +353,7 @@ impl SessionController {
             os: OS,
             state,
             ticket: transport.our_ticket().to_string(),
-            ticket_seq: FIRST_TICKET_SEQ,
+            ticket_seq,
             ipc_port: self.ipc_port,
             self_check,
             game_connected: self.game_connected.load(Ordering::Relaxed),
@@ -319,10 +400,10 @@ impl SessionController {
     /// it may be called from async code.
     ///
     /// The text is trimmed first, so stray spaces and line breaks around a
-    /// pasted Ticket do no harm. Each join attempt clears the
-    /// `invalid_ticket` banner, and one refused as not a Ticket, or as our
-    /// own, sets it again; one refused because a dial is already in progress
-    /// changes nothing.
+    /// pasted Ticket do no harm. Each join attempt clears the event banners
+    /// of the one before it, and one refused as not a Ticket, or as our own,
+    /// sets the `invalid_ticket` banner; one refused because a dial is
+    /// already in progress changes nothing.
     ///
     /// The dial is not made here: run the result with [`dial`](Self::dial).
     pub(crate) fn begin_join(&self, text: &str) -> Result<PendingDial, JoinRefused> {
@@ -331,7 +412,11 @@ impl SessionController {
             return Err(JoinRefused::DialInProgress);
         }
         let checked = self.check_ticket(text);
-        joins.invalid_ticket = checked.as_ref().err().and_then(JoinRefused::invalid_ticket);
+        joins.failure = checked
+            .as_ref()
+            .err()
+            .and_then(JoinRefused::invalid_ticket)
+            .map(JoinFailure::InvalidTicket);
         let ticket = checked?;
         let mut warnings = Vec::new();
         if ticket.addr().addrs.is_empty() {
@@ -351,9 +436,9 @@ impl SessionController {
     /// The friend's Ticket in the text given to a join, trimmed.
     fn check_ticket(&self, text: &str) -> Result<Ticket, JoinRefused> {
         let ticket = Ticket::parse(text.trim()).map_err(JoinRefused::NotATicket)?;
-        // Through the field, not `transport()`: no reference to a Transport
-        // is taken, so none can be the last one dropped on an async thread.
-        if ticket.addr().id == self.transport.endpoint_id() {
+        // Not through `transport()`: no reference to a Transport is taken,
+        // so none can be the last one dropped on an async thread.
+        if ticket.addr().id == self.current().transport.endpoint_id() {
             return Err(JoinRefused::OwnTicket);
         }
         Ok(ticket)
@@ -362,26 +447,106 @@ impl SessionController {
     /// Dial the friend's Helper of a join that [`begin_join`](Self::begin_join)
     /// accepted (blocking, for up to the Transport's dial timeout).
     ///
+    /// A dial that cannot reach the friend's Helper, or that it refuses for
+    /// another release, puts up that event banner, unless Stop replaced the
+    /// Transport it was made on meanwhile: the player pressed Stop, and the
+    /// dial's end is no news to them.
+    ///
     /// It waits on the Transport's runtime: from async code, call it inside
     /// `spawn_blocking`.
     pub(crate) fn dial(&self, pending: PendingDial) -> TransportResult<()> {
         let ticket = pending.ticket.serialize();
         info!("Connecting to host ticket: {}", ticket);
-        let dialled = self.transport().connect_to_peer(&ticket);
+        let transport = self.transport();
+        let dialled = transport.connect_to_peer(&ticket);
         match &dialled {
-            Ok(()) => {
-                info!("Connected to host!");
-                // Under the same lock as the end of the dial: status never
-                // sees the dial over and its success not yet recorded.
-                let mut joins = self.joins();
-                joins.dialled = true;
-                joins.dialling = false;
-            }
+            Ok(()) => info!("Connected to host!"),
             Err(e) => warn!("Could not connect to host: {}", e),
+        }
+        {
+            // Under the same lock as the end of the dial: status never sees
+            // the dial over and how it went not yet recorded.
+            let mut joins = self.joins();
+            if self.is_current(&transport) {
+                match &dialled {
+                    Ok(()) => joins.dialled = true,
+                    Err(e) => joins.failure = JoinFailure::of_dial(e),
+                }
+            }
+            joins.dialling = false;
         }
         // Dropping it ends the dial, whichever way it went.
         drop(pending);
         dialled
+    }
+
+    /// Join the session hosted by the Helper named by `host_ticket`, for the
+    /// game's DLL (blocking, for up to the Transport's dial timeout and the
+    /// session exchange after it).
+    ///
+    /// To the page this is a join attempt like its own: it clears the event
+    /// banners of the one before it, and a dial that cannot reach the host,
+    /// or that the host refuses for another release, puts up the same banner
+    /// as the page's dial would, unless Stop replaced the Transport meanwhile.
+    /// Failing for any other reason, such as a host with no session yet, puts
+    /// up none.
+    pub(crate) fn join_session(&self, host_ticket: &str) -> TransportResult<DPID> {
+        self.joins().failure = None;
+        let transport = self.transport();
+        let joined = transport.join_session_by_ticket(host_ticket);
+        if let Err(e) = &joined {
+            let mut joins = self.joins();
+            if self.is_current(&transport) {
+                joins.failure = JoinFailure::of_dial(e);
+            }
+        }
+        joined
+    }
+
+    /// Stop: end the current connections and carry on with a new Transport,
+    /// and so a new Ticket (blocking). Returns the new Ticket's sequence
+    /// number.
+    ///
+    /// The new Transport is created first, so that if that fails nothing has
+    /// changed, and so that the IPC server always finds a Transport: the
+    /// game's link to the Helper survives Stop. The old Transport is then
+    /// shut down gracefully, so the connected Helpers notice at once. Stop
+    /// also clears the event banners, which were about joins made on the old
+    /// one.
+    ///
+    /// Creating a Transport and shutting one down both wait on a Transport's
+    /// runtime, and the old Transport's last reference may be dropped here:
+    /// from async code, call it inside `spawn_blocking`. Takes up to
+    /// `Transport::SHUTDOWN_TIMEOUT` once the new Transport is up.
+    pub(crate) fn stop(&self) -> Result<u64, StopError> {
+        let shut_down = self.shut_down.lock().unwrap_or_else(PoisonError::into_inner);
+        if *shut_down {
+            return Err(StopError::ShutDown);
+        }
+        info!("Stopping: creating a new transport");
+        // No lock but the one above is held while this waits on the network:
+        // status and the IPC server carry on with the old Transport.
+        let transport = Transport::with_options(self.transport_options).map_err(|e| {
+            warn!("Stop failed, nothing changed: {}", e);
+            StopError::Transport(e)
+        })?;
+        info!("New transport. Endpoint ID: {:?}", transport.endpoint_id());
+        let (old, ticket_seq) = {
+            let mut joins = self.joins();
+            let mut current = self.current();
+            let old = std::mem::replace(&mut current.transport, Arc::new(transport));
+            current.ticket_seq += 1;
+            joins.failure = None;
+            (old, current.ticket_seq)
+        };
+        old.shutdown();
+        // Most likely the last reference, so the old Transport ends here, on
+        // this thread. Otherwise a request still using it drops it after,
+        // on the thread it runs on, which is never an async one either.
+        drop(old);
+        drop(shut_down);
+        info!("Stopped. Ticket sequence number: {}", ticket_seq);
+        Ok(ticket_seq)
     }
 
     /// Shut the Helper down: close every peer connection and the endpoint
@@ -399,7 +564,9 @@ impl SessionController {
             return;
         }
         info!("Shutting down");
-        self.transport.shutdown();
+        // A clone, so that the Transport is not locked while it shuts down:
+        // status reads it meanwhile.
+        self.transport().shutdown();
         *shut_down = true;
         self.shut_down_signal.notify_all();
     }

@@ -17,7 +17,7 @@ Tests use the seam 1 harness, a friend Transport on loopback and the fake DLL.
 
 **Blocked by:** 03 (Transport: `shutdown()` and `connected_peers()`), 09 (Step 3: game link status), 11 (Step 2: join a friend's Ticket from the page)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [ ] After Stop the Ticket has changed, the sequence number has gone up by one, and the state is `ready`
 - [ ] A connected friend sees the connection close promptly
