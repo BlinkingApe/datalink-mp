@@ -12,7 +12,7 @@ The gate, on the archives of one `-rc.N` draft:
 
 - [ ] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
 - [ ] Windows file properties of the exe and the DLL show `0.1.0`
-- [ ] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
+- [x] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
 - [ ] The same game with a Windows-using friend over the internet
 
 Trust checks:
@@ -40,3 +40,12 @@ Publish:
   - `dplayx.dll` `203a2ba0e63132759bc4dc095e6cb77650cb7434e60301219d868c326b9a097c` (the same in all three archives)
 - `main` is one commit past the RC (`4c12b62`, ticket notes only). Tag `v0.1.0` on `d4f9f09`, the gated commit, not on `main`: `git tag v0.1.0 v0.1.0-rc.2^{}`.
 - `docs/releasing.md` section 4's commands say `v0.1.0-rc.1` as an example; with this RC it's `gh release download v0.1.0-rc.2 -D gated`.
+
+**2026-10-01 (maintainer, recorded by agent):** First gate results on `v0.1.0-rc.2`.
+
+- A game between Linux and the maintainer's own Windows machine connected and started, both sides running only the RC's Helper and DLL. Box ticked.
+- Smoke test, first try: the Windows files were copied over a USB stick, not downloaded. A Windows Security (firewall) alert appeared, was allowed, and the page opened. A USB copy has no download mark, so this doesn't test SmartScreen.
+- Smoke test, second try: the `.zip` was downloaded from the GitHub draft and extracted over the first copy. There was no firewall alert (already allowed for that path) and **no SmartScreen prompt**. The cause isn't known yet: the extractor may have dropped the download mark, or SmartScreen may be off. The SmartScreen part of the smoke test is still unproven, so that box stays unticked.
+- VirusTotal: 1 of about 70 engines flagged a file, Acronis (Static ML). Microsoft (Defender) shows Undetected, so no WDSI submission is needed. Still missing: which file was flagged and both report links for the release notes.
+- Not yet run: file properties showing `0.1.0`, and the game with a friend over the internet.
+- No defect found, so no new ticket or `-rc.N`.

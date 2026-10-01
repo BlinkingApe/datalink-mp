@@ -39,7 +39,7 @@ git push origin v0.1.0-rc.1
   locally.
 - An RC's binaries already report the Release version it becomes (`0.1.0`, not
   `0.1.0-rc.1`), in the page and in Windows file properties. That is what
-  lets the gated RC's archives become the release (section 4).
+  lets the gated RC's archives become the release (section 5).
 - Number RCs from 1 and never reuse a number: a new defect means a new
   `-rc.N` and a fresh gate. A tag that was pushed and deleted counts as used;
   the first CI-built RC for `0.1.0` is `-rc.2`, because `-rc.1` was spent on
@@ -61,7 +61,7 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
 
 - Archive names carry the **version, not the tag**, so an RC and its final
   release have identically named assets. That is what makes
-  `gh release upload --clobber` replace them in section 4.
+  `gh release upload --clobber` replace them in section 5.
 - The attestations are also stored by GitHub: they're listed on the run's
   summary page and under the repository's **Attestations** page
   (`/attestations`), and `gh attestation verify` finds them there. Verify
@@ -110,9 +110,46 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
   version, and the Linux Helper must be static. A failure there means the
   toolchain changed, not that the code did.
 
-## 4. After the gate
+## 4. Run the gate
 
-Run the gate (ADR-0002 section 4) on one RC's archives. Then:
+The gate (ADR-0002 section 4) runs on one RC's archives, downloaded from its
+draft. Bytes you built yourself, or copied from an earlier RC, don't count.
+For `0.1.0` the gated RC is `v0.1.0-rc.2`.
+
+- **Get the Windows `.zip` onto Windows with a browser download** from the
+  draft, then extract it. A copy over a USB stick carries no download mark, so
+  Windows skips SmartScreen and the smoke test proves nothing about it. That
+  happened on the first `0.1.0` try.
+- The first start of `datalink-mp.exe` shows a **Windows Security** firewall
+  alert; allow it. Windows remembers the answer for that path, so extracting a
+  later RC over the same Game folder doesn't ask again. To see the alert again,
+  use a fresh folder.
+- `0.1.0`: on the maintainer's own Windows machine, a browser-downloaded copy
+  extracted over the USB copy showed **no SmartScreen prompt** either. The
+  cause isn't known yet. The extractor may not carry the download mark onto
+  the files it extracts (Explorer's own Extract All does), or SmartScreen may
+  be off. To check, look for **Unblock** under the exe's Properties →
+  General, or run `Get-Item .\datalink-mp.exe -Stream Zone.Identifier` in
+  PowerShell.
+- A game between Linux (Faugus, the musl `.tar.gz`) and Windows, both
+  running only the archives' Helper and DLL, connected and started for
+  `0.1.0` on the maintainer's own Windows machine.
+
+### VirusTotal and Defender
+
+Upload the exe and the DLL from the extracted Windows `.zip` and keep both
+report links for the release notes.
+
+- `0.1.0`: 1 of about 70 engines flagged it: Acronis (Static ML), a
+  machine-learning verdict on the file's shape, not a known signature.
+  Expect that kind of hit on unsigned binaries.
+- What matters for WDSI is the **Microsoft** row, which is Defender. It said
+  Undetected for `0.1.0`, so nothing was submitted. If it ever flags the exe
+  or the DLL, file a WDSI "software developer" submission before publishing.
+
+## 5. After the gate
+
+Once every gate check passes:
 
 - Tag the gated RC's commit `v<version>` and push it. Its run builds new,
   different bytes (builds aren't reproducible) and opens its own draft.
@@ -121,7 +158,7 @@ Run the gate (ADR-0002 section 4) on one RC's archives. Then:
   bind the archives' digests, not the tag.
 
   ```bash
-  gh release download v0.1.0-rc.1 -D gated
+  gh release download v0.1.0-rc.2 -D gated
   gh release upload v0.1.0 gated/* --clobber
   ```
 
