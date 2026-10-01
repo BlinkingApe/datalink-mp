@@ -11,7 +11,7 @@ Run ADR-0002 section 4 (the gate) and the per-release items of section 3 (VirusT
 The gate, on the archives of one `-rc.N` draft:
 
 - [ ] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
-- [ ] Windows file properties of the exe and the DLL show `0.1.0`
+- [x] Windows file properties of the exe and the DLL show `0.1.0`
 - [x] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
 - [ ] The same game with a Windows-using friend over the internet
 
@@ -49,3 +49,10 @@ Publish:
 - VirusTotal: 1 of about 70 engines flagged a file, Acronis (Static ML). Microsoft (Defender) shows Undetected, so no WDSI submission is needed. Still missing: which file was flagged and both report links for the release notes.
 - Not yet run: file properties showing `0.1.0`, and the game with a friend over the internet.
 - No defect found, so no new ticket or `-rc.N`.
+
+**2026-10-01 (maintainer, recorded by agent):** More gate results.
+
+- Windows file properties show `0.1.0` for the exe and the DLL. Box ticked.
+- VirusTotal: the DLL is clean (0/71). The Acronis (Static ML) hit was on the exe. Report links still needed.
+- SmartScreen, a third try: SmartScreen's app check is confirmed on. A fresh browser download was extracted into a new folder. The firewall alert came back, but there was still no SmartScreen prompt. Whether the extracted exe carries the download mark (Unblock / `Zone.Identifier`) hasn't been checked yet.
+- The game with a friend over the internet is postponed. A substitute was proposed: the laptop on a phone's mobile data, the other machine on home Wi-Fi.

@@ -124,13 +124,14 @@ For `0.1.0` the gated RC is `v0.1.0-rc.2`.
   alert; allow it. Windows remembers the answer for that path, so extracting a
   later RC over the same Game folder doesn't ask again. To see the alert again,
   use a fresh folder.
-- `0.1.0`: on the maintainer's own Windows machine, a browser-downloaded copy
-  extracted over the USB copy showed **no SmartScreen prompt** either. The
-  cause isn't known yet. The extractor may not carry the download mark onto
-  the files it extracts (Explorer's own Extract All does), or SmartScreen may
-  be off. To check, look for **Unblock** under the exe's Properties →
-  General, or run `Get-Item .\datalink-mp.exe -Stream Zone.Identifier` in
-  PowerShell.
+- `0.1.0`: on the maintainer's own Windows machine, with SmartScreen on, a
+  browser-downloaded copy showed **no SmartScreen prompt**. That held both
+  extracted over the USB copy and extracted into a new folder (where the
+  firewall alert came back). The cause isn't known yet. One candidate is an
+  extractor that doesn't carry the download mark onto the files it extracts
+  (Explorer's own Extract All does). To check, look for **Unblock** under
+  the exe's Properties → General, or run
+  `Get-Item .\datalink-mp.exe -Stream Zone.Identifier` in PowerShell.
 - A game between Linux (Faugus, the musl `.tar.gz`) and Windows, both
   running only the archives' Helper and DLL, connected and started for
   `0.1.0` on the maintainer's own Windows machine.
@@ -140,9 +141,9 @@ For `0.1.0` the gated RC is `v0.1.0-rc.2`.
 Upload the exe and the DLL from the extracted Windows `.zip` and keep both
 report links for the release notes.
 
-- `0.1.0`: 1 of about 70 engines flagged it: Acronis (Static ML), a
-  machine-learning verdict on the file's shape, not a known signature.
-  Expect that kind of hit on unsigned binaries.
+- `0.1.0`: the DLL was clean (0/71). The exe got one hit out of about 70:
+  Acronis (Static ML), a machine-learning verdict on the file's shape, not a
+  known signature. Expect that kind of hit on unsigned binaries.
 - What matters for WDSI is the **Microsoft** row, which is Defender. It said
   Undetected for `0.1.0`, so nothing was submitted. If it ever flags the exe
   or the DLL, file a WDSI "software developer" submission before publishing.
