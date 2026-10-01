@@ -172,10 +172,10 @@ impl Guard {
     }
 }
 
-/// The policy for every response: the page's own inline scripts (by hash) and
-/// inline style, requests to this server only, nothing else loaded, and no
-/// framing. Style is allowed inline rather than by hash so that `style`
-/// attributes in the page keep working.
+/// The policy for every response: the page's own inline scripts (by hash),
+/// inline style and the fonts the page carries as data URLs, requests to this
+/// server only, nothing else loaded, and no framing. Style is allowed inline
+/// rather than by hash so that `style` attributes in the page keep working.
 fn content_security_policy(page: &str) -> String {
     let scripts = inline_scripts(page)
         .map(|script| format!("'sha256-{}'", BASE64.encode(&Sha256::digest(script))))
@@ -187,7 +187,8 @@ fn content_security_policy(page: &str) -> String {
     };
     format!(
         "default-src 'none'; script-src {scripts}; style-src 'unsafe-inline'; \
-         connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+         font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'; \
+         frame-ancestors 'none'"
     )
 }
 

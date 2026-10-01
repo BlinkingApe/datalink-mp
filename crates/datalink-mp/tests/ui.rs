@@ -157,6 +157,31 @@ fn test_page_is_served_without_a_token_and_loads_nothing_from_other_hosts() {
 }
 
 #[test]
+fn test_page_carries_its_fonts_inside_it() {
+    let Some(started) = start(false) else {
+        return;
+    };
+
+    let page = http_get(started.ui_port(), "/", &[]);
+
+    let faces: Vec<&str> = page.body.split("@font-face").skip(1).collect();
+    for family in ["Chakra Petch", "IBM Plex Sans", "IBM Plex Mono"] {
+        assert!(
+            faces.iter().any(|face| face.contains(&format!("font-family: \"{family}\""))),
+            "the page should embed {family}"
+        );
+    }
+    // Every font is a woff2 file inside the page, not a file to fetch.
+    const PREFIX: &str = "url(data:font/woff2;base64,";
+    for face in &faces {
+        let start = face.find(PREFIX).expect("each font face is a data URL") + PREFIX.len();
+        let encoded = &face[start..start + face[start..].find(')').unwrap()];
+        let font = data_encoding::BASE64.decode(encoded.as_bytes()).expect("the font is base64");
+        assert_eq!(&font[..4], b"wOF2", "the font is a woff2 file");
+    }
+}
+
+#[test]
 fn test_browser_opener_is_called_once_with_the_launch_url() {
     let Some(started) = start(true) else {
         return;
@@ -578,8 +603,8 @@ fn test_every_response_carries_the_security_headers() {
     }
 }
 
-/// The page's own inline script and style, connections to itself, no framing,
-/// and nothing else.
+/// The page's own inline script, style and fonts, connections to itself, no
+/// framing, and nothing else.
 fn assert_csp_is_strict(kind: &str, csp: &str) {
     let directives = csp
         .split(';')
@@ -604,6 +629,8 @@ fn assert_csp_is_strict(kind: &str, csp: &str) {
     assert_eq!(sources("base-uri"), ["'none'"], "{kind}: {csp}");
     assert_eq!(sources("form-action"), ["'none'"], "{kind}: {csp}");
     assert_eq!(sources("style-src"), ["'unsafe-inline'"], "{kind}: {csp}");
+    // Fonts: only the ones the page carries inside it.
+    assert_eq!(sources("font-src"), ["data:"], "{kind}: {csp}");
     // Scripts: only the page's own, named by hash. No inline script an
     // attacker could inject, no script from anywhere, and no eval.
     let scripts = sources("script-src");
@@ -621,6 +648,7 @@ fn assert_csp_is_strict(kind: &str, csp: &str) {
                 "base-uri",
                 "form-action",
                 "style-src",
+                "font-src",
                 "script-src"
             ]
             .contains(&name.as_str()),

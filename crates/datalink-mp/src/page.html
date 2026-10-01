@@ -2,63 +2,91 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="color-scheme" content="dark">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>datalink-mp</title>
 <style>
+  /* @font-face rules go here */
+  /* One look, whatever the browser's colour scheme: a Datalink terminal. */
   :root {
-    --bg: #f6f7f9; --card: #fff; --ink: #1c2330; --muted: #5d6778; --line: #dde1e8;
-    --accent: #1f6feb; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e;
-    --okbg: #dafbe1; --warnbg: #fff8c5; --badbg: #ffebe9;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #0f1419; --card: #182029; --ink: #e6edf3; --muted: #8d98a8; --line: #2b3440;
-      --accent: #4c8dff; --ok: #3fb950; --warn: #d29922; --bad: #f85149;
-      --okbg: #12301c; --warnbg: #332a0e; --badbg: #3a1418;
-    }
+    --bg: #050c0b; --card: #0a1714; --card-2: #0f201c; --ink: #d5ebe3; --ink-2: #b0ccc2;
+    --muted: #7fa397; --faint: #4f7167; --line: #1c3932; --card-line: #22473e;
+    --accent: #3fd3a0; --glow: rgba(63, 211, 160, .35);
+    --ok: #3fd3a0; --warn: #f0b44c; --bad: #ff7d6e;
+    --okbg: #123a30; --badbg: #2e1412;
+    --display: "Chakra Petch", system-ui, sans-serif;
+    --body-font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  html { background: var(--bg); }
+  /* Scanlines over a faint grid. */
+  body { margin: 0; background-color: var(--bg); color: var(--ink);
+    font: 15px/1.5 var(--body-font); -webkit-font-smoothing: antialiased;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(0, 0, 0, .22) 0 1px, transparent 1px 3px),
+      linear-gradient(rgba(63, 211, 160, .05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(63, 211, 160, .05) 1px, transparent 1px);
+    background-size: auto, 32px 32px, 32px 32px; background-attachment: fixed; }
+  /* Each font comes in the weights embedded above, so bold is 600. */
+  b, strong { font-weight: 600; }
   main { max-width: 640px; margin: 0 auto; padding: 16px; }
-  h1 { font-size: 18px; margin: 0; }
-  h2 { font-size: 15px; margin: 3px 0 8px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin: 12px 0; }
+  h1 { font: 600 26px/1.1 var(--display); margin: 0; letter-spacing: .02em; text-transform: uppercase;
+    text-shadow: 0 0 22px var(--glow); }
+  h1::before { content: "// Alpha Centauri · multiplayer"; display: block; font: 11px var(--mono);
+    letter-spacing: .08em; color: var(--faint); text-shadow: none; margin-bottom: 2px; }
+  h2 { font: 600 16px/1.2 var(--display); margin: 4px 0 8px; letter-spacing: .03em; text-transform: uppercase;
+    color: var(--accent); }
+  .card { background: var(--card); border: 1px solid var(--card-line); border-top: 2px solid var(--accent);
+    padding: 10px 18px; margin: 14px 0;
+    clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 0 100%); }
   .muted { color: var(--muted); }
-  .small { font-size: 12px; }
+  .small { font-size: 13px; }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--ink);
-    border-radius: 7px; padding: 6px 12px; cursor: pointer; }
-  button:disabled { opacity: .45; cursor: not-allowed; }
-  button.danger { color: var(--bad); }
-  .bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
-  input.ticket, textarea.ticket { width: 100%; font: 12px/1.4 ui-monospace, Consolas, monospace;
-    border: 1px solid var(--line); border-radius: 7px; padding: 8px; background: var(--bg); color: var(--ink); }
+  button { font: 600 12px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    border: 1px solid var(--card-line); background: var(--card-2); color: var(--ink);
+    border-radius: 3px; padding: 7px 12px; cursor: pointer; }
+  button:hover:not(:disabled), button:focus-visible { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.danger, button.danger:hover:not(:disabled) { color: var(--bad); }
+  button.danger:hover:not(:disabled), button.danger:focus-visible { border-color: var(--bad); }
+  .bar { display: flex; justify-content: space-between; align-items: flex-end; gap: 8px; flex-wrap: wrap; }
+  input.ticket, textarea.ticket { width: 100%; font: 12px/1.4 var(--mono);
+    border: 1px solid var(--line); border-radius: 3px; padding: 8px; background: var(--bg); color: var(--ink); }
+  input.ticket:focus, textarea.ticket:focus { outline: none; border-color: var(--accent); }
   textarea.ticket { resize: vertical; min-height: 54px; display: block; }
   /* Side by side, or one above the other in a narrow window. */
   .pair { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
   .pair > div { flex: 1; min-width: min(220px, 100%); }
-  .step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; margin: 14px 0; }
-  .num { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700;
-    border: 2px solid var(--line); color: var(--muted); }
-  .num.done { background: var(--ok); border-color: var(--ok); color: #fff; }
-  .num.now { border-color: var(--accent); color: var(--accent); }
+  .pair b { font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .step { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; margin: 14px 0; }
+  .num { width: 28px; height: 28px; border-radius: 3px; display: grid; place-items: center;
+    font: 600 14px var(--mono); border: 1px solid var(--line); color: var(--faint); }
+  .num.done { background: var(--accent); border-color: var(--accent); color: var(--bg); box-shadow: 0 0 14px var(--glow); }
+  .num.now { border-color: var(--accent); color: var(--accent); box-shadow: 0 0 10px var(--glow); }
   [hidden] { display: none !important; }
-  code { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; overflow-wrap: anywhere; }
-  .pill { display: inline-block; border-radius: 99px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
-  .pill.ok { background: var(--okbg); color: var(--ok); }
-  .pill.idle { background: var(--line); color: var(--muted); }
-  .banner { border-radius: 10px; padding: 12px 14px; margin: 12px 0; border: 1px solid; }
-  .banner.bad { background: var(--badbg); border-color: var(--bad); }
-  .ingame { border-left: 3px solid var(--accent); padding: 4px 0 4px 10px; margin: 8px 0; }
+  code { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere; color: var(--ink-2); }
+  .pill { display: inline-block; border-radius: 3px; padding: 1px 8px; font: 600 11px/1.6 var(--mono);
+    letter-spacing: .08em; text-transform: uppercase; border: 1px solid; }
+  .pill.ok { background: var(--okbg); color: var(--ok); border-color: var(--ok); }
+  .pill.idle { background: transparent; color: var(--muted); border-color: var(--line); }
+  .banner { padding: 12px 14px; margin: 14px 0; border: 1px solid var(--line); border-left: 3px solid; }
+  .banner.bad { background: var(--badbg); border-left-color: var(--bad); }
+  .ingame { border-left: 2px solid var(--accent); background: var(--card-2); padding: 8px 12px; margin: 8px 0;
+    font: 13px/1.5 var(--mono); color: var(--muted); }
+  .ingame b { color: var(--ink); }
   .step .banner { margin: 0; }
   .warn { color: var(--warn); }
   .ok { color: var(--ok); }
   .gap { margin-top: 6px; }
-  details summary { cursor: pointer; font-weight: 600; }
+  details summary { cursor: pointer; font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--muted); }
   details p { margin: 6px 0; }
   .copyline { display: flex; gap: 6px; align-items: center; margin: 4px 0 8px; }
   .copyline input { flex: 1; min-width: 0; }
+  #peers code { color: var(--accent); }
+  #footer { font: 11px var(--mono); letter-spacing: .04em; color: var(--faint); }
 </style>
 </head>
 <body>

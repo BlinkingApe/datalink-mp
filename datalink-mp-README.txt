@@ -159,5 +159,8 @@ LICENSE
 Dual-licensed under MIT or Apache-2.0, at your option. See
 datalink-mp-LICENSE-MIT.txt and datalink-mp-LICENSE-APACHE.txt.
 
+The page uses the fonts Chakra Petch and IBM Plex, under the SIL Open Font
+License 1.1. See datalink-mp-LICENSE-FONTS.txt.
+
 Sid Meier's Alpha Centauri is a trademark of its respective owners. This
 project is an unaffiliated interoperability layer and contains no game assets.

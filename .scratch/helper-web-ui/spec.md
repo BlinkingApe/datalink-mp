@@ -248,7 +248,7 @@ The ADRs left these open.
 - Every request's `Host` header must be `127.0.0.1:<ui-port>` or `localhost:<ui-port>`, where the port is the one actually bound. Otherwise 403.
 - State-changing routes are POST only, need `Content-Type: application/json`, and reject any `Origin` that is present and is not the Helper's own.
 - No CORS headers are ever sent.
-- Responses carry `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a Content-Security-Policy that allows only the page's own inline script and style, connections to itself, and no framing.
+- Responses carry `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a Content-Security-Policy that allows only the page's own inline script and style, the fonts the page carries inside it (`font-src data:`), connections to itself, and no framing.
 - There are no file-writing routes, and the Helper writes no files in UI mode.
 
 ### Browser opening

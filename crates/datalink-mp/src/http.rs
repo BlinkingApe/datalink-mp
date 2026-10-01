@@ -13,18 +13,59 @@ use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router, ServiceExt};
+use data_encoding::BASE64;
 use serde::Deserialize;
 use serde_json::json;
 use std::net::TcpListener;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tracing::info;
 
-/// The page, embedded in the binary.
-const PAGE: &str = include_str!("page.html");
+/// The page, embedded in the binary, with its fonts inside it. The page loads
+/// nothing, so it needs no route for them and works offline.
+static PAGE: LazyLock<String> =
+    LazyLock::new(|| include_str!("page.html").replacen(FONTS_MARKER, &font_faces(), 1));
+
+/// Where `page.html` wants its `@font-face` rules.
+const FONTS_MARKER: &str = "/* @font-face rules go here */";
+
+/// The page's fonts: family, weight, woff2 file, and the characters it is for
+/// (`None`: all it has). `LICENSE-FONTS` covers them, and goes into every
+/// archive. IBM's Latin1 files lack the → and ✓ the page shows in Plex Mono, so
+/// those come from IBM's Pi files. A face declared later is tried first for
+/// the characters in its range.
+const FONTS: [(&str, u16, &[u8], Option<&str>); 7] = [
+    ("Chakra Petch", 600, include_bytes!("fonts/ChakraPetch-SemiBold-Latin1.woff2"), None),
+    ("IBM Plex Sans", 400, include_bytes!("fonts/IBMPlexSans-Regular-Latin1.woff2"), None),
+    ("IBM Plex Sans", 600, include_bytes!("fonts/IBMPlexSans-SemiBold-Latin1.woff2"), None),
+    ("IBM Plex Mono", 400, include_bytes!("fonts/IBMPlexMono-Regular-Latin1.woff2"), None),
+    ("IBM Plex Mono", 600, include_bytes!("fonts/IBMPlexMono-SemiBold-Latin1.woff2"), None),
+    ("IBM Plex Mono", 400, include_bytes!("fonts/IBMPlexMono-Regular-Pi.woff2"), PI),
+    ("IBM Plex Mono", 600, include_bytes!("fonts/IBMPlexMono-SemiBold-Pi.woff2"), PI),
+];
+
+/// What the page takes from IBM's Pi files: → and ✓.
+const PI: Option<&str> = Some("U+2192, U+2713");
+
+/// One `@font-face` rule per font, each holding its font as a data URL.
+fn font_faces() -> String {
+    FONTS
+        .iter()
+        .map(|(family, weight, woff2, range)| {
+            let range = range
+                .map(|r| format!(" unicode-range: {r};"))
+                .unwrap_or_default();
+            format!(
+                "  @font-face {{ font-family: \"{family}\"; font-weight: {weight};{range} \
+                 src: url(data:font/woff2;base64,{}); }}\n",
+                BASE64.encode(woff2)
+            )
+        })
+        .collect()
+}
 
 /// How long each part of stopping the HTTP server may take: answering the
 /// requests it has taken up, then ending its runtime.
@@ -138,7 +179,7 @@ pub(crate) fn spawn(
     let app = Router::new().route("/", get(page)).nest("/api", api);
     // Every request passes the security rules, the token among them, before
     // it reaches any of the routes above. See `guard`.
-    let app = guard::protect(app, guard::Guard::new(port, &token, PAGE));
+    let app = guard::protect(app, guard::Guard::new(port, &token, &PAGE));
 
     let (stop, stopped) = oneshot::channel::<()>();
     let listener = {
@@ -199,7 +240,7 @@ impl Drop for HttpServer {
 }
 
 async fn page() -> Html<&'static str> {
-    Html(PAGE)
+    Html(PAGE.as_str())
 }
 
 async fn status(State(state): State<Arc<AppState>>) -> Result<Json<Status>, StatusCode> {

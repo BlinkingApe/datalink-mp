@@ -216,5 +216,9 @@ Based on smac-iroh by Henry de Valence.
 Dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at
 your option.
 
+The page embeds the fonts [Chakra Petch](https://github.com/m4rc1e/Chakra-Petch)
+and [IBM Plex](https://github.com/IBM/plex), under the SIL Open Font License
+1.1: see [LICENSE-FONTS](LICENSE-FONTS).
+
 Sid Meier's Alpha Centauri is a trademark of its respective owners. This
 project is an unaffiliated interoperability layer and contains no game assets.
