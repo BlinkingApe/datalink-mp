@@ -24,7 +24,7 @@ Verify through seam 1, as in ticket 02: you may push and delete `-rc.N` tags, an
 - [x] The macOS job runs on `macos-15`
 - [x] The draft release text says macOS is built in CI and untested
 - [x] `docs/releasing.md` covers the macOS archive
-- [ ] Test tags and drafts are cleaned up; one good `-rc.N` draft remains
+- [x] Test tags and drafts are cleaned up; one good `-rc.N` draft remains
 
 ## Comments
 
@@ -40,3 +40,5 @@ Verify through seam 1, as in ticket 02: you may push and delete `-rc.N` tags, an
 - Downloaded: `sha256sum -c` and `gh attestation verify` pass for all three archives. `dplayx.dll` hashes `203a2ba0…a097c` in the Windows, Linux and macOS archives alike. The macOS zip's mode bits (read with Python's `zipfile`) give the Helper `-rwxr-xr-x`, an arm64 Mach-O executable. Nobody has run it on a Mac (no Mac here, as planned).
 - The draft notes say macOS is built in CI and untested.
 - Cleanup: same as ticket 02. The leftover test tags need the maintainer, and `v0.1.0-rc.2` is the draft to keep.
+
+**2026-10-01 (agent):** Cleanup confirmed, as in ticket 02: only `v0.1.0-rc.2` and its draft remain.

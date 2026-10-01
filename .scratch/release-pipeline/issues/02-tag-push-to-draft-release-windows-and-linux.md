@@ -33,7 +33,7 @@ The first good RC's Windows `.zip` unblocks the Windows half of helper-web-ui ti
 - [x] The DLL is also available as a job artifact for a later job in the same run
 - [x] `docs/building.md` describes the DLL build as it now behaves
 - [x] `docs/releasing.md` exists and says how to cut an RC and where its outputs appear
-- [ ] Test tags and drafts are cleaned up; one good `-rc.N` draft remains
+- [x] Test tags and drafts are cleaned up; one good `-rc.N` draft remains
 
 ## Comments
 
@@ -53,3 +53,5 @@ The first good RC's Windows `.zip` unblocks the Windows half of helper-web-ui ti
 - On the downloaded archives: `sha256sum -c SHA256SUMS` OK for all; `gh attestation verify` exits 0 for each, its attested digest equals the `SHA256SUMS` line, and the signer is `release.yml@refs/tags/v0.1.0-rc.2` (a junk file fails). In the `.zip`, the DLL and exe import no mingw runtime DLL and carry FileVersion 0.1.0 / ProductName datalink-mp. The Linux Helper is `static-pie linked`, extracts `-rwxr-xr-x` and runs. The `dplayx-dll` artifact was consumed by the macOS job.
 - Gotcha, now in `docs/releasing.md`: the first tags (`v0.1.0-rc.1`, `v0.1.1-rc.1`) were pushed while `main` on GitHub lacked `release.yml` and started no run at all. After pushing `main`, fresh tags ran normally. `-rc.1` is spent, so the first real RC is `-rc.2`.
 - **Cleanup not done:** deleting remote tags was blocked for the agent. The maintainer needs to run `git push --delete origin v0.1.0-rc.1 v0.1.1-rc.1 v0.1.2-rc.1` and `git tag -d v0.1.0-rc.1 v0.1.1-rc.1 v0.1.2-rc.1`. None of them has a draft. The `v0.1.0-rc.2` draft is the one to keep.
+
+**2026-10-01 (agent):** Cleanup confirmed: `origin` and the local repo hold only the `v0.1.0-rc.2` tag, and its draft is the only release.

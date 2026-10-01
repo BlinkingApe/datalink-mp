@@ -28,3 +28,15 @@ Publish:
 - [ ] Release notes link the VirusTotal reports and say macOS is untested
 - [ ] Publish the `v0.1.0` release by hand, not marked pre-release
 - [ ] `docs/releasing.md` holds the whole gate and publish sequence as it was actually run
+
+## Comments
+
+**2026-10-01 (agent):** Checked before the gate; no gate box is ticked, because every one needs a person, a Windows machine, a VirusTotal account or a publish decision.
+
+- The RC to gate is `v0.1.0-rc.2` (commit `d4f9f09`, run https://github.com/BlinkingApe/datalink-mp/actions/runs/36881643024). It's the only tag on `origin` and its draft is the only release (draft, pre-release).
+- Downloaded fresh from the draft: `sha256sum -c SHA256SUMS` passes for all three archives and `gh attestation verify` exits 0 for each.
+- Hashes in the Windows `.zip`, for a VirusTotal hash search before uploading:
+  - `datalink-mp.exe` `f5ef73aba1ece90811eda33bcc714d767278614ff0cf127fce98d1b6be50b725`
+  - `dplayx.dll` `203a2ba0e63132759bc4dc095e6cb77650cb7434e60301219d868c326b9a097c` (the same in all three archives)
+- `main` is one commit past the RC (`4c12b62`, ticket notes only). Tag `v0.1.0` on `d4f9f09`, the gated commit, not on `main`: `git tag v0.1.0 v0.1.0-rc.2^{}`.
+- `docs/releasing.md` section 4's commands say `v0.1.0-rc.1` as an example; with this RC it's `gh release download v0.1.0-rc.2 -D gated`.
