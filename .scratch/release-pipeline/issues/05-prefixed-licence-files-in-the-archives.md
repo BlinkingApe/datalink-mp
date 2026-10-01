@@ -6,7 +6,11 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] The packing step, run locally with stand-in binaries, gives a `.zip` and a `.tar.gz` holding the Helper, `dplayx.dll`, `datalink-mp-README.txt` and the three `datalink-mp-LICENSE-*.txt` files, with the Linux Helper still executable
-- [ ] The `-rc.3` archives (Windows, Linux, macOS) list those files
+- [x] The `-rc.3` archives (Windows, Linux, macOS) list those files
+
+## Comments
+
+**2026-10-01 (agent):** Checked on `v0.1.0-rc.3` (https://github.com/BlinkingApe/datalink-mp/actions/runs/36905778403). All three archives hold the Helper, `dplayx.dll`, `datalink-mp-README.txt`, `datalink-mp-LICENSE-MIT.txt`, `datalink-mp-LICENSE-APACHE.txt` and `datalink-mp-LICENSE-FONTS.txt`. The Linux Helper extracts executable.

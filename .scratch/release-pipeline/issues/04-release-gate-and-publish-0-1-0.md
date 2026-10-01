@@ -76,3 +76,10 @@ Publish:
 - Defect found while doing that: the archives' licence files lacked the `datalink-mp-` prefix the archive layout requires (ticket 05). Fixed in `release.yml` for rc.3.
 - The DLL's source didn't change, but rc.3 rebuilds it, so its hash changes too. Both files need a new VirusTotal scan.
 - Still valid from rc.2: the gotchas in `docs/releasing.md` (USB copies skip SmartScreen, the firewall alert is per path). The README's SmartScreen screenshots stay.
+
+**2026-10-01 (agent):** `v0.1.0-rc.3` is up and checked, ready for the gate (run https://github.com/BlinkingApe/datalink-mp/actions/runs/36905778403, commit `401ba51`).
+
+- `sha256sum -c SHA256SUMS` and `gh attestation verify` pass for all three archives. The archives hold the prefixed licence files (ticket 05).
+- `dplayx.dll` is the same in all three archives: `5e9a8bfe64ec4f07f59e1ba6e1b5077837f90ac99c15f4cceda3e4d06398d65e`. `datalink-mp.exe`: `1dfa81c2bb415a65caf422cc269de8bf6041d0d53712813a538b97df57ad648c`. Both are new, so they need a new VirusTotal scan.
+- The CI-built Linux Helper serves the themed page, with seven `@font-face` rules and `font-src data:`.
+- The `v0.1.0-rc.2` draft and tag are still there, waiting for the maintainer's go-ahead to delete them.
