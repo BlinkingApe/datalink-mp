@@ -1,7 +1,12 @@
+include!("../../build-support/versioninfo.rs");
+
 fn main() {
     // Tell Cargo to re-run if the .def file changes
     println!("cargo:rerun-if-changed=dplayx.def");
     println!("cargo:rerun-if-changed=unwind_stubs.c");
+    println!("cargo:rerun-if-changed=../../build-support/versioninfo.rs");
+
+    embed_version_info(WindowsBinary::Dll, "dplayx.dll", "datalink-mp DirectPlay DLL");
 
     // For Windows targets, use the .def file to control exports and ordinals
     let target = std::env::var("TARGET").unwrap_or_default();
