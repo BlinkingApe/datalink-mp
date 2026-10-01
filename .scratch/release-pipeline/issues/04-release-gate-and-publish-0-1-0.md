@@ -10,7 +10,7 @@ Run ADR-0002 section 4 (the gate) and the per-release items of section 3 (VirusT
 
 The gate, on the archives of one `-rc.N` draft:
 
-- [ ] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
+- [x] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
 - [x] Windows file properties of the exe and the DLL show `0.1.0`
 - [x] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
 - [ ] The same game with a Windows-using friend over the internet
@@ -56,3 +56,9 @@ Publish:
 - VirusTotal: the DLL is clean (0/71). The Acronis (Static ML) hit was on the exe. Report links still needed.
 - SmartScreen, a third try: SmartScreen's app check is confirmed on. A fresh browser download was extracted into a new folder. The firewall alert came back, but there was still no SmartScreen prompt. Whether the extracted exe carries the download mark (Unblock / `Zone.Identifier`) hasn't been checked yet.
 - The game with a friend over the internet is postponed. A substitute was proposed: the laptop on a phone's mobile data, the other machine on home Wi-Fi.
+
+**2026-10-01 (maintainer, recorded by agent):** The smoke test passes.
+
+- A later try showed the blue "Windows protected your PC" SmartScreen prompt, and More info → Run anyway got through. Box ticked. What made the earlier tries skip the prompt wasn't pinned down.
+- The phone-hotspot internet test couldn't run: USB tethering from the phone's mobile data didn't give the laptop a connection. The internet game waits for the friend game, a few days out. The gate isn't complete until then.
+- Still to come: the VirusTotal report links (exe: 1 hit, Acronis Static ML; DLL: 0/71).

@@ -127,10 +127,12 @@ For `0.1.0` the gated RC is `v0.1.0-rc.2`.
 - `0.1.0`: on the maintainer's own Windows machine, with SmartScreen on, a
   browser-downloaded copy showed **no SmartScreen prompt**. That held both
   extracted over the USB copy and extracted into a new folder (where the
-  firewall alert came back). The cause isn't known yet. One candidate is an
+  firewall alert came back). A later try did show the blue **Windows
+  protected your PC** prompt, and More info → Run anyway got past it. What
+  changed between the tries wasn't pinned down. One candidate is an
   extractor that doesn't carry the download mark onto the files it extracts
-  (Explorer's own Extract All does). To check, look for **Unblock** under
-  the exe's Properties → General, or run
+  (Explorer's own Extract All does). If the prompt doesn't appear, check
+  for **Unblock** under the exe's Properties → General, or run
   `Get-Item .\datalink-mp.exe -Stream Zone.Identifier` in PowerShell.
 - A game between Linux (Faugus, the musl `.tar.gz`) and Windows, both
   running only the archives' Helper and DLL, connected and started for
