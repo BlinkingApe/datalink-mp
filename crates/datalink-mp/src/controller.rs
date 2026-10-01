@@ -380,8 +380,18 @@ impl SessionController {
     }
 
     /// The IPC server reports that the DLL's connection ended, whichever way.
+    ///
+    /// A game that crashed or was closed while in a session never sent
+    /// CloseSession. Its session goes with it: kept, it would refuse the next
+    /// Host Game, and the game would carry on into its setup screen with no
+    /// session behind it.
     pub(crate) fn dll_disconnected(&self) {
         self.game_connected.store(false, Ordering::Relaxed);
+        let transport = self.transport();
+        if transport.session_manager().in_session() {
+            info!("The game left without closing its session; closing it");
+            transport.close_session();
+        }
     }
 
     /// Join the Helper named by a friend's Ticket: check the Ticket, then dial

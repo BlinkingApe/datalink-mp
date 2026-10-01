@@ -6,7 +6,7 @@ The failing attempt used `v0.1.0-rc.3` and the working one `v0.1.0-rc.2`, but **
 
 **Blocked by:** None
 
-**Status:** needs-info
+**Status:** ready-for-human
 
 Leads, unconfirmed:
 
@@ -16,11 +16,22 @@ Leads, unconfirmed:
 
 Needed from the maintainer:
 
-- [ ] What "null pointers" looked like: a crash or error dialog, or "(null)" shown as text in a field? Which dialog, and which drop-downs?
-- [ ] Which side showed it (host or joiner, Linux or Windows), and who hosted in each attempt
+- [x] What "null pointers" looked like: an error box titled `Net::send`, "Oh no! NULL pointer!!", over the game's Multiplayer Setup screen. The drop-downs on the host's own row (faction, difficulty) didn't react.
+- [x] Which side showed it: the host, in both failing attempts
 - [ ] Logs from a failing attempt, if it happens again: `DPLAYX_LOG_FILE=/path/dplayx.log` and `SMAC_HELPER_LOG_FILE=/path/helper.log` in the launcher's environment (Faugus: Game Arguments)
 
 Then:
 
-- [ ] Reproduce, if the timing lead holds, by adding latency between two local Helpers (for example `tc qdisc ... netem delay` on loopback)
-- [ ] Fix in the DLL. That means a new `-rc.N` and a fresh gate (ticket 04)
+- [x] Reproduce: `test_game_that_left_without_closing_its_session_can_host_again` (`crates/datalink-mp/tests/ipc.rs`) failed with `Failed to create session (already in session?)`
+- [x] Fix in the Helper: closing the session when the game disconnects
+- [ ] Confirm in the real game, on a new `-rc.N`: host, close the game while in the setup screen, start it again with the same Helper, host again; no `Net::send` error, and the drop-downs react
+
+## Comments
+
+**2026-10-01 (agent):** Cause found, by reading the code and reproducing it at the IPC level. It's the Helper, not the DLL.
+
+- `Net::send` and "Oh no! NULL pointer!!" are the game's own: the game tried to send a message and something it needed was missing.
+- When the game's connection to the Helper ended, the Helper only marked the game as not connected. A game that crashed or was closed while hosting never sent CloseSession, so **its session stayed in the Helper**. The next Host Game got "Failed to create session (already in session?)", the DLL returned `DPERR_CANTCREATESESSION`, and the game carried on into Multiplayer Setup with no session behind it. The host's first change on its own row makes the game send the new settings, and `Net::send` fails.
+- That explains why only the host saw it, why it repeated on the same Helper, and why a freshly started Helper worked. The rc.2/rc.3 difference was only which Helper was fresh.
+- Fix: `SessionController::dll_disconnected` closes the session when the game leaves it open. Closing tells connected friends the session ended (`SessionClosed`) and keeps the connections, as CloseSession always did.
+- The `GetSessionDesc` null session name and the timing lead above weren't needed to explain this. The null name stays a known oddity, not a cause.

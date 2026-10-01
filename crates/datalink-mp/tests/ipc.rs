@@ -111,6 +111,43 @@ fn test_new_dll_connection_is_served_after_the_previous_one_closes() {
     helper.shutdown();
 }
 
+/// Ask the Helper to host a session, the way the game's Host Game does.
+fn create_session(dll: &mut FakeDll) -> IpcResponse {
+    let desc = dp_types::SessionDesc {
+        guid_instance: dp_types::GUID::new_random(),
+        session_name: "test".to_string(),
+        max_players: 8,
+        ..Default::default()
+    };
+    dll.request(&IpcRequest::CreateSession { desc })
+}
+
+#[test]
+fn test_game_that_left_without_closing_its_session_can_host_again() {
+    let Some(helper) = start_helper() else {
+        return;
+    };
+
+    let mut first = connect_fake_dll(&helper);
+    first.handshake();
+    match create_session(&mut first) {
+        IpcResponse::SessionCreated { .. } => {}
+        other => panic!("the first Host Game should create a session, got {other:?}"),
+    }
+    // The game crashed or was closed while hosting: no CloseSession.
+    drop(first);
+
+    // The game is started again, and its player hosts again.
+    let mut second = connect_fake_dll(&helper);
+    second.handshake();
+    match create_session(&mut second) {
+        IpcResponse::SessionCreated { .. } => {}
+        other => panic!("hosting again should create a new session, got {other:?}"),
+    }
+
+    helper.shutdown();
+}
+
 #[test]
 fn test_start_fails_with_an_ipc_bind_error_when_the_ipc_port_is_taken() {
     let (_holder, taken_port) = hold_port();
