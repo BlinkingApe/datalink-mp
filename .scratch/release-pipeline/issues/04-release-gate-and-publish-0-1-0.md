@@ -90,3 +90,9 @@ Publish:
 - On `v0.1.0-rc.3`, the game's setup dialogs showed null pointers and some drop-downs didn't react. The rc.2 and rc.3 DLLs are identical apart from timestamps, so this isn't a build regression. It's a defect to investigate, ticket 06, which blocks the friend game and so the gate. If the fix touches the DLL, the gate moves to a new `-rc.N`.
 
 **2026-10-01 (agent):** The gate moves to `v0.1.0-rc.4`, with two Helper changes from the friend game: ticket 06 (a game that left without closing its session broke the next Host Game) and helper-web-ui ticket 19 (a second start replaces an idle Helper; the footer names the build). The DLL's source is unchanged. Every gate check runs again on rc.4, including the friend game.
+
+**2026-10-01 (agent):** `v0.1.0-rc.4` is up and checked (run https://github.com/BlinkingApe/datalink-mp/actions/runs/36923550814, commit `8fed7af`). The rc.3 pre-release and its tag are deleted, so `v0.1.0-rc.4` is the only tag.
+
+- `sha256sum -c SHA256SUMS` and `gh attestation verify` pass for all three archives, and each holds the six expected files.
+- `dplayx.dll` is the same in all three archives: `c36307b0e7b37958638cb281968993fa14e9f84ae0053de309f84c3419819f0d`. `datalink-mp.exe`: `ef16ed9aae69ab8ac8561e95752ddaf6e52c55407f10c3df33a1e23b5da1643b`. Both need a VirusTotal scan.
+- The CI-built Linux Helper prints `datalink-mp 0.1.0 (build 8fed7af)`, and a second start of it made the idle first one quit and took its IPC port.
