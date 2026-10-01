@@ -50,3 +50,5 @@ Page and wording
 - [ ] A tab left over from an earlier run shows the earlier-run message
 - [ ] The footer shows the Release version, IPC version and Peer protocol version
 - [ ] With the network unplugged from the internet, the page still loads
+
+**2026-10-01 (agent):** The Windows checks are unblocked. The draft pre-release `v0.1.0-rc.2` (release-pipeline ticket 02) holds the CI-built `datalink-mp-0.1.0-windows-x86_64.zip`. Get it with `gh release download v0.1.0-rc.2 -R BlinkingApe/datalink-mp`; drafts are only visible to maintainers.

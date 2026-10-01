@@ -47,10 +47,10 @@ version (Properties → Details on Windows). Their `build.rs` compiles it with
 mingw's `windres`, which comes with the mingw-w64 packages above; native
 Linux and macOS builds skip it.
 
-The DLL links with mingw's own `_Unwind_Resume` from `libgcc_eh` (linked
-with Fedora's GCC 15.1; Ubuntu 24.04's GCC 13.2, which CI uses, ships the
-same DWARF `libgcc_eh`). Older versions of this
-project compiled a C stub for it, which clashed with `libgcc_eh` on newer
+The DLL links with mingw's own `_Unwind_Resume` from `libgcc_eh`, with no
+extra flags: on Fedora's GCC 15.1 locally and on Ubuntu 24.04's GCC 13.2 in
+the first CI run (`v0.1.0-rc.2`). Older versions of this project compiled a
+C stub for it, which clashed with `libgcc_eh` on newer
 mingw with `multiple definition of '_Unwind_Resume'`. If a mingw toolchain
 ever reports that again, add the linker flag per-target, so
 `.cargo/config.toml`'s `control-flow-guard=no` and `-lws2_32` stay in effect —

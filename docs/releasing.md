@@ -21,6 +21,11 @@ The tag must match the workspace version in the root `Cargo.toml`
 else a patch), let `cargo build` update `Cargo.lock`, commit both and push
 `main`.
 
+Push `main` before the tag. A tag pushed while `main` on GitHub lacked
+`release.yml`, pointing at commits on no GitHub branch, started no run at
+all: no failed run, nothing under Actions. Pushing `main` and a fresh tag
+fixed it.
+
 ## 2. Cut a release candidate
 
 ```bash
@@ -36,7 +41,9 @@ git push origin v0.1.0-rc.1
   `0.1.0-rc.1`), in the page and in Windows file properties. That is what
   lets the gated RC's archives become the release (section 4).
 - Number RCs from 1 and never reuse a number: a new defect means a new
-  `-rc.N` and a fresh gate.
+  `-rc.N` and a fresh gate. A tag that was pushed and deleted counts as used;
+  the first CI-built RC for `0.1.0` is `-rc.2`, because `-rc.1` was spent on
+  the run that never started (section 1).
 
 ## 3. What the run produces, and where
 
@@ -67,18 +74,29 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
   for a in *.zip *.tar.gz; do gh attestation verify "$a" -R BlinkingApe/datalink-mp; done
   ```
 
+  Outside a terminal (in a script, or piped), `gh attestation verify` prints
+  nothing on success; judge it by the exit status, or add `--format json`
+  to see the attested digest and the signing workflow
+  (`release.yml@refs/tags/<tag>`). `--bundle attestation.sigstore.json`
+  checks against the release's own copy instead of GitHub's.
+
 - The DLL step retries with `--allow-multiple-definition` if CI's mingw ever
   reports a `multiple definition of '_Unwind_Resume'` clash (see
   [building.md](building.md)). The run then shows a warning annotation; the
-  retry is a fallback, not the expected path.
+  retry is a fallback, not the expected path, and `v0.1.0-rc.2` didn't need
+  it. The linker's `resolving _DirectPlayCreate by linking to
+  _DirectPlayCreate@12` warning is expected: the `.def` file exports the
+  undecorated names the game imports.
 - All three archives hold the DLL built once by the Ubuntu job; the release
   job fails if their `dplayx.dll` hashes differ. So the macOS job waits for
   the Ubuntu job, and a run takes about as long as both back to back.
 - The macOS archive is built on `macos-15` (arm64, free for public
   repositories; the `-large`/`-xlarge` runners are billed). Its log shows
-  `codesign --verify` on the Helper; if the linker's ad-hoc signature didn't
-  survive stripping, the job re-signs ad-hoc and verifies again, with a
-  notice annotation. That only satisfies Gatekeeper's basic checks: players
+  `codesign --verify` on the Helper (`valid on disk`, `satisfies its
+  Designated Requirement` for `v0.1.0-rc.2`, so no re-signing). If it ever
+  fails, the job re-signs ad-hoc and verifies again, with a notice
+  annotation. macOS arm64 runners can queue for a while under load; the run
+  says so in an annotation. That only satisfies Gatekeeper's basic checks: players
   still go through Open Anyway (README).
 - The macOS archive is packed with `ditto -c -k`, never `zip` or
   `upload-artifact` alone, which drop the executable bit. The job extracts

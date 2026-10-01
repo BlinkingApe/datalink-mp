@@ -15,15 +15,15 @@ Verify through seam 1, as in ticket 02: you may push and delete `-rc.N` tags, an
 
 **Blocked by:** 02 (Tag push → draft release with the Windows and Linux archives)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] A pushed `-rc.N` tag produces a draft pre-release with the Windows `.zip`, Linux `.tar.gz` and macOS `.zip`, and one `SHA256SUMS` covering all three
-- [ ] `sha256sum -c SHA256SUMS` and `gh attestation verify` pass for all three downloaded archives
-- [ ] The `dplayx.dll` inside each of the three archives has the same hash
-- [ ] The macOS Helper extracted with Archive Utility or `ditto -x -k` keeps its executable bit, and the log shows `codesign --verify` passing
-- [ ] The macOS job runs on `macos-15`
-- [ ] The draft release text says macOS is built in CI and untested
-- [ ] `docs/releasing.md` covers the macOS archive
+- [x] A pushed `-rc.N` tag produces a draft pre-release with the Windows `.zip`, Linux `.tar.gz` and macOS `.zip`, and one `SHA256SUMS` covering all three
+- [x] `sha256sum -c SHA256SUMS` and `gh attestation verify` pass for all three downloaded archives
+- [x] The `dplayx.dll` inside each of the three archives has the same hash
+- [x] The macOS Helper extracted with Archive Utility or `ditto -x -k` keeps its executable bit, and the log shows `codesign --verify` passing
+- [x] The macOS job runs on `macos-15`
+- [x] The draft release text says macOS is built in CI and untested
+- [x] `docs/releasing.md` covers the macOS archive
 - [ ] Test tags and drafts are cleaned up; one good `-rc.N` draft remains
 
 ## Comments
@@ -33,3 +33,10 @@ Verify through seam 1, as in ticket 02: you may push and delete `-rc.N` tags, an
 - The `macos` job needs the Ubuntu job, downloads its `dplayx-dll` artifact, and packs with `ditto -c -k --norsrc --noextattr --noacl` (no AppleDouble entries in the zip). It re-extracts with `ditto -x -k` and fails if the Helper isn't executable, and logs `codesign --verify` (re-signing ad-hoc on failure).
 - The release job now waits for it, fails if the three archives' `dplayx.dll` hashes differ, and the draft notes say macOS is built in CI and untested.
 - Simulated locally with `gh` stubbed and a stand-in macOS zip: the DLL check passes on matching DLLs and fails on different ones; the notes render as Markdown; `--prerelease` appears only for `-rc.N`.
+
+**2026-10-01 (agent):** Seam 1 run with `v0.1.0-rc.2` (https://github.com/BlinkingApe/datalink-mp/actions/runs/36881643024).
+
+- The macOS job ran on `macos-15` (arm64) in 3m25s after the Ubuntu job. `codesign --verify --verbose` printed `valid on disk` and `satisfies its Designated Requirement`, so it didn't re-sign. The job's `ditto -x -k` re-extract kept the Helper executable, and `zipinfo` in the log shows `-rwxr-xr-x datalink-mp`.
+- Downloaded: `sha256sum -c` and `gh attestation verify` pass for all three archives. `dplayx.dll` hashes `203a2ba0…a097c` in the Windows, Linux and macOS archives alike. The macOS zip's mode bits (read with Python's `zipfile`) give the Helper `-rwxr-xr-x`, an arm64 Mach-O executable. Nobody has run it on a Mac (no Mac here, as planned).
+- The draft notes say macOS is built in CI and untested.
+- Cleanup: same as ticket 02. The leftover test tags need the maintainer, and `v0.1.0-rc.2` is the draft to keep.
