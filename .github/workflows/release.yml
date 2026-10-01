@@ -87,16 +87,24 @@ jobs:
 
       - name: Pack the archives
         run: |
-          COMMON=(datalink-mp-README.txt LICENSE-MIT LICENSE-APACHE)
+          # Everything but the binaries carries a datalink-mp- prefix, so
+          # extracting into the Game folder can't overwrite the game's own
+          # readme or licence files.
+          COMMON=(datalink-mp-README.txt datalink-mp-LICENSE-MIT.txt
+            datalink-mp-LICENSE-APACHE.txt datalink-mp-LICENSE-FONTS.txt)
           mkdir -p dist stage/windows stage/linux
+          for d in stage/windows stage/linux; do
+            cp datalink-mp-README.txt "$d/"
+            for l in MIT APACHE FONTS; do cp "LICENSE-$l" "$d/datalink-mp-LICENSE-$l.txt"; done
+          done
 
           cp target/x86_64-pc-windows-gnu/release/datalink-mp.exe \
-            target/i686-pc-windows-gnu/release/dplayx.dll "${COMMON[@]}" stage/windows/
+            target/i686-pc-windows-gnu/release/dplayx.dll stage/windows/
           (cd stage/windows && zip -X "../../dist/datalink-mp-$VERSION-windows-x86_64.zip" \
             datalink-mp.exe dplayx.dll "${COMMON[@]}")
 
           cp target/x86_64-unknown-linux-musl/release/datalink-mp \
-            target/i686-pc-windows-gnu/release/dplayx.dll "${COMMON[@]}" stage/linux/
+            target/i686-pc-windows-gnu/release/dplayx.dll stage/linux/
           chmod 755 stage/linux/datalink-mp
           tar -C stage/linux --owner=0 --group=0 --numeric-owner \
             -czf "dist/datalink-mp-$VERSION-linux-x86_64.tar.gz" datalink-mp dplayx.dll "${COMMON[@]}"
@@ -156,7 +164,8 @@ jobs:
       # as-is (upload-artifact wraps it, and download-artifact unwraps it).
       - name: Pack the archive
         run: |
-          cp "$HELPER" datalink-mp-README.txt LICENSE-MIT LICENSE-APACHE stage/
+          cp "$HELPER" datalink-mp-README.txt stage/
+          for l in MIT APACHE FONTS; do cp "LICENSE-$l" "stage/datalink-mp-LICENSE-$l.txt"; done
           chmod 755 stage/datalink-mp
           mkdir dist
           ARCHIVE="dist/datalink-mp-$VERSION-macos-aarch64.zip"
