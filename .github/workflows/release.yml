@@ -1,0 +1,164 @@
+# Builds the release archives for a pushed v* tag and opens a draft GitHub
+# Release with them. It never publishes: a maintainer does that by hand after
+# the release gate (docs/releasing.md, ADR-0002).
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    # Explicit, so every step gets -o pipefail.
+    shell: bash
+
+jobs:
+  version:
+    name: Check the tag against the workspace version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: check
+        run: scripts/release-version.sh "$GITHUB_REF_NAME" | tee -a "$GITHUB_OUTPUT"
+
+  ubuntu:
+    name: Build the DLL, Windows and Linux archives
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-mingw-w64-i686 gcc-mingw-w64-x86-64 musl-tools zip
+          rustup toolchain install stable --profile minimal \
+            --target i686-pc-windows-gnu,x86_64-pc-windows-gnu,x86_64-unknown-linux-musl
+          rustup default stable
+
+      - name: Build the DLL
+        run: |
+          build() { cargo build --release --locked --target i686-pc-windows-gnu -p dplayx; }
+          if build 2>&1 | tee dll-build.log; then
+            exit 0
+          fi
+          grep -q "multiple definition of .*_Unwind_Resume" dll-build.log || exit 1
+          echo "::warning::_Unwind_Resume clash on this mingw; retrying with --allow-multiple-definition"
+          # Per-target, so .cargo/config.toml's rustflags still apply; bare
+          # RUSTFLAGS would replace them.
+          CARGO_TARGET_I686_PC_WINDOWS_GNU_RUSTFLAGS="-C link-arg=-Wl,--allow-multiple-definition" build
+
+      - name: Build the Windows Helper
+        run: cargo build --release --locked --target x86_64-pc-windows-gnu -p datalink-mp
+
+      - name: Build the Linux Helper
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl -p datalink-mp
+
+      - name: Check the binaries
+        run: |
+          DLL=target/i686-pc-windows-gnu/release/dplayx.dll
+          EXE=target/x86_64-pc-windows-gnu/release/datalink-mp.exe
+          LINUX=target/x86_64-unknown-linux-musl/release/datalink-mp
+          for f in "$DLL" "$EXE"; do
+            echo "== $f"
+            objdump -p "$f" | grep 'DLL Name' | sort -u
+            if objdump -p "$f" | grep -qiE 'DLL Name: (libgcc|libwinpthread|libstdc)'; then
+              echo "::error::$f links a mingw runtime DLL"; exit 1
+            fi
+            x86_64-w64-mingw32-windres -J coff -i "$f" -O rc | grep -E 'VALUE "(ProductName|FileVersion)"'
+            x86_64-w64-mingw32-windres -J coff -i "$f" -O rc | grep -q "VALUE \"FileVersion\", \"$VERSION\"" \
+              || { echo "::error::$f has no VERSIONINFO for $VERSION"; exit 1; }
+          done
+          file "$LINUX"
+          file "$LINUX" | grep -q 'static' || { echo "::error::$LINUX isn't static"; exit 1; }
+
+      - name: Pack the archives
+        run: |
+          COMMON=(datalink-mp-README.txt LICENSE-MIT LICENSE-APACHE)
+          mkdir -p dist stage/windows stage/linux
+
+          cp target/x86_64-pc-windows-gnu/release/datalink-mp.exe \
+            target/i686-pc-windows-gnu/release/dplayx.dll "${COMMON[@]}" stage/windows/
+          (cd stage/windows && zip -X "../../dist/datalink-mp-$VERSION-windows-x86_64.zip" \
+            datalink-mp.exe dplayx.dll "${COMMON[@]}")
+
+          cp target/x86_64-unknown-linux-musl/release/datalink-mp \
+            target/i686-pc-windows-gnu/release/dplayx.dll "${COMMON[@]}" stage/linux/
+          chmod 755 stage/linux/datalink-mp
+          tar -C stage/linux --owner=0 --group=0 --numeric-owner \
+            -czf "dist/datalink-mp-$VERSION-linux-x86_64.tar.gz" datalink-mp dplayx.dll "${COMMON[@]}"
+
+          ls -l dist
+
+      # Archive names carry the version, not the tag, so an RC's archives can
+      # replace the final tag's with `gh release upload --clobber`.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: archives-ubuntu
+          path: dist/
+          if-no-files-found: error
+
+      - name: The DLL alone, for the macOS archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: dplayx-dll
+          path: target/i686-pc-windows-gnu/release/dplayx.dll
+          if-no-files-found: error
+
+  release:
+    name: Draft the GitHub Release
+    needs: [version, ubuntu]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: archives-*
+          merge-multiple: true
+          path: dist
+
+      - name: Write SHA256SUMS
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+
+      - id: attest
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          cp "$BUNDLE" dist/attestation.sigstore.json
+          NOTES="$(cat <<EOF
+          Built by CI from $GITHUB_REF_NAME ($GITHUB_SHA), run $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID.
+
+          Verify a download:
+
+              sha256sum -c SHA256SUMS --ignore-missing
+              gh attestation verify <archive> -R $GITHUB_REPOSITORY
+          EOF
+          )"
+          FLAGS=(--draft --verify-tag --title "datalink-mp $VERSION" --notes "$NOTES")
+          [[ "$PRERELEASE" == true ]] && FLAGS+=(--prerelease)
+          gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" "${FLAGS[@]}" dist/*

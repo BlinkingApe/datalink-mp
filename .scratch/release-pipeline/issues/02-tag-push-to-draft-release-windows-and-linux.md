@@ -34,3 +34,13 @@ The first good RC's Windows `.zip` unblocks the Windows half of helper-web-ui ti
 - [ ] `docs/building.md` describes the DLL build as it now behaves
 - [ ] `docs/releasing.md` exists and says how to cut an RC and where its outputs appear
 - [ ] Test tags and drafts are cleaned up; one good `-rc.N` draft remains
+
+## Comments
+
+**2026-10-01 (agent):** Built and checked through seam 2; seam 1 (a real tag push) not yet run.
+
+- The DLL-fix commit is `Drop the DLL's unwind_stubs build step`. Without the stub the DLL links cleanly on Fedora's mingw GCC 15.1 with no workaround, with the same exports and imports. Ubuntu 24.04's `gcc-mingw-w64-i686-win32` 13.2 package ships a DWARF `libgcc_eh.a` that defines `_Unwind_Resume` (checked in the `.deb`), so the first CI run should link without the fallback too. The workflow retries with the per-target flag only if the log shows the clash.
+- The version check is `scripts/release-version.sh`, checked locally against `v0.1.0`, `v0.1.0-rc.1`, `-rc.12` (pass) and `v0.1.1`, `-beta`, `-rc`, `-rc.x`, `-rc.1-rc.2`, no `v` (fail).
+- The workflow's "Check the binaries" and "Pack the archives" steps were run locally against local cross-builds: no mingw runtime DLL imports, VERSIONINFO 0.1.0 in both, a `static-pie linked` musl Helper that runs, and a `.tar.gz` that keeps the executable bit. `actionlint` (with shellcheck) is clean.
+- Archives are named by version, not tag, so the gated RC's archives can `--clobber` the final tag's.
+- Not done: pushing a real `-rc.N` and a mismatched tag. `gh` isn't installed on the dev host, so the drafts couldn't be inspected, verified (`gh attestation verify`) or deleted afterwards, and pushing a tag would also publish the 27 commits `main` is ahead of `origin`. Remaining unchecked boxes all need that run.

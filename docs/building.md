@@ -42,10 +42,17 @@ Artifacts:
 - `target/release/datalink-mp` (`datalink-mp.exe` on Windows): the Helper
 - `target/i686-pc-windows-gnu/release/dplayx.dll`: the DLL
 
-The DLL's `build.rs` always compiles `unwind_stubs.c` for `-gnu` targets. On
-a mingw newer than this project was last linked with (GCC 14+; seen locally
-at 15.1), that clashes with libgcc's own `_Unwind_Resume` and the build fails
-with `multiple definition of '_Unwind_Resume'`. Work around it per-target, so
+Both Windows binaries carry a VERSIONINFO resource with the workspace
+version (Properties → Details on Windows). Their `build.rs` compiles it with
+mingw's `windres`, which comes with the mingw-w64 packages above; native
+Linux and macOS builds skip it.
+
+The DLL links with mingw's own `_Unwind_Resume` from `libgcc_eh` (linked
+with Fedora's GCC 15.1; Ubuntu 24.04's GCC 13.2, which CI uses, ships the
+same DWARF `libgcc_eh`). Older versions of this
+project compiled a C stub for it, which clashed with `libgcc_eh` on newer
+mingw with `multiple definition of '_Unwind_Resume'`. If a mingw toolchain
+ever reports that again, add the linker flag per-target, so
 `.cargo/config.toml`'s `control-flow-guard=no` and `-lws2_32` stay in effect —
 bare `RUSTFLAGS` replaces them instead of adding to them:
 
@@ -68,9 +75,26 @@ cargo build --release --target x86_64-pc-windows-gnu -p datalink-mp
 ```
 
 Artifact: `target/x86_64-pc-windows-gnu/release/datalink-mp.exe`. It links no
-mingw runtime DLLs (libgcc/winpthread are statically linked), and this
-crate's `build.rs` has no unwind-stub step, so it doesn't hit the DLL's link
-conflict above.
+mingw runtime DLLs (libgcc/winpthread are statically linked).
+
+### Building the static Linux Helper
+
+Releases ship a static musl Helper, so it runs on any x86_64 distro whatever
+its glibc. `ring` compiles C, so it needs a musl C compiler:
+
+```bash
+rustup target add x86_64-unknown-linux-musl
+# apt install musl-tools  # Debian/Ubuntu
+
+CC_x86_64_unknown_linux_musl=musl-gcc \
+  cargo build --release --target x86_64-unknown-linux-musl -p datalink-mp
+```
+
+Without `musl-gcc` (Fedora, RHEL), `CC_x86_64_unknown_linux_musl=gcc` also
+links, for local experiments.
+
+These cross-builds are for experiments. The archives players download are
+built by CI from a tag; see [releasing.md](releasing.md).
 
 ## 3. Assemble your Game folder
 
