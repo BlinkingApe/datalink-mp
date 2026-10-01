@@ -20,10 +20,12 @@ use subtle::ConstantTimeEq;
 use tower::{Layer, Service};
 
 /// The paths served without the token. They still get every other rule.
-/// `/` is the page, which holds no secrets. The other two are how a second
-/// Helper on the same IPC port finds the running one and asks it to show its
-/// page: they reveal no secret and can at worst open a browser tab.
-const PUBLIC_PATHS: &[&str] = &["/", "/api/instance", "/api/show"];
+/// `/` is the page, which holds no secrets. The others are how a second
+/// Helper on the same IPC port finds the running one and asks it to make way
+/// or to show its page. They reveal no secret. At worst they open a browser
+/// tab, or quit a Helper that nothing is using, which a program on this
+/// computer could do anyway by ending its process.
+const PUBLIC_PATHS: &[&str] = &["/", "/api/instance", "/api/show", "/api/replace"];
 
 /// The header that carries the token.
 const TOKEN_HEADER: &str = "x-token";

@@ -13,14 +13,16 @@ mod ipc_server;
 mod platform;
 
 pub use controller::{
-    Banner, InvalidTicket, JoinError, JoinRefused, SessionController, State, Status,
+    Banner, InvalidTicket, JoinError, JoinRefused, SessionController, State, Status, BUILD_ID,
 };
 pub use http::generate_token;
 pub use platform::{system_browser_opener, SelfCheck};
 
 use iroh_transport::{TransportError, TransportOptions};
 use std::path::PathBuf;
+use std::net::TcpListener;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::{info, warn};
 
@@ -77,9 +79,10 @@ pub enum StartError {
     #[error("Failed to start the HTTP server")]
     HttpServer(#[source] std::io::Error),
 
-    /// Another Helper is running on this IPC port, and it has been asked to
-    /// show its page. Not a failure: the binary says so and exits with status 0.
-    #[error("datalink-mp is already running")]
+    /// Another Helper is running on this IPC port and stays, because it is in
+    /// use. It has been asked to show its page. Not a failure: the binary says
+    /// so and exits with status 0.
+    #[error("datalink-mp is already running and in use, so it kept running. Its page has opened.")]
     AlreadyRunning,
 
     #[error("Failed to create transport")]
@@ -105,29 +108,60 @@ pub struct Helper {
 /// then serves no DLL, and its status carries the `ipc_port_in_use` banner.
 pub fn start(config: Config) -> Result<Helper, StartError> {
     // Bind first: a taken port is found out before an Iroh endpoint is started.
-    let (listener, ipc_port) = match ipc_server::bind(config.ipc_port) {
-        Ok(listener) => {
-            let port = listener.local_addr().map_err(StartError::IpcBind)?.port();
-            info!("Listening on 127.0.0.1:{}", port);
-            (Some(listener), port)
-        }
-        // With a page to say so on, a port held by another program is not
-        // fatal: the Helper runs without the game and shows a banner.
-        Err(e) if config.ui.is_some() && e.kind() == std::io::ErrorKind::AddrInUse => {
-            // Unless the program holding it is a Helper: then the player has
-            // double-clicked a second time, and gets the running Helper's page.
-            if let Some(ui) = &config.ui {
-                if instance::show_running_helper(config.ipc_port, ui.port) {
-                    return Err(StartError::AlreadyRunning);
-                }
+    let bound = match ipc_server::bind(config.ipc_port) {
+        // Unless the program holding it is a Helper: then the player has
+        // started datalink-mp again. A Helper nothing is using makes way;
+        // one in use stays and shows its page.
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            let running = config
+                .ui
+                .as_ref()
+                .and_then(|ui| instance::ask_running_helper_to_make_way(config.ipc_port, ui.port));
+            match running {
+                Some(instance::Running::Staying) => return Err(StartError::AlreadyRunning),
+                Some(instance::Running::MakingWay) => bind_once_freed(config.ipc_port)
+                    .map_err(|_| StartError::AlreadyRunning)?,
+                None => return start_without_the_ipc_port(config, e),
             }
-            warn!("IPC port {} is in use by another program", config.ipc_port);
-            (None, config.ipc_port)
         }
-        Err(e) => return Err(StartError::IpcBind(e)),
+        bound => bound.map_err(StartError::IpcBind)?,
     };
+    let port = bound.local_addr().map_err(StartError::IpcBind)?.port();
+    info!("Listening on 127.0.0.1:{}", port);
+    start_with(config, Some(bound), port)
+}
 
-    // Likewise the UI port. A taken port is not fatal: the Helper walks on to
+/// How long a Helper that makes way may take to free the IPC port.
+const MAKE_WAY_DEADLINE: Duration = Duration::from_secs(10);
+
+/// Bind the IPC port once the Helper making way has freed it.
+fn bind_once_freed(port: u16) -> std::io::Result<TcpListener> {
+    let deadline = Instant::now() + MAKE_WAY_DEADLINE;
+    loop {
+        match ipc_server::bind(port) {
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            bound => return bound,
+        }
+    }
+}
+
+/// Another program holds the IPC port. With a page to say so on, that is not
+/// fatal: the Helper runs without the game and shows a banner.
+fn start_without_the_ipc_port(config: Config, e: std::io::Error) -> Result<Helper, StartError> {
+    if config.ui.is_none() {
+        return Err(StartError::IpcBind(e));
+    }
+    warn!("IPC port {} is in use by another program", config.ipc_port);
+    let port = config.ipc_port;
+    start_with(config, None, port)
+}
+
+/// Start the Helper with the IPC port bound, or, when `listener` is None,
+/// held by another program.
+fn start_with(config: Config, listener: Option<TcpListener>, ipc_port: u16) -> Result<Helper, StartError> {
+    // A taken UI port is not fatal either: the Helper walks on to
     // the next free one, and reports the port it bound.
     let ui_listener = config
         .ui

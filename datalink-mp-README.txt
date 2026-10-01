@@ -101,8 +101,12 @@ Stop, so share it again after either. Stop ends your current connections and
 gives you a new Ticket without closing datalink-mp; with the game open, return
 to the game's main menu first. Quit closes datalink-mp.
 
-If you double-click datalink-mp a second time, your browser opens the page of
-the copy that is already running.
+If you double-click datalink-mp while it's already running, the running copy
+makes way and a fresh one starts, so you always get the copy you just started
+(handy after extracting a new release). If the game or a friend is connected to
+the running copy, it keeps running instead, and its page opens to say why.
+The page's footer shows the Release version and the build, so you can check
+which one is running.
 
 
 TROUBLESHOOTING

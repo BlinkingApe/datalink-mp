@@ -114,9 +114,11 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
 
 The gate (ADR-0002 section 4) runs on one RC's archives, downloaded from its
 draft. Bytes you built yourself, or copied from an earlier RC, don't count.
-For `0.1.0` the gated RC is `v0.1.0-rc.3`. `-rc.2` passed most of the gate, then was
-superseded: the page's look changed, and with it the exe. The notes below
-marked `0.1.0-rc.2` are from its run.
+For `0.1.0` the gated RC is `v0.1.0-rc.4`. `-rc.2` passed most of the gate, then was
+superseded by the page's new look (`-rc.3`), and `-rc.3` by two Helper fixes
+found in the friend game: a stale session that broke hosting, and a second
+start that now replaces an idle Helper. The notes below marked `0.1.0-rc.2`
+are from its run.
 
 - **Get the Windows `.zip` onto Windows with a browser download** from the
   draft, then extract it. A copy over a USB stick carries no download mark, so
@@ -168,7 +170,7 @@ Once every gate check passes:
   bind the archives' digests, not the tag.
 
   ```bash
-  gh release download v0.1.0-rc.3 -D gated
+  gh release download v0.1.0-rc.4 -D gated
   gh release upload v0.1.0 gated/* --clobber
   ```
 
@@ -179,8 +181,8 @@ Once every gate check passes:
 - Delete the RC drafts and their tags, the gated one included:
 
   ```bash
-  gh release delete v0.1.0-rc.3 --cleanup-tag --yes
-  git tag -d v0.1.0-rc.3
+  gh release delete v0.1.0-rc.4 --cleanup-tag --yes
+  git tag -d v0.1.0-rc.4
   ```
 
   GitHub can't hide the **tags** link under Releases in the sidebar. With

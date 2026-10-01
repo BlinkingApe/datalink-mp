@@ -1750,16 +1750,26 @@ fn test_status_is_answered_promptly_while_friends_connect_and_disconnect() {
 // ---------------------------------------------------------------------------
 // Ticket 15: single instance
 //
-// Two routes work without the token so that a second Helper can find the
-// first and ask it to show its page. The rest of the rules still apply.
+// Three routes work without the token so that a second Helper can find the
+// first, ask it to make way, or ask it to show its page. The rest of the
+// rules still apply.
 // ---------------------------------------------------------------------------
 
 /// POST to `/api/show` the way a second Helper does: no token, a JSON content
 /// type, and `extra` headers.
 fn post_show(ui_port: u16, extra: &[(&str, &str)]) -> common::HttpResponse {
+    post_public(ui_port, "/api/show", extra)
+}
+
+/// POST to `/api/replace` the way a second Helper does.
+fn post_replace(ui_port: u16, extra: &[(&str, &str)]) -> common::HttpResponse {
+    post_public(ui_port, "/api/replace", extra)
+}
+
+fn post_public(ui_port: u16, path: &str, extra: &[(&str, &str)]) -> common::HttpResponse {
     let mut headers = vec![("Content-Type", "application/json")];
     headers.extend_from_slice(extra);
-    common::http_request(ui_port, "POST", "/api/show", &headers)
+    common::http_request(ui_port, "POST", path, &headers)
 }
 
 #[test]
@@ -1776,6 +1786,20 @@ fn test_instance_needs_no_token_and_names_the_application_release_and_ipc_port()
     assert_eq!(instance["release_version"], env!("CARGO_PKG_VERSION"));
     assert_eq!(instance["ipc_port"], started.helper.ipc_port());
     assert!(!response.body.contains(TOKEN), "the route must not reveal the token");
+}
+
+#[test]
+fn test_instance_and_status_name_the_same_build() {
+    let Some(started) = start(false) else {
+        return;
+    };
+
+    let instance = http_get(started.ui_port(), "/api/instance", &[]).json();
+    let status = started.status();
+
+    let build = instance["build_id"].as_str().expect("the instance names its build");
+    assert!(!build.is_empty());
+    assert_eq!(status["build_id"], build, "the page shows the build the instance names");
 }
 
 #[test]
@@ -1833,10 +1857,13 @@ fn test_the_single_instance_routes_still_refuse_another_host_name() {
 
     let instance = http_get(port, "/api/instance", &[("Host", &host)]);
     let show = post_show(port, &[("Host", &host)]);
+    let replace = post_replace(port, &[("Host", &host)]);
 
     assert_eq!(instance.status, 403);
     assert_eq!(show.status, 403);
+    assert_eq!(replace.status, 403);
     assert_eq!(started.opened.lock().unwrap().len(), 1, "a refused request opens nothing");
+    assert_eq!(started.status()["state"], "ready", "a refused replace quits nothing");
 }
 
 #[test]
@@ -1857,6 +1884,23 @@ fn test_show_still_refuses_a_foreign_origin_and_needs_a_json_content_type() {
 }
 
 #[test]
+fn test_replace_still_refuses_a_foreign_origin_and_needs_a_json_content_type() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let port = started.ui_port();
+
+    let foreign = post_replace(port, &[("Origin", "http://rebind.example")]);
+    let not_json = common::http_request(port, "POST", "/api/replace", &[("Content-Type", "text/plain")]);
+    let by_get = http_get(port, "/api/replace", &[]);
+
+    assert_eq!(foreign.status, 403);
+    assert_eq!(not_json.status, 415);
+    assert_eq!(by_get.status, 405);
+    assert_eq!(started.status()["state"], "ready", "a refused replace quits nothing");
+}
+
+#[test]
 fn test_instance_is_read_only_and_other_api_routes_still_need_the_token() {
     let Some(started) = start(false) else {
         return;
@@ -1868,7 +1912,7 @@ fn test_instance_is_read_only_and_other_api_routes_still_need_the_token() {
     let status = http_get(port, "/api/status", &[]);
 
     assert_eq!(instance_by_post.status, 405);
-    assert_eq!(status.status, 403, "only the two single-instance routes are public");
+    assert_eq!(status.status, 403, "only the single-instance routes are public");
 }
 
 /// Start a Helper on the IPC port `ipc_port`, serving the page from `ui_port`
@@ -1901,23 +1945,69 @@ fn wait_for_opened(started: &Started, count: usize) {
 }
 
 #[test]
-fn test_second_start_on_the_same_ipc_port_is_already_running_and_opens_the_first_ones_page() {
+fn test_second_start_on_the_same_ipc_port_replaces_an_idle_first_helper() {
     let ipc_port = common::free_port();
     let Some(first) = try_start_on(ipc_port, common::free_port()) else {
         return;
     };
     let first = first.expect("the first Helper should start");
     let ui_port = first.ui_port();
-    assert_eq!(first.opened.lock().unwrap().len(), 1);
+    let first_opened = first.opened.clone();
+    // As the binary's main does: whatever waits on a Helper ends it once it quits.
+    let first_waiting = wait_in_the_background(first.helper);
 
     let Some(second) = try_start_on(ipc_port, ui_port) else {
+        return;
+    };
+
+    let second = second.expect("an idle Helper makes way for the one started after it");
+    assert_finishes(first_waiting);
+    assert_eq!(second.helper.ipc_port(), ipc_port, "the second Helper serves the game now");
+    assert_eq!(second.opened.lock().unwrap().len(), 1, "the second opens its own page");
+    assert_eq!(first_opened.lock().unwrap().len(), 1, "the first was not asked to show its page");
+}
+
+#[test]
+fn test_second_start_leaves_a_first_helper_the_game_is_connected_to_and_its_page_says_why() {
+    let ipc_port = common::free_port();
+    let Some(first) = try_start_on(ipc_port, common::free_port()) else {
+        return;
+    };
+    let first = first.expect("the first Helper should start");
+    let mut dll = first.connect_fake_dll();
+    dll.handshake();
+
+    let Some(second) = try_start_on(ipc_port, first.ui_port()) else {
         return;
     };
 
     assert!(matches!(second, Err(StartError::AlreadyRunning)), "got {:?}", second.err());
     wait_for_opened(&first, 2);
     assert_eq!(first.opened.lock().unwrap()[1], first.helper.launch_url().unwrap());
-    assert_eq!(first.status()["state"], "ready", "the first Helper is undisturbed");
+    assert_eq!(first.banners(), ["restart_refused"]);
+    assert_eq!(first.status()["game_connected"], true, "the game keeps its Helper");
+}
+
+#[test]
+fn test_second_start_leaves_a_first_helper_a_friend_is_connected_to() {
+    let ipc_port = common::free_port();
+    let Some(first) = try_start_on(ipc_port, common::free_port()) else {
+        return;
+    };
+    let first = first.expect("the first Helper should start");
+    let Some(friend) = friend() else {
+        return;
+    };
+    dial_the_helper(&friend, &first);
+    first.wait_for_state("hosting");
+
+    let Some(second) = try_start_on(ipc_port, first.ui_port()) else {
+        return;
+    };
+
+    assert!(matches!(second, Err(StartError::AlreadyRunning)), "got {:?}", second.err());
+    assert_eq!(first.banners(), ["restart_refused"]);
+    assert_eq!(first.status()["state"], "hosting", "the friend keeps their connection");
 }
 
 #[test]
@@ -1929,6 +2019,9 @@ fn test_first_helper_is_found_when_it_is_on_a_later_port_of_the_ui_range() {
     };
     let first = first.expect("the first Helper should start");
     assert_eq!(first.ui_port(), base + 1);
+    // In use, so that it stays and shows its page.
+    let mut dll = first.connect_fake_dll();
+    dll.handshake();
 
     let Some(second) = try_start_on(ipc_port, base) else {
         return;
@@ -1991,6 +2084,8 @@ fn test_the_helper_writes_no_lock_or_state_file() {
     let Some(first) = start_with(config(&folder), OpenedUrls::default()) else {
         return;
     };
+    let mut dll = first.connect_fake_dll();
+    dll.handshake();
     let second = datalink_mp::start(Config { ui: first.helper.ui_port().map(|port| UiConfig { port, ..ui_config_from(0).ui.unwrap() }), ..config(&folder) });
     assert!(matches!(second, Err(StartError::AlreadyRunning)));
 
@@ -2009,6 +2104,9 @@ fn test_binary_started_twice_on_the_same_ipc_port_says_already_running_and_exits
     let Some(_) = first.launch_url() else {
         return;
     };
+    // The game is connected to the first, so it stays.
+    let mut dll = common::FakeDll::connect(ipc_port.parse().unwrap()).unwrap();
+    dll.handshake();
     let mut second = UiProcess::spawn(&args(ui_port), &[], std::path::Path::new(""));
 
     let exit = second.wait_for_exit();
@@ -2021,6 +2119,32 @@ fn test_binary_started_twice_on_the_same_ipc_port_says_already_running_and_exits
         exit.stderr
     );
     assert!(!exit.stdout.contains("?t="), "no token is printed by the second process");
+}
+
+#[test]
+fn test_binary_started_again_replaces_an_idle_running_one() {
+    let ipc_port = common::free_port().to_string();
+    let ui_port = common::free_port();
+    let args = vec![
+        "--ui-port".to_string(),
+        ui_port.to_string(),
+        "--port".into(),
+        ipc_port.clone(),
+        "--no-browser".into(),
+    ];
+    let mut first = UiProcess::spawn(&args, &[], std::path::Path::new(""));
+    let Some(_) = first.launch_url() else {
+        return;
+    };
+
+    let mut second = UiProcess::spawn(&args, &[], std::path::Path::new(""));
+
+    assert!(second.launch_url().is_some(), "the second Helper starts and prints its page");
+    let exit = first.wait_for_exit();
+    assert!(exit.status.success(), "the first made way and exited with {:?}: {}", exit.status, exit.stderr);
+    common::FakeDll::connect(ipc_port.parse().unwrap())
+        .expect("the second Helper serves the game")
+        .handshake();
 }
 
 #[test]

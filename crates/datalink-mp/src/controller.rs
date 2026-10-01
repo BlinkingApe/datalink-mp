@@ -17,6 +17,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::{info, warn};
 
@@ -196,12 +197,25 @@ pub enum Banner {
     /// The most recent join's dial was refused by a friend's Helper of
     /// another release
     PeerVersionMismatch,
+    /// The player started datalink-mp again, but this Helper was in use, so
+    /// it kept running instead of making way. Shown for
+    /// [`RESTART_REFUSED_SHOWN_FOR`].
+    RestartRefused,
 }
+
+/// How long the page says that a second start left this Helper running.
+const RESTART_REFUSED_SHOWN_FOR: Duration = Duration::from_secs(60);
+
+/// The commit this Helper was built from, short: two builds of one Release
+/// version tell themselves apart by it.
+pub const BUILD_ID: &str = env!("DATALINK_BUILD_ID");
 
 /// A snapshot of the Helper's status, as the page shows it.
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
     pub release_version: &'static str,
+    /// [`BUILD_ID`]
+    pub build_id: &'static str,
     pub ipc_version: u32,
     pub peer_protocol_version: u16,
     /// `windows`, `linux` or `macos`
@@ -248,6 +262,8 @@ pub struct SessionController {
     /// replaces the Transport, so that neither races a shutdown or a Stop.
     shut_down: Mutex<bool>,
     shut_down_signal: Condvar,
+    /// When a second start last found this Helper in use.
+    restart_refused_at: Mutex<Option<Instant>>,
 }
 
 impl SessionController {
@@ -282,6 +298,7 @@ impl SessionController {
             joins: Arc::default(),
             shut_down: Mutex::new(false),
             shut_down_signal: Condvar::new(),
+            restart_refused_at: Mutex::new(None),
         })
     }
 
@@ -342,12 +359,17 @@ impl SessionController {
             banners.push(Banner::IpcVersionMismatch);
         }
         banners.extend(failure.map(JoinFailure::banner));
+        let refused_at = *self.restart_refused_at.lock().unwrap_or_else(PoisonError::into_inner);
+        if refused_at.is_some_and(|at| at.elapsed() < RESTART_REFUSED_SHOWN_FOR) {
+            banners.push(Banner::RestartRefused);
+        }
         let invalid_ticket = match failure {
             Some(JoinFailure::InvalidTicket(reason)) => Some(reason),
             _ => None,
         };
         Status {
             release_version: env!("CARGO_PKG_VERSION"),
+            build_id: BUILD_ID,
             ipc_version: ipc_protocol::PROTOCOL_VERSION,
             peer_protocol_version: STREAM_PROTO_VERSION,
             os: OS,
@@ -365,6 +387,25 @@ impl SessionController {
 
     fn joins(&self) -> MutexGuard<'_, Joins> {
         lock(&self.joins)
+    }
+
+    /// Whether quitting would drop something: the game is connected, a
+    /// friend is, or a join is under way. A Helper in use doesn't make way
+    /// for a second start.
+    pub(crate) fn in_use(&self) -> bool {
+        if self.game_connected.load(Ordering::Relaxed) {
+            return true;
+        }
+        // Locked in the order status locks them.
+        let mut joins = self.joins();
+        let has_peers = !self.current().transport.connected_peers().is_empty();
+        session_state(&mut joins, has_peers) != State::Ready
+    }
+
+    /// A second start found this Helper in use and left it running: the page
+    /// says so for a while.
+    pub(crate) fn restart_refused(&self) {
+        *self.restart_refused_at.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
     }
 
     /// The IPC server reports that a DLL handshake succeeded: the game is

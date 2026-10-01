@@ -88,3 +88,5 @@ Publish:
 
 - On `v0.1.0-rc.2` (both sides, as far as known), the game connected and worked reasonably well between Linux and Windows, but syncing between turns was very slow. Speed is the focus of 0.2.0 (ADR-0004), and 0.1.0 continues as planned.
 - On `v0.1.0-rc.3`, the game's setup dialogs showed null pointers and some drop-downs didn't react. The rc.2 and rc.3 DLLs are identical apart from timestamps, so this isn't a build regression. It's a defect to investigate, ticket 06, which blocks the friend game and so the gate. If the fix touches the DLL, the gate moves to a new `-rc.N`.
+
+**2026-10-01 (agent):** The gate moves to `v0.1.0-rc.4`, with two Helper changes from the friend game: ticket 06 (a game that left without closing its session broke the next Host Game) and helper-web-ui ticket 19 (a second start replaces an idle Helper; the footer names the build). The DLL's source is unchanged. Every gate check runs again on rc.4, including the friend game.

@@ -29,7 +29,7 @@ Stop ends the current connections and gives a new Ticket without closing the Hel
 
 1. As a player, I want to double-click the Helper and have my browser open the page, so that I never need a terminal.
 2. As a player, I want the page's address printed in the Helper's window too, so that I can open it myself if the browser did not open.
-3. As a player who double-clicks the Helper a second time, I want my browser to open the page of the Helper that is already running, so that I don't end up with two Helpers fighting over the same port.
+3. As a player who double-clicks the Helper a second time, I want the running Helper to make way for the one I just started, unless the game or a friend is using it, in which case I want its page to open and say why. That way I never end up with two Helpers fighting over the same port, and never keep running a stale build after extracting a new one.
 4. As a player whose usual UI port is taken by another program, I want the Helper to pick the next free port by itself, so that it still starts.
 5. As a player, I want the Helper to work from wherever my Game folder is, without a settings file or an install step, so that setup is only "extract and double-click".
 6. As a Windows player, I want the Helper to open my browser without spawning a hidden PowerShell, so that my antivirus is less likely to flag it.
@@ -234,7 +234,7 @@ Status fields: Release version, IPC version, Peer protocol version, OS (`windows
 The ADRs left these open.
 
 - **UI port.** Default 47700. If the chosen port is taken, try the next nine (so 47700 to 47709 by default); if all ten are taken, exit with a clear message. The same walk applies to a port given by flag or environment variable.
-- **Single instance, keyed on the IPC port, with no files.** At startup the Helper binds the IPC port. If that fails with address-in-use, it asks each port in the UI range for `GET /api/instance`. If a Helper answers with the same IPC port, the new process sends it `POST /api/show`, prints "datalink-mp is already running", and exits with status 0. The running Helper opens the browser itself, so the token never leaves it. If no Helper answers, something else holds the port: the new process carries on and shows the `ipc_port_in_use` banner. Two Helpers on different IPC ports are separate instances and both run.
+- **Single instance, keyed on the IPC port, with no files.** At startup the Helper binds the IPC port. If that fails with address-in-use, it asks each port in the UI range for `GET /api/instance`. If a Helper answers with the same IPC port, the new process sends it `POST /api/replace`. A running Helper that nothing uses (no game connected, no friend connected, no join under way) answers 202 and quits as Quit does, and the new process binds the IPC port once it is free (within 10 s) and starts normally. One in use answers 409, opens its own page with the `restart_refused` banner for a minute, and keeps running; the new process prints "datalink-mp is already running and in use…" and exits with status 0. A running Helper from a release without `/api/replace` gets `POST /api/show` instead. The running Helper opens the browser itself, so the token never leaves it. `POST /api/replace` needs no token: at worst it quits a Helper that nothing uses, which any local program could do by ending its process, and the Host, Origin and content-type rules keep web pages from sending it. Status, `GET /api/instance`, the page footer and the console all name the build (the short commit hash), so two builds of one Release version can be told apart. If no Helper answers, something else holds the port: the new process carries on and shows the `ipc_port_in_use` banner. Two Helpers on different IPC ports are separate instances and both run.
 - **The two unauthenticated routes** are the one deviation from "every endpoint needs the token". They still get the `Host` check, and `POST /api/show` still rejects a foreign `Origin`. They reveal nothing secret and can at worst open a browser tab.
 - **`--no-browser`**, for tests and headless use.
 - **Dial timeout** of 15 seconds.
@@ -329,7 +329,7 @@ Behaviours to cover:
 - Stop and join issued from async handlers do not abort the process (the nested-runtime and runtime-drop hazards).
 - Quit makes the Helper's handle finish.
 - Security: no token, a wrong token, a `Host` of another name, a `Host` with another port, a foreign `Origin` on each POST, a GET on a POST route, and the absence of CORS headers. The page at `/` is served without a token and contains no `http://` or `https://` references to other hosts.
-- Single instance: `GET /api/instance` reports the IPC port; `POST /api/show` calls the browser opener with the launch URL; a second start on the same IPC port returns "already running" and triggers the first one's opener; a second start on a different IPC port runs and takes the next UI port.
+- Single instance: `GET /api/instance` reports the IPC port and the build; `POST /api/show` calls the browser opener with the launch URL; a second start on the same IPC port replaces an idle first Helper, and returns "already running" when the game or a friend is connected to the first, which then shows its page with the `restart_refused` banner; a second start on a different IPC port runs and takes the next UI port.
 
 ### Seam 2 (existing): the Transport's public API
 

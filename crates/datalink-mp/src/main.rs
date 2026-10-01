@@ -145,7 +145,7 @@ fn run_ui(port: u16, ui_port: u16, no_browser: bool) -> Result<()> {
     };
 
     // The launch URL carries the token: printing it here is the only place it appears.
-    println!("datalink-mp {}", env!("CARGO_PKG_VERSION"));
+    println!("datalink-mp {} (build {})", env!("CARGO_PKG_VERSION"), datalink_mp::BUILD_ID);
     println!(
         "{}",
         helper.launch_url().expect("a Helper started with a UI has a launch URL")

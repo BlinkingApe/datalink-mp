@@ -299,7 +299,8 @@ fn test_ui_mode_prints_its_name_version_and_how_to_quit() {
     let Some(first_line) = helper.first_stdout_line() else {
         return;
     };
-    assert_eq!(first_line, format!("datalink-mp {}", env!("CARGO_PKG_VERSION")));
+    let name_and_version = format!("datalink-mp {} (build ", env!("CARGO_PKG_VERSION"));
+    assert!(first_line.starts_with(&name_and_version), "got: {first_line}");
     let Some(_) = helper.launch_url() else {
         return;
     };

@@ -1,4 +1,5 @@
-//! Finding a Helper that already runs on the same IPC port.
+//! Finding a Helper that already runs on the same IPC port, and asking it to
+//! make way.
 //!
 //! There are no lock files: a Helper that finds its IPC port taken asks the
 //! ports the page may be on who answers. A tiny blocking HTTP client is all
@@ -17,22 +18,43 @@ const CONNECT_TIMEOUT: Duration = Duration::from_millis(500);
 /// How long to wait for the running Helper to answer.
 const REPLY_TIMEOUT: Duration = Duration::from_secs(2);
 
-/// If a Helper is running on the IPC port `ipc_port`, ask it to show its page
-/// and say so. Looks on the ports of the UI port walk that starts at
-/// `ui_port`, which is where a running Helper serves its page. Anything else
-/// that answers on those ports is not a Helper on this IPC port and is left alone.
-pub(crate) fn show_running_helper(ipc_port: u16, ui_port: u16) -> bool {
+/// What a Helper already running on the IPC port did when asked to make way.
+pub(crate) enum Running {
+    /// It is quitting. The ports it holds will be free shortly.
+    MakingWay,
+    /// It stays, and has been asked to show its page: it is in use, or it is
+    /// from a release that can't be asked to make way.
+    Staying,
+}
+
+/// If a Helper is running on the IPC port `ipc_port`, ask it to make way for
+/// this one, and say what it did. None when no Helper answers. Looks on the
+/// ports of the UI port walk that starts at `ui_port`, which is where a
+/// running Helper serves its page. Anything else that answers on those ports
+/// is not a Helper on this IPC port and is left alone.
+pub(crate) fn ask_running_helper_to_make_way(ipc_port: u16, ui_port: u16) -> Option<Running> {
     let last = ui_port.saturating_add(PORT_WALK_LEN - 1);
     for port in ui_port..=last {
         if !answers_for(ipc_port, port) {
             continue;
         }
         info!("A Helper on IPC port {ipc_port} is already running, serving its page on port {port}");
-        // If the request fails, the player still gets told it is running.
-        let _ = request(port, "POST", "/api/show");
-        return true;
+        return Some(match request(port, "POST", "/api/replace") {
+            Some((202, _)) => {
+                info!("It is not in use, and is making way");
+                Running::MakingWay
+            }
+            // In use: it has shown its page, with a banner saying why it stays.
+            Some((409, _)) => Running::Staying,
+            // No answer, or a release without the route: it still gets asked
+            // to show its page, and the player gets told it is running.
+            _ => {
+                let _ = request(port, "POST", "/api/show");
+                Running::Staying
+            }
+        });
     }
-    false
+    None
 }
 
 /// Whether the Helper on `ui_port` says it is on the IPC port `ipc_port`.

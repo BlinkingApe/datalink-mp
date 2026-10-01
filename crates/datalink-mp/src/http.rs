@@ -131,7 +131,7 @@ pub(crate) struct HttpServer {
 
 struct AppState {
     controller: Arc<SessionController>,
-    /// The application name, the Release version and the IPC port (null when another program holds it), as
+    /// The application name, the Release version, the build and the IPC port (null when another program holds it), as
     /// `GET /api/instance` answers them.
     instance: serde_json::Value,
     launch_url: String,
@@ -161,6 +161,7 @@ pub(crate) fn spawn(
         instance: serde_json::json!({
             "app": crate::APP_NAME,
             "release_version": env!("CARGO_PKG_VERSION"),
+            "build_id": crate::controller::BUILD_ID,
             "ipc_port": ipc_port,
         }),
         launch_url: launch_url(port, &token),
@@ -174,6 +175,7 @@ pub(crate) fn spawn(
         .route("/stop", post(stop))
         .route("/instance", get(instance))
         .route("/show", post(show))
+        .route("/replace", post(replace))
         .route("/quit", post(quit))
         .with_state(state);
     let app = Router::new().route("/", get(page)).nest("/api", api);
@@ -332,6 +334,25 @@ async fn quit(State(state): State<Arc<AppState>>) -> StatusCode {
     // async worker thread like this one.
     tokio::task::spawn_blocking(move || controller.shutdown());
     StatusCode::NO_CONTENT
+}
+
+/// A Helper started on the same IPC port asks to take this one's place: the
+/// player started datalink-mp again, perhaps after extracting a new release.
+/// Unless this Helper is in use, it quits as Quit does and answers 202, and
+/// the new Helper takes the ports once they are free. In use, it keeps
+/// running, shows its page with the `restart_refused` banner, and answers 409.
+async fn replace(State(state): State<Arc<AppState>>) -> StatusCode {
+    let controller = state.controller.clone();
+    let in_use = tokio::task::spawn_blocking(move || controller.in_use())
+        .await
+        .unwrap_or(true);
+    if in_use {
+        state.controller.restart_refused();
+        show(State(state)).await;
+        return StatusCode::CONFLICT;
+    }
+    quit(State(state)).await;
+    StatusCode::ACCEPTED
 }
 
 /// Who is answering: the way a second Helper on the same IPC port finds this one.

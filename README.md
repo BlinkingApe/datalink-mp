@@ -115,8 +115,12 @@ Your Ticket is new every time datalink-mp starts and every time you press
 and gives you a new Ticket without closing datalink-mp; with the game open,
 return to the game's main menu first. **Quit** closes datalink-mp.
 
-If you double-click `datalink-mp` a second time, your browser opens the page of
-the copy that is already running.
+If you double-click `datalink-mp` while it's already running, the running copy
+makes way and a fresh one starts, so you always get the copy you just started
+(handy after extracting a new release). If the game or a friend is connected to
+the running copy, it keeps running instead, and its page opens to say why.
+The page's footer shows the Release version and the build, so you can check
+which one is running.
 
 ## Troubleshooting
 

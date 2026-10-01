@@ -13,7 +13,7 @@
     --muted: #7fa397; --faint: #4f7167; --line: #1c3932; --card-line: #22473e;
     --accent: #3fd3a0; --glow: rgba(63, 211, 160, .35);
     --ok: #3fd3a0; --warn: #f0b44c; --bad: #ff7d6e;
-    --okbg: #123a30; --badbg: #2e1412;
+    --okbg: #123a30; --warnbg: #2b220c; --badbg: #2e1412;
     --display: "Chakra Petch", system-ui, sans-serif;
     --body-font: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
     --mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
@@ -73,6 +73,10 @@
   .pill.idle { background: transparent; color: var(--muted); border-color: var(--line); }
   .banner { padding: 12px 14px; margin: 14px 0; border: 1px solid var(--line); border-left: 3px solid; }
   .banner.bad { background: var(--badbg); border-left-color: var(--bad); }
+  /* Not an error: something the player should know, and nothing broke. */
+  .banner.note { background: var(--warnbg); border-left-color: var(--warn); }
+  .banner .label { display: block; font: 600 11px var(--mono); letter-spacing: .08em; text-transform: uppercase;
+    color: var(--warn); margin-bottom: 4px; }
   .ingame { border-left: 2px solid var(--accent); background: var(--card-2); padding: 8px 12px; margin: 8px 0;
     font: 13px/1.5 var(--mono); color: var(--muted); }
   .ingame b { color: var(--ink); }
@@ -115,6 +119,11 @@
     Stop.</div>
   <div class="banner bad" data-banner="peer_version_mismatch" hidden>Your friend has a different
     release of datalink-mp. You both need the same one.</div>
+  <div class="banner note" data-banner="restart_refused" hidden>
+    <span class="label">// Already running</span>
+    You started datalink-mp again, but this one is in use: the game or a friend is connected. So it
+    kept running, and nothing was interrupted. To restart it, close the game, press <b>Quit</b>,
+    then start datalink-mp again.</div>
 
   <div class="card">
     <div class="step"><div class="num" id="num1">1</div>
@@ -355,7 +364,7 @@
     document.getElementById('wine-hint').hidden = s.game_connected || s.os === 'windows' || explained;
 
     document.getElementById('footer').textContent =
-      'Release ' + s.release_version +
+      'Release ' + s.release_version + ' · build ' + s.build_id +
       ' (IPC v' + s.ipc_version + ' · Peer protocol v' + s.peer_protocol_version + ')' +
       ' · State: ' + (STATE_WORDS[s.state] || s.state);
   }
