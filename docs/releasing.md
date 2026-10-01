@@ -176,6 +176,20 @@ Once every gate check passes:
   Change that line to the gated RC's tag and run, which built the bytes and
   holds their attestations.
 - Add the VirusTotal report links to the notes, then publish by hand.
+- Delete the RC drafts and their tags, the gated one included:
+
+  ```bash
+  gh release delete v0.1.0-rc.3 --cleanup-tag --yes
+  git tag -d v0.1.0-rc.3
+  ```
+
+  GitHub can't hide the **tags** link under Releases in the sidebar. With
+  the RC tags gone, it lists the same versions as the Releases page, so a
+  player who clicks it by mistake still lands on a release. Nothing that
+  ships needs the RC's tag. The attestations bind the archives' digests, so
+  `gh attestation verify` still passes, and the RC's run, named in the notes,
+  stays under Actions. The README links players to `/releases/latest`, which
+  skips the sidebar altogether.
 
 ## Cleaning up test runs
 

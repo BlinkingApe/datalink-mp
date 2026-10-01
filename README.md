@@ -37,8 +37,8 @@ This README claims only what has been tested.
 release of datalink-mp.
 
 Download the archive for your system from the
-[Releases page](https://github.com/BlinkingApe/datalink-mp/releases) and
-follow the section for your system.
+[latest release](https://github.com/BlinkingApe/datalink-mp/releases/latest)
+and follow the section for your system.
 
 ### Windows
 
