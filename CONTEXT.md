@@ -26,6 +26,16 @@ _Avoid_: install dir, game directory
 Ending the Helper's current connections without quitting it; the Helper comes back with a new Ticket.
 _Avoid_: reset, disconnect, leave
 
+### Connections
+
+**Direct connection**:
+A connection between two Helpers whose traffic goes straight between the two players' machines.
+_Avoid_: P2P connection (every connection is peer-to-peer)
+
+**Relayed connection**:
+A connection between two Helpers whose traffic passes through a relay server, because no direct connection could be made. It is slower than a direct connection.
+_Avoid_: proxied connection, fallback connection
+
 ### Versions
 
 **IPC version**:

@@ -83,3 +83,8 @@ Publish:
 - `dplayx.dll` is the same in all three archives: `5e9a8bfe64ec4f07f59e1ba6e1b5077837f90ac99c15f4cceda3e4d06398d65e`. `datalink-mp.exe`: `1dfa81c2bb415a65caf422cc269de8bf6041d0d53712813a538b97df57ad648c`. Both are new, so they need a new VirusTotal scan.
 - The CI-built Linux Helper serves the themed page, with seven `@font-face` rules and `font-src data:`.
 - The `v0.1.0-rc.2` draft and tag are still there, waiting for the maintainer's go-ahead to delete them.
+
+**2026-10-01 (maintainer, recorded by agent):** Internet game with a friend.
+
+- On `v0.1.0-rc.2` (both sides, as far as known), the game connected and worked reasonably well between Linux and Windows, but syncing between turns was very slow. Speed is the focus of 0.2.0 (ADR-0004), and 0.1.0 continues as planned.
+- On `v0.1.0-rc.3`, the game's setup dialogs showed null pointers and some drop-downs didn't react. The rc.2 and rc.3 DLLs are identical apart from timestamps, so this isn't a build regression. It's a defect to investigate, ticket 06, which blocks the friend game and so the gate. If the fix touches the DLL, the gate moves to a new `-rc.N`.
