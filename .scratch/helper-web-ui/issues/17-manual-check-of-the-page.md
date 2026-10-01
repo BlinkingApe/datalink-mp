@@ -6,7 +6,7 @@ Run the checks on Windows and on Linux (Faugus or the shell under GE-Proton), ag
 
 Reference for layout and wording: prototype variant C on branch `prototype/ui-flow` (commit `6399164`) and the spec's "The page" and "Wine setup text" sections.
 
-**Blocked by:** 06 (Startup), 07 (HTTP security hardening), 08 (Step 1), 09 (Step 3), 10 (Step 4), 11 (Step 2), 12 (Dial failure banners), 13 (Stop), 14 (Quit), 15 (Single instance)
+**Blocked by:** 06 (Startup), 07 (HTTP security hardening), 08 (Step 1), 09 (Step 3), 10 (Step 4), 11 (Step 2), 12 (Dial failure banners), 13 (Stop), 14 (Quit), 15 (Single instance); for the Windows checks, also release-pipeline 02 (a CI-built Windows archive to test)
 
 **Status:** ready-for-human
 

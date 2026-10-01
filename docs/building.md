@@ -42,6 +42,36 @@ Artifacts:
 - `target/release/datalink-mp` (`datalink-mp.exe` on Windows): the Helper
 - `target/i686-pc-windows-gnu/release/dplayx.dll`: the DLL
 
+The DLL's `build.rs` always compiles `unwind_stubs.c` for `-gnu` targets. On
+a mingw newer than this project was last linked with (GCC 14+; seen locally
+at 15.1), that clashes with libgcc's own `_Unwind_Resume` and the build fails
+with `multiple definition of '_Unwind_Resume'`. Work around it per-target, so
+`.cargo/config.toml`'s `control-flow-guard=no` and `-lws2_32` stay in effect —
+bare `RUSTFLAGS` replaces them instead of adding to them:
+
+```bash
+CARGO_TARGET_I686_PC_WINDOWS_GNU_RUSTFLAGS="-C link-arg=-Wl,--allow-multiple-definition" \
+  cargo build --release --target i686-pc-windows-gnu -p dplayx
+```
+
+### Cross-building the Helper for Windows
+
+To produce a Windows `datalink-mp.exe` without a Windows machine (for example
+to stage a manual test), add the 64-bit mingw target and cross-build:
+
+```bash
+rustup target add x86_64-pc-windows-gnu
+brew install mingw-w64              # macOS
+# apt install gcc-mingw-w64-x86-64  # Debian/Ubuntu
+
+cargo build --release --target x86_64-pc-windows-gnu -p datalink-mp
+```
+
+Artifact: `target/x86_64-pc-windows-gnu/release/datalink-mp.exe`. It links no
+mingw runtime DLLs (libgcc/winpthread are statically linked), and this
+crate's `build.rs` has no unwind-stub step, so it doesn't hit the DLL's link
+conflict above.
+
 ## 3. Assemble your Game folder
 
 Copy both artifacts into your Game folder, next to the game executable:
