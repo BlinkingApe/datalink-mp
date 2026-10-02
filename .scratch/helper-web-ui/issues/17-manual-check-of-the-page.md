@@ -19,9 +19,9 @@ Criterion 1: first run
 
 Criterion 2: two machines play
 
-- [ ] A second machine (Windows, or Linux with the override set) pastes the Ticket, presses Connect, and sees "Connecting to your friend…" then "Connected to your friend"
+- [x] A second machine (Windows, or Linux with the override set) pastes the Ticket, presses Connect, and sees "Connecting to your friend…" then "Connected to your friend"
 - [ ] The host's page shows the friend under step 4 with a short ID
-- [ ] Both games show "Game connected", and the two play a game together
+- [x] Both games show "Game connected", and the two play a game together
 
 Criterion 3: Stop
 
@@ -52,3 +52,5 @@ Page and wording
 - [ ] With the network unplugged from the internet, the page still loads
 
 **2026-10-01 (agent):** The Windows checks are unblocked. The draft pre-release `v0.1.0-rc.2` (release-pipeline ticket 02) holds the CI-built `datalink-mp-0.1.0-windows-x86_64.zip`. Get it with `gh release download v0.1.0-rc.2 -R BlinkingApe/datalink-mp`; drafts are only visible to maintainers.
+
+**2026-10-02 (maintainer, recorded by agent):** Criterion 2 checked against `v0.1.0-rc.4`'s archives (`docs/datalink-mp rc4 tests.md`), both Linux-Linux (Mint hosting, Rocky joining on a mobile hotspot) and Windows-Linux (the maintainer's own Windows 11 machine hosting, Rocky joining). The Joiner's page showed "Connecting to your friend…" then "Connected to your friend" each time, and full games were played (one Linux-Linux game to completion, one Windows-Linux game for several turns before an unrelated defect ended it — release-pipeline [ticket 09](../release-pipeline/issues/09-net-send-null-pointer-ending-game-after-joiner-disconnect.md)). Not confirmed: whether the host's page shows the friend's short ID at step 4 — the log only mentions a peer count, which testers suggested also surfacing earlier (helper-web-ui [ticket 20](20-show-friends-connected-earlier.md)). This same testing surfaced two more defects, both filed against release-pipeline: the Joiner's in-game name shows blank ([ticket 07](../release-pipeline/issues/07-joiner-name-blank-in-game-ui.md)), and "game not found" persists after a Joiner cancels once ([ticket 08](../release-pipeline/issues/08-joiner-no-game-found-after-cancel.md)). Everything else in this ticket (Criteria 1, 3, 6, and the page/wording checks) is still unchecked.
