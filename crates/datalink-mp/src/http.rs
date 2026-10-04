@@ -121,7 +121,7 @@ pub(crate) fn bind_walking(port: u16) -> Result<TcpListener, PortWalkFailed> {
 /// plain thread.
 pub(crate) struct HttpServer {
     port: u16,
-    token: String,
+    token: SharedToken,
     stop: Option<oneshot::Sender<()>>,
     /// The task serving requests. It ends once the server was told to stop
     /// and has answered every request it had taken up.
@@ -129,12 +129,19 @@ pub(crate) struct HttpServer {
     runtime: Option<Runtime>,
 }
 
+/// The token, shared with the [`guard::Guard`] that checks it on every
+/// request. [`show`] rolls it over when it opens a tab for a second start, so
+/// that a tab left over from before becomes an old tab, the way a fresh
+/// Ticket makes an old one stale.
+pub(crate) type SharedToken = Arc<Mutex<String>>;
+
 struct AppState {
     controller: Arc<SessionController>,
     /// The application name, the Release version, the build and the IPC port (null when another program holds it), as
     /// `GET /api/instance` answers them.
     instance: serde_json::Value,
-    launch_url: String,
+    port: u16,
+    token: SharedToken,
     browser_opener: Option<Arc<BrowserOpener>>,
     /// When the browser was last opened because a request asked for it.
     last_shown: Mutex<Option<Instant>>,
@@ -157,6 +164,7 @@ pub(crate) fn spawn(
         .enable_all()
         .build()?;
 
+    let token: SharedToken = Arc::new(Mutex::new(token));
     let state = Arc::new(AppState {
         instance: serde_json::json!({
             "app": crate::APP_NAME,
@@ -164,7 +172,8 @@ pub(crate) fn spawn(
             "build_id": crate::controller::BUILD_ID,
             "ipc_port": ipc_port,
         }),
-        launch_url: launch_url(port, &token),
+        port,
+        token: token.clone(),
         browser_opener,
         last_shown: Mutex::new(None),
         controller,
@@ -181,7 +190,7 @@ pub(crate) fn spawn(
     let app = Router::new().route("/", get(page)).nest("/api", api);
     // Every request passes the security rules, the token among them, before
     // it reaches any of the routes above. See `guard`.
-    let app = guard::protect(app, guard::Guard::new(port, &token, &PAGE));
+    let app = guard::protect(app, guard::Guard::new(port, token.clone(), &PAGE));
 
     let (stop, stopped) = oneshot::channel::<()>();
     let listener = {
@@ -219,7 +228,7 @@ impl HttpServer {
     }
 
     pub(crate) fn launch_url(&self) -> String {
-        launch_url(self.port, &self.token)
+        launch_url(self.port, &self.token.lock().unwrap())
     }
 }
 
@@ -340,7 +349,8 @@ async fn quit(State(state): State<Arc<AppState>>) -> StatusCode {
 /// player started datalink-mp again, perhaps after extracting a new release.
 /// Unless this Helper is in use, it quits as Quit does and answers 202, and
 /// the new Helper takes the ports once they are free. In use, it keeps
-/// running, shows its page with the `restart_refused` banner, and answers 409.
+/// running, shows its page (see [`show`], which rolls the token) with the
+/// `restart_refused` banner, and answers 409.
 async fn replace(State(state): State<Arc<AppState>>) -> StatusCode {
     let controller = state.controller.clone();
     let in_use = tokio::task::spawn_blocking(move || controller.in_use())
@@ -363,6 +373,11 @@ async fn instance(State(state): State<Arc<AppState>>) -> Json<serde_json::Value>
 /// Open the browser at this Helper's own launch URL, for a second Helper that
 /// was started on the same IPC port. The token never leaves this process.
 /// Answers 429 when it opened the browser less than [`SHOW_INTERVAL`] ago.
+///
+/// Every caller of this route is a second start the player just made, so the
+/// tab it opens rolls the token: whatever tab the player had open before
+/// becomes an old one, the same way a quit-and-restart does, and the page
+/// they are looking at now (this fresh tab) is the one that works.
 async fn show(State(state): State<Arc<AppState>>) -> StatusCode {
     {
         let mut last_shown = state.last_shown.lock().unwrap();
@@ -373,9 +388,24 @@ async fn show(State(state): State<Arc<AppState>>) -> StatusCode {
         *last_shown = Some(now);
     }
     if let Some(open) = state.browser_opener.clone() {
+        let url = launch_url(state.port, &rotate_token(&state.token));
         // The opener may start a program: keep it off the async worker.
-        let url = state.launch_url.clone();
         tokio::task::spawn_blocking(move || open(&url));
     }
     StatusCode::NO_CONTENT
+}
+
+/// Roll a fresh token into `token` and return it. A tab still holding the old
+/// one gets 403 on its next poll and shows the "earlier run" message, so a
+/// player with several tabs open is left with exactly one that works: the one
+/// just opened.
+fn rotate_token(token: &SharedToken) -> String {
+    match generate_token() {
+        Ok(fresh) => {
+            *token.lock().unwrap() = fresh.clone();
+            fresh
+        }
+        // The OS random source failed: keep what the one working tab already has.
+        Err(_) => token.lock().unwrap().clone(),
+    }
 }

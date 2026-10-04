@@ -7,6 +7,7 @@
 //! per-route check to forget. A route that must work without the token is
 //! listed in [`PUBLIC_PATHS`]; every other path needs it.
 
+use super::SharedToken;
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
 use axum::middleware::{self, Next};
@@ -62,8 +63,10 @@ impl IntoResponse for Rejection {
 pub(super) struct Guard {
     /// The UI port actually bound: the only port `Host` may name.
     port: u16,
-    /// The secret every request outside [`PUBLIC_PATHS`] must carry.
-    token: String,
+    /// The secret every request outside [`PUBLIC_PATHS`] must carry. Shared
+    /// with [`AppState`](super::AppState): `show` rolls it over, so a tab left
+    /// open from before a second start stops being admitted.
+    token: SharedToken,
     /// The Content-Security-Policy for every response.
     csp: HeaderValue,
 }
@@ -71,11 +74,11 @@ pub(super) struct Guard {
 impl Guard {
     /// Rules for a server bound to `port`, whose secret is `token`, and that
     /// serves `page`, whose inline scripts are the only scripts allowed to run.
-    pub(super) fn new(port: u16, token: &str, page: &str) -> Self {
+    pub(super) fn new(port: u16, token: SharedToken, page: &str) -> Self {
         let csp = content_security_policy(page);
         Self {
             port,
-            token: token.to_string(),
+            token,
             csp: HeaderValue::from_str(&csp).expect("the policy is plain ASCII"),
         }
     }
@@ -105,7 +108,10 @@ impl Guard {
     fn carries_token(&self, headers: &HeaderMap) -> bool {
         let mut values = headers.get_all(TOKEN_HEADER).iter();
         match (values.next(), values.next()) {
-            (Some(given), None) => bool::from(given.as_bytes().ct_eq(self.token.as_bytes())),
+            (Some(given), None) => {
+                let current = self.token.lock().unwrap();
+                bool::from(given.as_bytes().ct_eq(current.as_bytes()))
+            }
             _ => false,
         }
     }
@@ -279,7 +285,8 @@ mod tests {
                     )
                 }),
             );
-        let app = protect(router, Guard::new(PORT, TOKEN, "<script>go()</script>"));
+        let token = Arc::new(std::sync::Mutex::new(TOKEN.to_string()));
+        let app = protect(router, Guard::new(PORT, token, "<script>go()</script>"));
 
         let mut request = Request::builder().method(method).uri(path);
         if !headers.iter().any(|(n, _)| n.eq_ignore_ascii_case("host")) {

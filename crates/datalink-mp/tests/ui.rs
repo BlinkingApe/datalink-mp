@@ -37,6 +37,13 @@ impl Started {
         assert_eq!(response.status, 200, "status should be served: {}", response.body);
         response.json()
     }
+
+    /// GET `/api/status` with a token other than the one this Helper started
+    /// with, the way a tab holding a token from before a rolled-over show
+    /// would. May be 403, if `token` is no longer the current one.
+    fn status_with_token(&self, token: &str) -> common::HttpResponse {
+        http_get(self.ui_port(), "/api/status", &[("X-Token", token)])
+    }
 }
 
 /// A Game folder that passes the self-check, for the tests that are about
@@ -866,6 +873,13 @@ fn port_of(launch_url: &str) -> u16 {
         .strip_prefix("http://127.0.0.1:")
         .and_then(|rest| rest.split_once("/?t="))
         .and_then(|(port, _)| port.parse().ok())
+        .unwrap_or_else(|| panic!("not a launch URL: {launch_url}"))
+}
+
+fn token_of(launch_url: &str) -> &str {
+    launch_url
+        .split_once("/?t=")
+        .map(|(_, token)| token)
         .unwrap_or_else(|| panic!("not a launch URL: {launch_url}"))
 }
 
@@ -1807,7 +1821,7 @@ fn test_show_needs_no_token_and_opens_the_browser_at_the_launch_url() {
     let Some(started) = start(true) else {
         return;
     };
-    let launch_url = started.helper.launch_url().unwrap();
+    let startup_url = started.helper.launch_url().unwrap();
     // The opener was called once at startup.
     assert_eq!(started.opened.lock().unwrap().len(), 1);
 
@@ -1816,8 +1830,21 @@ fn test_show_needs_no_token_and_opens_the_browser_at_the_launch_url() {
     assert_eq!(response.status, 204, "{}", response.body);
     // The opener runs off the request's thread: wait for it.
     wait_for_opened(&started, 2);
-    assert_eq!(*started.opened.lock().unwrap(), vec![launch_url.clone(), launch_url]);
+    let reopened = started.opened.lock().unwrap()[1].clone();
+    assert_eq!(port_of(&reopened), port_of(&startup_url), "the same Helper, shown again");
+    assert_ne!(reopened, startup_url, "a fresh tab gets a fresh token, so an old tab is left behind");
     assert!(!response.body.contains(TOKEN), "the route must not reveal the token");
+
+    assert_eq!(
+        started.status_with_token(token_of(&startup_url)).status,
+        403,
+        "the tab open before this show is no longer admitted"
+    );
+    assert_eq!(
+        started.status_with_token(token_of(&reopened)).status,
+        200,
+        "the freshly shown tab works"
+    );
 }
 
 #[test]
@@ -1974,6 +2001,7 @@ fn test_second_start_leaves_a_first_helper_the_game_is_connected_to_and_its_page
         return;
     };
     let first = first.expect("the first Helper should start");
+    let original = first.helper.launch_url().unwrap();
     let mut dll = first.connect_fake_dll();
     dll.handshake();
 
@@ -1983,9 +2011,17 @@ fn test_second_start_leaves_a_first_helper_the_game_is_connected_to_and_its_page
 
     assert!(matches!(second, Err(StartError::AlreadyRunning)), "got {:?}", second.err());
     wait_for_opened(&first, 2);
-    assert_eq!(first.opened.lock().unwrap()[1], first.helper.launch_url().unwrap());
-    assert_eq!(first.banners(), ["restart_refused"]);
-    assert_eq!(first.status()["game_connected"], true, "the game keeps its Helper");
+    let reopened = first.opened.lock().unwrap()[1].clone();
+    assert_eq!(port_of(&reopened), port_of(&original), "the same Helper, shown again");
+    assert_ne!(reopened, original, "a fresh tab for the refused second start gets a fresh token");
+    assert_eq!(
+        first.status_with_token(token_of(&original)).status,
+        403,
+        "the tab the player had open is no longer admitted"
+    );
+    let status = first.status_with_token(token_of(&reopened)).json();
+    assert_eq!(status["banners"], serde_json::json!(["restart_refused"]));
+    assert_eq!(status["game_connected"], true, "the game keeps its Helper");
 }
 
 #[test]
@@ -2006,8 +2042,11 @@ fn test_second_start_leaves_a_first_helper_a_friend_is_connected_to() {
     };
 
     assert!(matches!(second, Err(StartError::AlreadyRunning)), "got {:?}", second.err());
-    assert_eq!(first.banners(), ["restart_refused"]);
-    assert_eq!(first.status()["state"], "hosting", "the friend keeps their connection");
+    wait_for_opened(&first, 2);
+    let reopened = first.opened.lock().unwrap()[1].clone();
+    let status = first.status_with_token(token_of(&reopened)).json();
+    assert_eq!(status["banners"], serde_json::json!(["restart_refused"]));
+    assert_eq!(status["state"], "hosting", "the friend keeps their connection");
 }
 
 #[test]
