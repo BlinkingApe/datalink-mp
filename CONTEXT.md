@@ -26,6 +26,10 @@ _Avoid_: install dir, game directory
 Ending the Helper's current connections without quitting it; the Helper comes back with a new Ticket.
 _Avoid_: reset, disconnect, leave
 
+**Game session**:
+The DirectPlay-level multiplayer session the game itself is in: created by Host Game, joined by Join Game, ended by CloseSession or a crash. Tracked today in the IPC layer the DLL talks through. Distinct from the Helper's own connection state (`ready`/`joining`/`joined`/`hosting`, driven by the Transport and its peers) — the two can fall out of sync.
+_Avoid_: session (ambiguous with the Helper's connection state)
+
 ### Connections
 
 **Direct connection**:
