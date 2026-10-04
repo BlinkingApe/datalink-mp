@@ -21,4 +21,8 @@ Resolve by establishing, for 08, 09 and 10:
 3. Logs from a reproduction would help confirm any of these: `DPLAYX_LOG_FILE=/path/dplayx.log` and `SMAC_HELPER_LOG_FILE=/path/helper.log` on both sides, covering the trigger and the failure.
 4. Reproduce at the IPC/Transport level where possible (as ticket 06 did), rather than relying on a real two-machine game each time.
 
+## Comments
+
+**2026-10-04 (agent):** A probable cause for 08 came out of [ticket 03](03-joiner-leaving-tells-the-host-its-session-was-lost.md). A Joiner's Helper that closes (its game cancelled out of Multiplayer Setup, or quit) tells every peer the whole session is over. The host's game is handed `DPSYS_SESSIONLOST` and, probably, stops hosting, so every later Join Game finds nothing, even after the Joiner restarts everything. Reproduced at the Transport level; the fix is ticket 03's. It's worth checking whether the same message is behind 10's "No game found" after a host-side Stop. 09 and the rest of 10 are untouched.
+
 ## Answer

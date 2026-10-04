@@ -116,3 +116,9 @@ Publish:
 - Worth checking in rc.5's games: the Joiner's name on its row on both screens (ticket 07's last box), a second double-click while in use leaving one working tab (ticket 23), and the ticket 06 re-host.
 - The gate still waits on the [game-session-sync map](../../game-session-sync/map.md): rc.5 holds no fix for the `Net::send` popup, the stuck "game not found", or Stop mid-game.
 - The `v0.1.0-rc.4` draft and tag are still there, waiting for the maintainer's go-ahead to delete them.
+
+**2026-10-04 (maintainer, recorded by agent):** First results on `v0.1.0-rc.5`.
+
+- [Ticket 07](07-joiner-name-blank-in-game-ui.md) is confirmed: the Joiner's name shows. Closed.
+- helper-web-ui [ticket 23](../../helper-web-ui/issues/23-second-start-leaves-two-helpers-running.md) is confirmed: a second double-click leaves one working page, and the old tab shows the earlier-run message.
+- New defect: after both games left Multiplayer Setup and quit, with the Helpers still connected, the host hosted again and the Joiner found no game. A Joiner's Helper that closes tells the host's game its session was lost, and that message waits for the host's next game. Reproduced at the Transport level. The fix is game-session-sync [ticket 03](../../game-session-sync/issues/03-joiner-leaving-tells-the-host-its-session-was-lost.md), and it probably also explains the old ticket 08. A new `-rc.N` and a fresh gate follow once it is fixed.

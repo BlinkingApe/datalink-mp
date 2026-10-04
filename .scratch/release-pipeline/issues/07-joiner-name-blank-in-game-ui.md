@@ -4,7 +4,7 @@
 
 **Blocked by:** None
 
-**Status:** ready-for-human
+**Status:** resolved
 
 Leads, unconfirmed:
 
@@ -15,7 +15,7 @@ Needed:
 - [x] Confirm whether the blank name is the Joiner's own row (as seen from the Host) or also shows blank to the Joiner viewing their own row: both, read from the game's code (see Comments)
 - [ ] ~~Logs from a reproduction~~: not needed, the game's code showed the cause
 - [x] Trace why the Joiner's name arrives blank, and fix it: in the Helper (see Comments)
-- [ ] Confirm in the real game, on a new `-rc.N`: the Joiner's name shows on its row, on both the Host's and the Joiner's screens
+- [x] Confirm in the real game, on a new `-rc.N`: the Joiner's name shows on its row, on both the Host's and the Joiner's screens
 
 ## Comments
 
@@ -35,3 +35,5 @@ Needed:
 - Only the host's game's CREATEPLAYERORGROUP is held back. Between the JoinRequest and the joiner's CreatePlayer (milliseconds), the host's `EnumPlayers`, `GetPlayerName` and the session's player count already include the nameless joiner, and so does the roster a later joiner gets in its `JoinResponse`. That was also true before the fix.
 - Other joiners' Helpers still hand `PlayerJoined` to their games at the JoinRequest, unnamed. By the disassembly above, joiners don't register players from CREATEPLAYERORGROUP but copy the host's roster, so this should be harmless. A game with three or more players would confirm it: every row named on every screen.
 - A joiner whose connection drops without a `PlayerLeft` is never removed from the host's roster. That's the same for named joiners and belongs to the [game-session-sync map](../../game-session-sync/map.md), not this ticket.
+
+**2026-10-04 (maintainer, recorded by agent):** Confirmed on `v0.1.0-rc.5`: the Joiner's name now shows. Closing.

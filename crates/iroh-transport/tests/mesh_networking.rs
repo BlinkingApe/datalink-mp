@@ -531,6 +531,136 @@ fn test_host_game_hears_of_joiner_at_its_create_player_already_named() {
     );
 }
 
+/// The system message type of a message queued for the game, if it is one.
+fn system_message_type(qm: &iroh_transport::QueuedMessage) -> Option<u32> {
+    if qm.from != 0 {
+        return None;
+    }
+    Some(u32::from_le_bytes(qm.data.get(0..4)?.try_into().ok()?))
+}
+
+/// The player a queued DPSYS_DESTROYPLAYERORGROUP is about, if it is one.
+fn destroyed_player(qm: &iroh_transport::QueuedMessage) -> Option<u32> {
+    if system_message_type(qm)? != dp_types::sysmsg::DPSYS_DESTROYPLAYERORGROUP {
+        return None;
+    }
+    Some(u32::from_le_bytes(qm.data.get(8..12)?.try_into().ok()?))
+}
+
+/// A host with a session and its own player, and a joiner in it, named the way
+/// SMAC's CreatePlayer names it, with the host's game already told of it.
+/// None when a Transport cannot be created.
+fn hosted_game_with_a_named_joiner() -> Option<(Transport, Transport, u32)> {
+    let host = create_transport()?;
+    let joiner = create_transport()?;
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Leave Test".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+    host.create_player(PlayerName::default(), 0, vec![0x03])
+        .expect("host player");
+    let joiner_id = joiner
+        .join_session_by_ticket(host.our_ticket())
+        .expect("join by ticket should succeed");
+    joiner.create_player(
+        PlayerName {
+            short_name: String::new(),
+            long_name: "Joining Player".to_string(),
+        },
+        0,
+        vec![0x02],
+    );
+    // The joiner's name comes first, then its data, on one ordered stream:
+    // the host's game has heard everything once the data has arrived.
+    poll_until(Duration::from_secs(10), || {
+        std::iter::from_fn(|| host.receive()).find(|qm| {
+            system_message_type(qm) == Some(dp_types::sysmsg::DPSYS_SETPLAYERORGROUPDATA)
+        })
+    })
+    .expect("the host's game should hear of the joiner and its data");
+    while joiner.receive().is_some() {}
+    Some((host, joiner, joiner_id))
+}
+
+/// A joiner's game that leaves (Cancel in Multiplayer Setup, or quitting) closes
+/// only its own part of the session. Real DirectPlay tells the others that
+/// player was destroyed; only the host going away loses the session. Told the
+/// session was lost instead, the host's game stops hosting, and every later
+/// Join Game finds no game, even after the joiner restarts everything
+/// (game-session-sync ticket 03).
+#[test]
+#[ignore = "fails until game-session-sync ticket 03 is fixed"]
+fn test_joiner_that_closes_tells_the_host_its_player_left_not_that_the_session_is_lost() {
+    let Some((host, joiner, joiner_id)) = hosted_game_with_a_named_joiner() else {
+        return;
+    };
+
+    joiner.close_session();
+
+    let mut heard = Vec::new();
+    let left = poll_until(Duration::from_secs(5), || {
+        while let Some(qm) = host.receive() {
+            heard.push(system_message_type(&qm));
+            if destroyed_player(&qm) == Some(joiner_id) {
+                return Some(());
+            }
+        }
+        None
+    });
+    assert!(
+        !heard.contains(&Some(dp_types::sysmsg::DPSYS_SESSIONLOST)),
+        "a joiner leaving must not tell the host's game its session was lost"
+    );
+    assert!(left.is_some(), "the host's game should hear the joiner's player was destroyed");
+    assert!(host.session_manager().is_host(), "the host keeps hosting");
+}
+
+/// Both games leave Multiplayer Setup and quit while the two Helpers stay
+/// connected, and the host hosts again. Whatever the old session's peers sent
+/// after it closed must not reach the new game: a stale DPSYS_SESSIONLOST
+/// makes the new game stop hosting, and the joiner finds no game
+/// (game-session-sync ticket 03, seen on `v0.1.0-rc.5`).
+#[test]
+#[ignore = "fails until game-session-sync ticket 03 is fixed"]
+fn test_messages_from_a_closed_session_do_not_reach_the_next_game_the_host_hosts() {
+    let Some((host, joiner, joiner_id)) = hosted_game_with_a_named_joiner() else {
+        return;
+    };
+
+    // As each Helper does when its game leaves without closing (dll_disconnected).
+    host.close_session();
+    joiner.close_session();
+    // Wait for what the joiner's Helper sent on leaving to reach the host's.
+    poll_until(Duration::from_secs(5), || (host.message_count() > 0).then_some(()));
+
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Hosted Again".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+    host.create_player(PlayerName::default(), 0, vec![0x03])
+        .expect("host player in the new session");
+
+    while let Some(qm) = host.receive() {
+        assert_ne!(
+            system_message_type(&qm),
+            Some(dp_types::sysmsg::DPSYS_SESSIONLOST),
+            "the new session's game was told it lost its session"
+        );
+        assert_ne!(
+            destroyed_player(&qm),
+            Some(joiner_id),
+            "the new session's game was told of a player from the old one"
+        );
+    }
+    assert!(host.session_manager().is_host(), "the host is hosting again");
+}
+
 #[test]
 fn test_default_options_are_peer_protocol_version_1_and_15s_dial_timeout() {
     let options = iroh_transport::TransportOptions::default();

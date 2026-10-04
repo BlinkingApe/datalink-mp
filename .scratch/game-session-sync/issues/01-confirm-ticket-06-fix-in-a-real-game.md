@@ -12,4 +12,8 @@ Originally release-pipeline ticket 06. **Cause, already found** (2026-10-01, by 
 
 **What's left is only the real-game confirm**, not run yet on `rc.4` or later: host a game, close it while sitting in Multiplayer Setup (not via CloseSession), restart the game, host again with the same Helper. Expected: no `Net::send` NULL pointer, and the setup screen's drop-downs react normally. If this still fails, the fix doesn't cover the real-game path the test modeled and the root cause needs revisiting.
 
+## Comments
+
+**2026-10-04 (maintainer, recorded by agent):** Run on `v0.1.0-rc.5`, with a Joiner taking part: the host closed the game from Multiplayer Setup and quit it, the Joiner cancelled and quit too, both Helpers stayed connected, and the host started the game and hosted again. The Joiner's Join Game then said "no game was found". The cause is a different defect, now [ticket 03](03-joiner-leaving-tells-the-host-its-session-was-lost.md), so this ticket's own question is still open. Not recorded: whether the host's new Multiplayer Setup showed the `Net::send` NULL pointer, and whether its drop-downs reacted. Rerun once ticket 03 is fixed.
+
 ## Answer
