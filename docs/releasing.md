@@ -114,7 +114,7 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
 
 The gate (ADR-0002 section 4) runs on one RC's archives, downloaded from its
 draft. Bytes you built yourself, or copied from an earlier RC, don't count.
-For `0.1.0` the gated RC is `v0.1.0-rc.5`. `-rc.2` passed most of the gate, then was
+For `0.1.0` the gated RC is `v0.1.0-rc.6`. `-rc.2` passed most of the gate, then was
 superseded by the page's new look (`-rc.3`), and `-rc.3` by two Helper fixes
 found in the friend game: a stale session that broke hosting, and a second
 start that now replaces an idle Helper (`-rc.4`). `-rc.4` was superseded in
@@ -122,8 +122,10 @@ turn by two more Helper fixes (`-rc.5`): its real games showed the joining
 player's in-game name blank, and the manual check of the page found that a
 refused second start left an old tab that looked like a second Helper. Those
 games also found the **Game session** falling out of sync with the Helper's
-connection state; that investigation (`.scratch/game-session-sync/`) is open, `-rc.5` holds no
-fix for it, and the gate waits on it. The notes below marked `0.1.0-rc.2`
+connection state. `-rc.5`'s real games then showed a leaving Joiner ending
+the host's whole session, which `-rc.6` fixes (game-session-sync ticket 03); the
+investigation of the rest (`.scratch/game-session-sync/`) is open, and the gate
+waits on it. The notes below marked `0.1.0-rc.2`
 are from its run.
 
 - **Get the Windows `.zip` onto Windows with a browser download** from the
@@ -176,7 +178,7 @@ Once every gate check passes:
   bind the archives' digests, not the tag.
 
   ```bash
-  gh release download v0.1.0-rc.5 -D gated
+  gh release download v0.1.0-rc.6 -D gated
   gh release upload v0.1.0 gated/* --clobber
   ```
 
@@ -187,8 +189,8 @@ Once every gate check passes:
 - Delete the RC drafts and their tags, the gated one included:
 
   ```bash
-  gh release delete v0.1.0-rc.5 --cleanup-tag --yes
-  git tag -d v0.1.0-rc.5
+  gh release delete v0.1.0-rc.6 --cleanup-tag --yes
+  git tag -d v0.1.0-rc.6
   ```
 
   GitHub can't hide the **tags** link under Releases in the sidebar. With
