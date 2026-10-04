@@ -26,6 +26,8 @@ A decision, per originating defect (release-pipeline 06, 08, 09 and 10), on whet
 
 <!-- one line per closed ticket -->
 
+- [A Joiner leaving tells the host's game its session was lost](issues/03-joiner-leaving-tells-the-host-its-session-was-lost.md): fixed in the Helper. Only the host's close ends a session (a Joiner's close sends `PlayerLeft`, and a received `SessionClosed` counts only from the host), and each Game session starts with an empty inbox. Real-game confirmation is folded into tickets 01 and 02.
+
 ## Not yet specified
 
 - Whether one mechanism (e.g. the Helper telling the DLL/game a peer or the session ended) covers all of 08, 09 and 10, or each needs its own handling — depends on [Shared root cause across 08, 09 and 10](issues/02-shared-root-cause-across-08-09-10.md).

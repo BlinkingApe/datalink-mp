@@ -25,4 +25,6 @@ Resolve by establishing, for 08, 09 and 10:
 
 **2026-10-04 (agent):** A probable cause for 08 came out of [ticket 03](03-joiner-leaving-tells-the-host-its-session-was-lost.md). A Joiner's Helper that closes (its game cancelled out of Multiplayer Setup, or quit) tells every peer the whole session is over. The host's game is handed `DPSYS_SESSIONLOST` and, probably, stops hosting, so every later Join Game finds nothing, even after the Joiner restarts everything. Reproduced at the Transport level; the fix is ticket 03's. It's worth checking whether the same message is behind 10's "No game found" after a host-side Stop. 09 and the rest of 10 are untouched.
 
+**2026-10-04 (agent):** [Ticket 03](03-joiner-leaving-tells-the-host-its-session-was-lost.md)'s fix is in the code (not yet in a release). On the first `-rc.N` that has it, rerun 08's sequence: the Joiner finds the host's game, presses Cancel in Multiplayer Setup while the host stays there, then presses Join Game again. If it joins, 08 was ticket 03's defect. Both machines need the new build: a fixed host ignores a `-rc.5` Joiner's `SessionClosed`, but that host's game is then never told the Joiner left.
+
 ## Answer

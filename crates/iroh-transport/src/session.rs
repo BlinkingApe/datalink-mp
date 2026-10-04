@@ -341,6 +341,9 @@ impl SessionManager {
         }
         *session = None;
         self.pending_player_data.write().clear();
+        // Kept, it would make the old host's later closing or connection loss
+        // look like the end of whatever session comes next.
+        *self.host_node_id.write() = None;
     }
 
     /// Add discovered session

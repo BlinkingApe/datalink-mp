@@ -210,9 +210,30 @@ impl Transport {
     pub fn create_session(&self, desc: SessionDesc) -> Option<GUID> {
         let result = self.session_manager.create_session(desc);
         if result.is_some() {
+            self.discard_earlier_sessions_messages();
             info!("Created session as host");
         }
         result
+    }
+
+    /// Empty the game's inbox as a Game session begins.
+    ///
+    /// The inbox outlives sessions: a peer's message about a session that has
+    /// since closed (a Joiner leaving after the host's game quit) waits here,
+    /// and the next game to host or join would be handed it. Nothing addressed
+    /// to the new session can be waiting yet, so all of it is stale.
+    fn discard_earlier_sessions_messages(&self) {
+        let mut rx = self.message_rx.lock();
+        let mut queue = self.message_queue.lock();
+        let mut discarded = queue.len();
+        queue.clear();
+        while rx.try_recv().is_ok() {
+            discarded += 1;
+        }
+        self.createplayerorgroup_sent.lock().clear();
+        if discarded > 0 {
+            info!(discarded, "Discarded messages left over from an earlier session");
+        }
     }
 
     /// Join a session using the host ticket
@@ -221,6 +242,8 @@ impl Transport {
         if host_ticket.is_empty() {
             return Err(TransportError::InvalidMessage);
         }
+
+        self.discard_earlier_sessions_messages();
 
         let player_id = self.runtime.block_on(async {
             // Connect to host via ticket
@@ -371,14 +394,28 @@ impl Transport {
     }
 
     /// Close the current session
+    ///
+    /// Only the host closing ends the session for everyone. A Joiner closing
+    /// leaves it, as real DirectPlay does: its peers hear its player was
+    /// destroyed, and the host keeps hosting.
     pub fn close_session(&self) {
         // Notify peers
-        let msg = Message::SessionClosed {
-            reason: "Host closed session".to_string(),
+        let msg = if self.session_manager.is_host() {
+            Some(Message::SessionClosed {
+                reason: "Host closed session".to_string(),
+            })
+        } else {
+            // Nothing is queued for our own game: it is the one leaving.
+            self.session_manager.local_player_id().map(|player_id| Message::PlayerLeft {
+                player_id,
+                reason: crate::protocol::LeaveReason::Disconnect,
+            })
         };
 
-        if let Err(e) = self.connection_manager.broadcast(&msg) {
-            warn!("SessionClosed broadcast failed: {}", e);
+        if let Some(msg) = msg {
+            if let Err(e) = self.connection_manager.broadcast(&msg) {
+                warn!("{} broadcast failed: {}", msg.type_name(), e);
+            }
         }
         // Do NOT disconnect_all here. Session lifetime is decoupled from the
         // endpoint/connection lifetime: tearing down warm peer connections on

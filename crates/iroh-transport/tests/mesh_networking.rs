@@ -592,7 +592,6 @@ fn hosted_game_with_a_named_joiner() -> Option<(Transport, Transport, u32)> {
 /// Join Game finds no game, even after the joiner restarts everything
 /// (game-session-sync ticket 03).
 #[test]
-#[ignore = "fails until game-session-sync ticket 03 is fixed"]
 fn test_joiner_that_closes_tells_the_host_its_player_left_not_that_the_session_is_lost() {
     let Some((host, joiner, joiner_id)) = hosted_game_with_a_named_joiner() else {
         return;
@@ -624,7 +623,6 @@ fn test_joiner_that_closes_tells_the_host_its_player_left_not_that_the_session_i
 /// makes the new game stop hosting, and the joiner finds no game
 /// (game-session-sync ticket 03, seen on `v0.1.0-rc.5`).
 #[test]
-#[ignore = "fails until game-session-sync ticket 03 is fixed"]
 fn test_messages_from_a_closed_session_do_not_reach_the_next_game_the_host_hosts() {
     let Some((host, joiner, joiner_id)) = hosted_game_with_a_named_joiner() else {
         return;

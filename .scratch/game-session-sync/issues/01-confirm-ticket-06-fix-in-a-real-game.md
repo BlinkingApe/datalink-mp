@@ -16,4 +16,6 @@ Originally release-pipeline ticket 06. **Cause, already found** (2026-10-01, by 
 
 **2026-10-04 (maintainer, recorded by agent):** Run on `v0.1.0-rc.5`, with a Joiner taking part: the host closed the game from Multiplayer Setup and quit it, the Joiner cancelled and quit too, both Helpers stayed connected, and the host started the game and hosted again. The Joiner's Join Game then said "no game was found". The cause is a different defect, now [ticket 03](03-joiner-leaving-tells-the-host-its-session-was-lost.md), so this ticket's own question is still open. Not recorded: whether the host's new Multiplayer Setup showed the `Net::send` NULL pointer, and whether its drop-downs reacted. Rerun once ticket 03 is fixed.
 
+**2026-10-04 (agent):** [Ticket 03](03-joiner-leaving-tells-the-host-its-session-was-lost.md) is fixed in the code (not yet in a release). Rerun this on the first `-rc.N` that has it, with the same sequence as the rc.5 run. That run also confirms ticket 03 in the real game: the Joiner should find and join the host's new game. Record three things: whether the Joiner joined, whether the host's Multiplayer Setup showed the `Net::send` NULL pointer, and whether its drop-downs reacted.
+
 ## Answer

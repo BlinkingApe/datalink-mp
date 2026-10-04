@@ -862,6 +862,17 @@ async fn handle_peer_message(
         }
 
         Message::PlayerLeft { player_id, .. } => {
+            // Only the player's own Helper or the host may say it left. Anything
+            // else is about a session we're no longer in, and the DPID may since
+            // belong to someone else.
+            let belongs = session_manager.get_player(player_id).is_some_and(|p| {
+                p.node_id == Some(sender_endpoint_id)
+                    || session_manager.is_node_host(&sender_endpoint_id)
+            });
+            if !belongs {
+                debug!(player_id, "Ignoring PlayerLeft for a player not in our session");
+                return;
+            }
             debug!("Player left: {}", player_id);
             player_routes.write().remove(&player_id);
             session_manager.remove_player(player_id);
@@ -895,6 +906,12 @@ async fn handle_peer_message(
         }
 
         Message::SessionClosed { .. } => {
+            // Only the host's closing ends the session. A Helper from `-rc.5` or
+            // earlier sends this when its Joiner merely leaves.
+            if !session_manager.is_node_host(&sender_endpoint_id) {
+                debug!("Ignoring SessionClosed from a peer that isn't our session's host");
+                return;
+            }
             let _ = message_tx.send(ReceivedMessage::SessionClosed);
         }
 
