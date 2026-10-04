@@ -11,7 +11,7 @@
 use crate::protocol::{PlayerInfo, SessionInfo};
 use dp_types::{PlayerName, SessionDesc, DPID, GUID};
 use parking_lot::RwLock;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 
 /// Session state
@@ -40,6 +40,9 @@ pub struct Session {
     pub state: SessionState,
     /// Are we the host?
     pub is_host: bool,
+    /// Joiners (host only) whose game hasn't called CreatePlayer yet, so the
+    /// host's game hasn't been told about them. See [`SessionManager::add_joiner`].
+    awaiting_create_player: HashSet<DPID>,
     /// Next available player ID (for host) - increments by 0x10000
     next_player_id: AtomicU32,
 }
@@ -53,6 +56,7 @@ impl Session {
             players: HashMap::new(),
             state: SessionState::Hosting,
             is_host: true,
+            awaiting_create_player: HashSet::new(),
             // Start at 0x10000, increment by 0x10000 for each player
             next_player_id: AtomicU32::new(0x10000),
         }
@@ -66,6 +70,7 @@ impl Session {
             players: HashMap::new(),
             state: SessionState::Joined,
             is_host: false,
+            awaiting_create_player: HashSet::new(),
             next_player_id: AtomicU32::new(0),
         }
     }
@@ -84,6 +89,7 @@ impl Session {
 
     /// Remove a player from the session
     pub fn remove_player(&mut self, player_id: DPID) -> Option<Player> {
+        self.awaiting_create_player.remove(&player_id);
         let player = self.players.remove(&player_id);
         self.desc.current_players = self.players.len() as u32;
         player
@@ -453,6 +459,39 @@ impl SessionManager {
         } else {
             false
         }
+    }
+
+    /// Add a joiner at its JoinRequest (host only), held back from the host's
+    /// game until [`rename_remote_player`](Self::rename_remote_player) sees its
+    /// CreatePlayer.
+    ///
+    /// The JoinRequest comes at the joiner's Open, before its game calls
+    /// CreatePlayer with the player's name. The host's game (SMAC) registers a
+    /// player once, at its CREATEPLAYERORGROUP, under the long name
+    /// GetPlayerName returns right then, and ignores SETPLAYERORGROUPNAME (its
+    /// handler is a no-op). Announced at the JoinRequest, the joiner is named ""
+    /// for the whole game, on every machine, since joiners copy the host's names.
+    pub fn add_joiner(&self, info: PlayerInfo) -> bool {
+        let player_id = info.player_id;
+        if !self.add_remote_player(info) {
+            return false;
+        }
+        self.with_session_mut(|s| s.awaiting_create_player.insert(player_id))
+            .is_some()
+    }
+
+    /// Record a remote player's new name. Returns the player if this is a
+    /// joiner's CreatePlayer — its first name since [`add_joiner`](Self::add_joiner)
+    /// — so the caller announces it to the local game now, already named.
+    pub fn rename_remote_player(&self, player_id: DPID, name: PlayerName) -> Option<PlayerInfo> {
+        let mut session = self.session.write();
+        let session = session.as_mut()?;
+        let player = session.players.get_mut(&player_id)?;
+        player.name = name;
+        session
+            .awaiting_create_player
+            .remove(&player_id)
+            .then(|| player.to_info())
     }
 
     /// Remove a player

@@ -620,7 +620,6 @@ impl ConnectionManager {
                         match result {
                             Ok((send, recv)) => {
                                 let session_manager = session_manager.clone();
-                                let message_tx = message_tx.clone();
                                 let cm = cm.clone();
 
                                 tokio::spawn(async move {
@@ -628,7 +627,6 @@ impl ConnectionManager {
                                         send,
                                         recv,
                                         &session_manager,
-                                        &message_tx,
                                         endpoint_id_bytes,
                                         &cm,
                                     ).await {
@@ -921,9 +919,16 @@ async fn handle_peer_message(
         }
 
         Message::PlayerNameUpdate { player_id, name } => {
-            debug!(player_id, short = %name.short_name, long = %name.long_name, "Received player name update, generating DPMSG_SETPLAYERORGROUPNAME");
+            // A joiner's first name is its CreatePlayer: only now does the host's
+            // game hear of it, named, as real DirectPlay would tell it.
+            if let Some(joiner) = session_manager.rename_remote_player(player_id, name.clone()) {
+                info!(player_id, long = %name.long_name, "Joiner created its player, announcing it to the game");
+                let _ = message_tx.send(ReceivedMessage::PlayerJoined(joiner));
+                return;
+            }
 
-            // Generate DPMSG_SETPLAYERORGROUPNAME for the local game
+            // Otherwise a rename: tell the game, though SMAC ignores it.
+            debug!(player_id, short = %name.short_name, long = %name.long_name, "Received player name update, generating DPMSG_SETPLAYERORGROUPNAME");
             let sys_msg = serialize_dpmsg_setplayerorgroupname(
                 player_id,
                 DPPLAYERTYPE_PLAYER,
@@ -931,13 +936,6 @@ async fn handle_peer_message(
                 &name.long_name,
             );
             let _ = message_tx.send(ReceivedMessage::SystemMessage(sys_msg));
-
-            // Update the player's name in the session
-            session_manager.with_session_mut(|session| {
-                if let Some(player) = session.get_player_mut(player_id) {
-                    player.name = name;
-                }
-            });
         }
 
         Message::SessionDescUpdate { session: desc } => {
@@ -981,7 +979,6 @@ async fn handle_bi_stream(
     mut send: SendStream,
     mut recv: RecvStream,
     session_manager: &SessionManager,
-    message_tx: &mpsc::UnboundedSender<ReceivedMessage>,
     sender_endpoint_id: [u8; 32],
     cm: &ConnectionManager,
 ) -> TransportResult<()> {
@@ -1084,7 +1081,8 @@ async fn handle_bi_stream(
                         // game-start sync before it reaches our DLL. The byte is
                         // deterministic — for a joiner it is 0x02 (bit1 = reliable-
                         // eligible; bit0 = is-host, always clear for a joiner) — so we
-                        // bake it into the CREATEPLAYERORGROUP the host registers from,
+                        // bake it into the CREATEPLAYERORGROUP the host registers from
+                        // (sent at the joiner's CreatePlayer, see add_joiner),
                         // rather than depending on the game's (empty-in-practice)
                         // CreatePlayer lpData or a later SETPLAYERORGROUPDATA. This also
                         // makes 3+ players work: the host's roster (JACKAL type 0x10)
@@ -1097,13 +1095,12 @@ async fn handle_bi_stream(
                             ticket: my_ticket.clone(),
                             data: vec![dp_types::player_data_byte(false)],
                         };
-                        session_manager.add_remote_player(joiner_info.clone());
+                        // The host's game isn't told yet: it hears of the joiner at
+                        // the joiner's CreatePlayer, already named (see add_joiner).
+                        session_manager.add_joiner(joiner_info.clone());
                         // Register the route so directed sends to this player resolve
                         cm.add_player_route(player_id, sender_endpoint_id);
                         info!("Added remote player {} to session with route", player_id);
-
-                        // Notify the host's game about the new joiner via message channel
-                        let _ = message_tx.send(ReceivedMessage::PlayerJoined(joiner_info.clone()));
 
                         // Get updated session desc (current_players count updated)
                         let updated_desc = session_manager.get_session_desc().unwrap_or(desc);

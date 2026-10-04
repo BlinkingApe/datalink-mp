@@ -94,6 +94,18 @@ ways: baked into the host-side registration at join, carried in the name-table
 and roster, and propagated via data-update messages (with the buffering above).
 This single byte was the hardest bug in the project.
 
+### Why the host's game hears of a joiner late (a JACKAL note)
+
+The host's game registers each player once, when it gets that player's
+`CREATEPLAYERORGROUP`, under the long name `GetPlayerName` returns at that
+moment. It never renames a player: its `SETPLAYERORGROUPNAME` handler does
+nothing. Joiners copy every name from the host's roster. A joiner's
+JoinRequest is sent at its Open, before its CreatePlayer names the player, so
+the host's Helper holds the joiner back from its game until the joiner's first
+name update (its CreatePlayer) arrives, and announces it then, already named,
+which is the order real DirectPlay uses. Announcing the joiner at the
+JoinRequest left its name blank for the whole game, on every machine.
+
 ### smac-fixes (`crates/smac-fixes`)
 
 In-memory patches applied when the DLL loads into the game process:

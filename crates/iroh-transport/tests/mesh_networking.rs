@@ -457,6 +457,80 @@ fn test_join_and_ordered_delivery_end_to_end() {
     assert_eq!(received, expected, "messages arrived out of order");
 }
 
+/// The DPID a queued DPSYS_CREATEPLAYERORGROUP announces, if `qm` is one.
+fn created_player(qm: &iroh_transport::QueuedMessage) -> Option<u32> {
+    let word = |at: usize| Some(u32::from_le_bytes(qm.data.get(at..at + 4)?.try_into().ok()?));
+    if qm.from == 0 && word(0)? == dp_types::sysmsg::DPSYS_CREATEPLAYERORGROUP {
+        word(8)
+    } else {
+        None
+    }
+}
+
+/// The host's game registers a joiner once, at its CREATEPLAYERORGROUP, under
+/// the long name GetPlayerName returns right then, and ignores later renames
+/// (SMAC's SETPLAYERORGROUPNAME handler is a no-op). So it must not hear of the
+/// joiner at Open, before the joiner's CreatePlayer has supplied a name.
+#[test]
+fn test_host_game_hears_of_joiner_at_its_create_player_already_named() {
+    let host = match create_transport() {
+        Some(t) => t,
+        None => return,
+    };
+    let joiner = match create_transport() {
+        Some(t) => t,
+        None => return,
+    };
+
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Name Test".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+    host.create_player(PlayerName::default(), 0, vec![0x03])
+        .expect("host player");
+    while host.receive().is_some() {}
+
+    let joiner_id = joiner
+        .join_session_by_ticket(host.our_ticket())
+        .expect("join by ticket should succeed");
+
+    while let Some(qm) = host.receive() {
+        assert_ne!(
+            created_player(&qm),
+            Some(joiner_id),
+            "host's game heard of the joiner at Open, before it had a name"
+        );
+    }
+
+    // SMAC's CreatePlayer passes only a long name.
+    joiner.create_player(
+        PlayerName {
+            short_name: String::new(),
+            long_name: "Joining Player".to_string(),
+        },
+        0,
+        vec![0x02],
+    );
+
+    let name_at_create = poll_until(Duration::from_secs(10), || {
+        while let Some(qm) = host.receive() {
+            if created_player(&qm) == Some(joiner_id) {
+                // What the host's GetPlayerName answers when its game handles this.
+                return host.session_manager().get_player(joiner_id).map(|p| p.name);
+            }
+        }
+        None
+    });
+    assert_eq!(
+        name_at_create.map(|n| n.long_name).as_deref(),
+        Some("Joining Player"),
+        "host's game should hear of the joiner, already named, after its CreatePlayer"
+    );
+}
+
 #[test]
 fn test_default_options_are_peer_protocol_version_1_and_15s_dial_timeout() {
     let options = iroh_transport::TransportOptions::default();
