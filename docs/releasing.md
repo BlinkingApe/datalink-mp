@@ -117,10 +117,14 @@ draft. Bytes you built yourself, or copied from an earlier RC, don't count.
 For `0.1.0` the gated RC is `v0.1.0-rc.5`. `-rc.2` passed most of the gate, then was
 superseded by the page's new look (`-rc.3`), and `-rc.3` by two Helper fixes
 found in the friend game: a stale session that broke hosting, and a second
-start that now replaces an idle Helper (`-rc.4`). `-rc.4`'s real games found
-two more Helper defects: the Joiner's in-game name was blank, and a refused
-second start left an old page that looked like a second Helper (`-rc.5`).
-The notes below marked `0.1.0-rc.2` are from its run.
+start that now replaces an idle Helper (`-rc.4`). `-rc.4` was superseded in
+turn by two more Helper fixes (`-rc.5`): its real games showed the joining
+player's in-game name blank, and the manual check of the page found that a
+refused second start left an old tab that looked like a second Helper. Those
+games also found the **Game session** falling out of sync with the Helper's
+connection state; that investigation (`.scratch/game-session-sync/`) is open, `-rc.5` holds no
+fix for it, and the gate waits on it. The notes below marked `0.1.0-rc.2`
+are from its run.
 
 - **Get the Windows `.zip` onto Windows with a browser download** from the
   draft, then extract it. A copy over a USB stick carries no download mark, so

@@ -388,24 +388,32 @@ async fn show(State(state): State<Arc<AppState>>) -> StatusCode {
         *last_shown = Some(now);
     }
     if let Some(open) = state.browser_opener.clone() {
-        let url = launch_url(state.port, &rotate_token(&state.token));
+        let (port, token) = (state.port, state.token.clone());
         // The opener may start a program: keep it off the async worker.
-        tokio::task::spawn_blocking(move || open(&url));
+        tokio::task::spawn_blocking(move || open_with_a_fresh_token(&open, port, &token));
     }
     StatusCode::NO_CONTENT
 }
 
-/// Roll a fresh token into `token` and return it. A tab still holding the old
-/// one gets 403 on its next poll and shows the "earlier run" message, so a
-/// player with several tabs open is left with exactly one that works: the one
-/// just opened.
-fn rotate_token(token: &SharedToken) -> String {
-    match generate_token() {
-        Ok(fresh) => {
-            *token.lock().unwrap() = fresh.clone();
-            fresh
+/// Roll a fresh token into `token` and open the browser at it. A tab still
+/// holding the old one gets 403 on its next poll and shows the "earlier run"
+/// message, so a player with several tabs open is left with exactly one that
+/// works: the one just opened.
+///
+/// When the browser did not open, the old token is put back: with no new tab,
+/// the tab the player already has and the address printed at startup must
+/// stay the way in.
+fn open_with_a_fresh_token(open: &BrowserOpener, port: u16, token: &SharedToken) {
+    // The OS random source failed: keep what the one working tab already has.
+    let Ok(fresh) = generate_token() else {
+        open(&launch_url(port, &token.lock().unwrap()));
+        return;
+    };
+    let previous = std::mem::replace(&mut *token.lock().unwrap(), fresh.clone());
+    if !open(&launch_url(port, &fresh)) {
+        let mut current = token.lock().unwrap();
+        if *current == fresh {
+            *current = previous;
         }
-        // The OS random source failed: keep what the one working tab already has.
-        Err(_) => token.lock().unwrap().clone(),
     }
 }

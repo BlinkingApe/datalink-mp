@@ -44,8 +44,9 @@ pub struct Config {
     pub ui: Option<UiConfig>,
 }
 
-/// Called with the launch URL to open the player's browser on it.
-pub type BrowserOpener = Box<dyn Fn(&str) + Send + Sync>;
+/// Called with the launch URL to open the player's browser on it. Answers
+/// whether the browser was started.
+pub type BrowserOpener = Box<dyn Fn(&str) -> bool + Send + Sync>;
 
 /// The application's name, as `GET /api/instance` reports it and as the
 /// binary prints it.

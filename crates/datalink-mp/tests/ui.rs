@@ -38,9 +38,8 @@ impl Started {
         response.json()
     }
 
-    /// GET `/api/status` with a token other than the one this Helper started
-    /// with, the way a tab holding a token from before a rolled-over show
-    /// would. May be 403, if `token` is no longer the current one.
+    /// GET `/api/status` with `token`, the way a tab holding it would: one
+    /// from startup or from a show. 403 if `token` is no longer the current one.
     fn status_with_token(&self, token: &str) -> common::HttpResponse {
         http_get(self.ui_port(), "/api/status", &[("X-Token", token)])
     }
@@ -72,8 +71,10 @@ fn start(open_browser: bool) -> Option<Started> {
     let opened = OpenedUrls::default();
     let browser_opener = open_browser.then(|| {
         let opened = opened.clone();
-        Box::new(move |url: &str| opened.lock().unwrap().push(url.to_string()))
-            as datalink_mp::BrowserOpener
+        Box::new(move |url: &str| {
+            opened.lock().unwrap().push(url.to_string());
+            true
+        }) as datalink_mp::BrowserOpener
     });
     let config = Config {
         game_folder: game_folder_that_passes(),
@@ -1848,6 +1849,38 @@ fn test_show_needs_no_token_and_opens_the_browser_at_the_launch_url() {
 }
 
 #[test]
+fn test_show_whose_browser_did_not_open_keeps_the_tab_the_player_already_has() {
+    let opened = OpenedUrls::default();
+    let recorded = opened.clone();
+    let mut config = ui_config_from(common::free_port());
+    config.ui.as_mut().unwrap().browser_opener = Some(Box::new(move |url: &str| {
+        recorded.lock().unwrap().push(url.to_string());
+        false
+    }));
+    let Some(started) = start_with(config, opened) else {
+        return;
+    };
+    let startup_url = started.helper.launch_url().unwrap();
+
+    let response = post_show(started.ui_port(), &[]);
+
+    assert_eq!(response.status, 204, "{}", response.body);
+    wait_for_opened(&started, 2);
+    let not_shown = started.opened.lock().unwrap()[1].clone();
+    // The opener answers before the token is put back: wait for that.
+    common::poll_until(SHOW_DEADLINE, || {
+        (started.status_with_token(token_of(&not_shown)).status == 403).then_some(())
+    })
+    .expect("a tab the browser never opened should not be the one admitted");
+    assert_eq!(
+        started.status_with_token(token_of(&startup_url)).status,
+        200,
+        "with no new tab, the player's existing tab must keep working"
+    );
+    assert_eq!(started.helper.launch_url().unwrap(), startup_url, "the printed address still works");
+}
+
+#[test]
 fn test_show_asked_again_within_the_limit_does_not_open_the_browser_again() {
     let Some(started) = start(true) else {
         return;
@@ -1951,7 +1984,8 @@ fn try_start_on(ipc_port: u16, ui_port: u16) -> Option<Result<Started, StartErro
     let mut config = ui_config_from(ui_port);
     config.ipc_port = ipc_port;
     config.ui.as_mut().unwrap().browser_opener = Some(Box::new(move |url: &str| {
-        recorded.lock().unwrap().push(url.to_string())
+        recorded.lock().unwrap().push(url.to_string());
+        true
     }));
     match datalink_mp::start(config) {
         Ok(helper) => Some(Ok(Started { helper, opened })),

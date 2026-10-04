@@ -70,12 +70,14 @@ fn file_names_in(folder: &Path) -> Vec<String> {
 ///
 /// Failing to open the browser is never an error: the Helper keeps running and
 /// the launch URL is printed for the player to open themselves. The opener
-/// therefore returns nothing, and logs a failure without the URL, which
-/// carries the token.
+/// therefore only answers whether it started the browser, and logs a failure
+/// without the URL, which carries the token.
 pub fn system_browser_opener() -> BrowserOpener {
-    Box::new(|url: &str| {
-        if let Err(e) = open_in_browser(url) {
+    Box::new(|url: &str| match open_in_browser(url) {
+        Ok(()) => true,
+        Err(e) => {
             warn!("Could not open the browser: {e}");
+            false
         }
     })
 }
