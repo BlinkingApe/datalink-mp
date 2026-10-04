@@ -1,8 +1,8 @@
 # Spec: the Helper's embedded web UI (datalink-mp v1)
 
-Status: ready-for-agent
+Status: resolved
 
-Source decisions: [ADR-0001](../../docs/adr/0001-web-ui-frontend.md) (the web UI), [ADR-0002](../../docs/adr/0002-releases-versioning-pipeline-trust.md) section 1 (versioned ALPN) and [ADR-0003](../../docs/adr/0003-standalone-project.md) (the `datalink-mp` name). Decision trail: [the web UI v1 map](../web-ui-v1/map.md). Vocabulary: `CONTEXT.md`.
+Source decisions: [ADR-0001](../../../docs/adr/0001-web-ui-frontend.md) (the web UI), [ADR-0002](../../../docs/adr/0002-releases-versioning-pipeline-trust.md) section 1 (versioned ALPN) and [ADR-0003](../../../docs/adr/0003-standalone-project.md) (the `datalink-mp` name). Decision trail: [the web UI v1 map](../web-ui-v1/map.md). Vocabulary: `CONTEXT.md`.
 
 Where this spec and an ADR disagree, the ADR wins, except for the items listed under "Decisions this spec adds", which the ADRs left to the spec.
 

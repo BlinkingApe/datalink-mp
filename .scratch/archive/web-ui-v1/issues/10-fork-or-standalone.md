@@ -10,7 +10,7 @@ The repo on disk is a plain clone of `hdevalence/smac-iroh` (MIT OR Apache-2.0).
 
 ## Answer
 
-Resolved 2026-09-30 (grilling). Recorded in [ADR-0003](../../../docs/adr/0003-standalone-project.md).
+Resolved 2026-09-30 (grilling). Recorded in [ADR-0003](../../../../docs/adr/0003-standalone-project.md).
 
 - **Standalone, `datalink-mp`**, for the repo and the Helper binary. Both `datalink-iroh` and `datalink-mp` were checked on 2026-09-30: each was free on crates.io, and no GitHub repo used either name. `datalink-mp` was chosen because the name says "multiplayer" to players, while "iroh" is the networking library underneath and means nothing to them; the README credit line covers the lineage from smac-iroh. Keep the git history, with a read-only `upstream` remote. Keep both licence files, and credit smac-iroh in the README. Point the `repository` field at the new repo.
 - **ALPN `datalink/<peer protocol version>`**, with the Peer protocol version reset to 1. No interop with smac-iroh builds.

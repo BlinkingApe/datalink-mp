@@ -20,7 +20,7 @@ How do versions and identity behave across releases and sessions? Three linked d
 Decided in a grilling session (2026-09-30).
 
 **Facts established from the code first**
-- The only version checks were the IPC handshake ([main.rs:230](../../../crates/smac-helper/src/main.rs)) and the `SMAC`+version preamble on the ordered uni-stream ([connection.rs:676](../../../crates/iroh-transport/src/connection.rs)). Discovery (`SessionQuery`) and `JoinRequest` travel over bi-streams as raw postcard with no preamble, so mismatched builds first meet as a decode error or a silent misread, and the mismatch banner would practically never fire.
+- The only version checks were the IPC handshake ([main.rs:230](../../../../crates/smac-helper/src/main.rs)) and the `SMAC`+version preamble on the ordered uni-stream ([connection.rs:676](../../../../crates/iroh-transport/src/connection.rs)). Discovery (`SessionQuery`) and `JoinRequest` travel over bi-streams as raw postcard with no preamble, so mismatched builds first meet as a decode error or a silent misread, and the mismatch banner would practically never fire.
 - `protocol::PROTOCOL_VERSION` is dead code. The ALPN is a fixed `dplay-iroh/1`.
 - Each Transport calls `SecretKey::generate()`, so the Ticket already changes on every launch of the Helper, not only after Stop.
 

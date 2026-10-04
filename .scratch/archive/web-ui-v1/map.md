@@ -59,11 +59,11 @@ A player with SMAC plus Thinker or PRACX extracts one archive into the game fold
 - [Versioning and compatibility policy](issues/08-versioning-and-compatibility.md): semver, where an IPC or Peer protocol version change means a minor bump; the versioned ALPN (now `datalink/<peer version>` from `0.1.0`, see Fork or standalone project?) rejects mismatched builds at connect and drives the banner; the Ticket isn't persisted and changes after Stop; the Ticket format is unchanged.
 - [Release trust posture for v1](issues/09-release-trust-posture.md): ship unsigned with documented SmartScreen/Firewall/quarantine steps; SAC documented, not tested; delete the `unwind_stubs` build step (CI-only rustflags fallback); gate the first release on CI-built RC archives passing a Windows smoke test plus Linux ↔ Windows games (own machine, then a friend); VirusTotal, WDSI, attestations, VERSIONINFO and a "quarantined?" banner on every release.
 - [Revise and accept ADR-0001](issues/07-revise-adr.md): ADR-0001 (web UI) revised and Accepted, with a list of changes from the draft; new ADR-0002 (versioning, pipeline, trust) Accepted; the promise now says "without typing any commands"; Steam gets an untested line, not a button; drafts for tagged releases; the Linux build is static musl.
-- [Fork or standalone project?](issues/10-fork-or-standalone.md): standalone `datalink-mp` seeded from smac-iroh (history kept, credited in the README); ALPN `datalink/<peer version>` reset to 1; first release `0.1.0`; upstream is a courtesy, not a constraint ([ADR-0003](../../docs/adr/0003-standalone-project.md)).
+- [Fork or standalone project?](issues/10-fork-or-standalone.md): standalone `datalink-mp` seeded from smac-iroh (history kept, credited in the README); ALPN `datalink/<peer version>` reset to 1; first release `0.1.0`; upstream is a courtesy, not a constraint ([ADR-0003](../../../docs/adr/0003-standalone-project.md)).
 
 ## Not yet specified
 
-None: the way is clear. Hand off to `/to-spec` → `/to-tickets`, from [ADR-0001](../../docs/adr/0001-web-ui-frontend.md), [ADR-0002](../../docs/adr/0002-releases-versioning-pipeline-trust.md) and [ADR-0003](../../docs/adr/0003-standalone-project.md).
+None: the way is clear. Hand off to `/to-spec` → `/to-tickets`, from [ADR-0001](../../../docs/adr/0001-web-ui-frontend.md), [ADR-0002](../../../docs/adr/0002-releases-versioning-pipeline-trust.md) and [ADR-0003](../../../docs/adr/0003-standalone-project.md).
 
 <!-- Left for /to-spec, not map decisions: -->
 - UI port default, fallback range, and the single-instance mechanism: implementation-level.

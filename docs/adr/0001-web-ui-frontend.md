@@ -3,7 +3,7 @@
 - **Status:** Accepted (2026-09-30; revised from the Proposed draft, see [Changes from the draft](#changes-from-the-draft))
 - **Applies to:** `datalink-mp`, a standalone project seeded from `hdevalence/smac-iroh` ([ADR-0003](0003-standalone-project.md)); Windows x86_64, Linux x86_64 and macOS aarch64 releases
 - **Audience:** implementing agent working in the repo
-- **Related:** [ADR-0002](0002-releases-versioning-pipeline-trust.md) (versioning, release pipeline, trust posture), [ADR-0003](0003-standalone-project.md) (standalone project). Decision trail: `.scratch/web-ui-v1/map.md`.
+- **Related:** [ADR-0002](0002-releases-versioning-pipeline-trust.md) (versioning, release pipeline, trust posture), [ADR-0003](0003-standalone-project.md) (standalone project). Decision trail: `.scratch/archive/web-ui-v1/map.md`.
 
 ## Context
 

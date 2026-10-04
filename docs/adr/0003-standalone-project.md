@@ -1,7 +1,7 @@
 # ADR-0003: Standalone project `datalink-mp`, seeded from smac-iroh
 
 - **Status:** Accepted (2026-09-30)
-- **Related:** [ADR-0001](0001-web-ui-frontend.md), [ADR-0002](0002-releases-versioning-pipeline-trust.md). Decision trail: `.scratch/web-ui-v1/issues/10-fork-or-standalone.md`.
+- **Related:** [ADR-0001](0001-web-ui-frontend.md), [ADR-0002](0002-releases-versioning-pipeline-trust.md). Decision trail: `.scratch/archive/web-ui-v1/issues/10-fork-or-standalone.md`.
 
 This started as a GitHub fork of `hdevalence/smac-iroh` (MIT OR Apache-2.0, © Henry de Valence), designed to be upstream-friendly. Upstream has a single commit and few known users, while this effort adds a web UI, a release pipeline and a new version identity. So this is now **a standalone project, `datalink-mp`, seeded from smac-iroh**, not a fork.
 

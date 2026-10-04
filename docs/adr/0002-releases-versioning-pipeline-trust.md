@@ -3,7 +3,7 @@
 - **Status:** Accepted (2026-09-30)
 - **Applies to:** `datalink-mp` ([ADR-0003](0003-standalone-project.md))
 - **Audience:** implementing agent working in the repo
-- **Related:** [ADR-0001](0001-web-ui-frontend.md), [ADR-0003](0003-standalone-project.md). Decision trail: `.scratch/web-ui-v1/map.md`. Research: branches `research/windows-toolchain`, `research/macos-artifact`, `research/av-risk`.
+- **Related:** [ADR-0001](0001-web-ui-frontend.md), [ADR-0003](0003-standalone-project.md). Decision trail: `.scratch/archive/web-ui-v1/map.md`. Research: branches `research/windows-toolchain`, `research/macos-artifact`, `research/av-risk`.
 
 ## Context
 
