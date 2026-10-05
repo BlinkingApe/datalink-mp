@@ -10,9 +10,9 @@ Run ADR-0002 section 4 (the gate) and the per-release items of section 3 (VirusT
 
 The gate, on the archives of one `-rc.N` draft:
 
-- [x] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
-- [x] Windows file properties of the exe and the DLL show `0.1.0`
-- [x] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
+- [ ] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
+- [ ] Windows file properties of the exe and the DLL show `0.1.0`
+- [ ] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
 - [ ] The same game with a Windows-using friend over the internet
 
 Trust checks:
@@ -132,3 +132,9 @@ Publish:
 - [Ticket 02](../../game-session-sync/issues/02-shared-root-cause-across-08-09-10.md) is still open. 09, 10b and 10c no longer show the `Net::send` NULL pointer: the host sees "Send failed!" and then the game's own "Player not responding", with no crash. **10a still crashes the Joiner's game** when the host presses Stop mid-game. One more finding, without a crash: a host game killed in Multiplayer Setup leaves the Joiner's game on the setup screen, never told the session ended.
 - No defect new to rc.6, so no new `-rc.N` yet. The gate still waits on the map. By the map's standing preference, 10a's crash is in scope, so it decides whether rc.6 can ship.
 - No Helper or DLL log was written on either machine. Ticket 02 has the likely causes. To get logs, start the Helper from the terminal that sets `SMAC_HELPER_LOG_FILE`, and give `DPLAYX_LOG_FILE` a `Z:\…` path under Wine.
+
+**2026-10-05 (maintainer, recorded by agent):** Decided: the game-session-sync map no longer holds up `0.1.0` (its [ticket 02](../../game-session-sync/issues/02-shared-root-cause-across-08-09-10.md) closes with the decisions). 10, Stop mid-game, is not our problem, even where it crashes the other player's game. 09 and the killed-host case don't crash, so they ship as known issues.
+
+- **The gate moves to `-rc.7`**, so the three boxes ticked for rc.6 are unticked. rc.7 carries two changes. The first is the Stop warning saying what can happen (game-session-sync [ticket 04](../../game-session-sync/issues/04-stop-warning-says-what-can-happen.md)), a page change. The second is the `Copyright (c) 2026 BlinkingApe` line in `LICENSE-MIT` (ADR-0003, committed after rc.6 was tagged), which the archives ship. The session code is unchanged from rc.6.
+- The release notes list as known issues: 09 ("Send failed!" then "Player not responding" when a friend's Helper drops mid-game), the killed-host case (the Joiner stays on the setup screen), and Stop mid-game possibly crashing the other player's game.
+- What's left is in `docs/datalink-mp-0.1.0-release-checklist.html`.

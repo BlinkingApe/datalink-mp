@@ -1,7 +1,7 @@
 # Shared root cause across 08, 09 and 10, and a severity/warned classification
 
 Type: task
-Status:
+Status: resolved
 Blocked by:
 
 ## Question
@@ -45,3 +45,9 @@ Resolve by establishing, for 08, 09 and 10:
 - **Next:** a 10a run with logging that works on the Joiner (the Helper started from the terminal that sets `SMAC_HELPER_LOG_FILE`, and `DPLAYX_LOG_FILE` given a `Z:\…` path). It is the only crash left.
 
 ## Answer
+
+**2026-10-05 (maintainer, recorded by agent):** Decided per defect, from the `-rc.6` run above. None holds up `0.1.0`.
+
+- **08: fixed.** It was [ticket 03](03-joiner-leaving-tells-the-host-its-session-was-lost.md)'s defect, confirmed on `-rc.6`.
+- **09, and a host game killed with a Joiner in Multiplayer Setup: accepted for `0.1.0`, fixed after it.** Both happen in ordinary play, but neither crashes, and the game recovers by itself ("Player not responding", then Drop). They go into `0.1.0`'s release notes as known issues. The fix, telling the host's game when a Joiner's connection drops, is [ticket 05](05-tell-the-game-when-a-friends-connection-drops.md).
+- **10 (a, b and c): not our problem.** Each one needs a player to press Stop mid-game, past the warning to return to the main menu first. That includes 10a, where the other player's game crashes. This revises the map's standing preference, which had kept any crash in scope. As the map requires, the warning must now say what can happen: [ticket 04](04-stop-warning-says-what-can-happen.md), in `0.1.0`.
