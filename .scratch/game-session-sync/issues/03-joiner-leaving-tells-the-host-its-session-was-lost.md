@@ -36,7 +36,7 @@ A suggested shape, not yet decided:
 - [x] On receipt, act on `SessionClosed` only when it comes from the session's host. That way a fixed host is safe from a Joiner still running `-rc.5` or earlier, which matters while testers mix builds. The wire format doesn't change, so the Peer protocol version stays the same.
 - [x] Begin each Game session with an empty inbox: discard what's in `message_rx` and `message_queue` (and reset `createplayerorgroup_sent`) when `create_session` runs and at the start of `join_session`, before the `JoinRequest` goes out. Anything waiting at that point belongs to an earlier session.
 - [x] Both tests above pass without `#[ignore]`, and the full suite still passes.
-- [ ] Confirm in the real game, on a new `-rc.N`: today's sequence (both games leave Multiplayer Setup and quit, the Helpers stay connected, the host hosts again) lets the Joiner find and join the game. Also ticket 08's sequence (the Joiner cancels out of a found game while the host stays in Multiplayer Setup, then joins again).
+- [x] Confirm in the real game, on a new `-rc.N`: today's sequence (both games leave Multiplayer Setup and quit, the Helpers stay connected, the host hosts again) lets the Joiner find and join the game. Also ticket 08's sequence (the Joiner cancels out of a found game while the host stays in Multiplayer Setup, then joins again).
 
 Helper logs (`SMAC_HELPER_LOG_FILE`) from the host would confirm the unconfirmed step: a `CloseSession` right after the new game's session was created.
 
@@ -58,3 +58,5 @@ Not changed: the "third oddity" above. A Joiner whose host closed still keeps it
 - Today's sequence (both games leave Multiplayer Setup and quit, the Helpers stay connected, the host hosts again, the Joiner joins): rerun as part of [ticket 01](01-confirm-ticket-06-fix-in-a-real-game.md), which needs that exact run anyway.
 - Ticket 08's sequence (the Joiner cancels out of a found game, then joins again): goes to [ticket 02](02-shared-root-cause-across-08-09-10.md), which owns 08.
 
+
+**2026-10-05 (maintainer, recorded by agent):** Confirmed on `v0.1.0-rc.6`. After both games left Multiplayer Setup and quit with the Helpers still connected, the host hosted again and the Joiner found and joined the game ([ticket 01](01-confirm-ticket-06-fix-in-a-real-game.md)). The Joiner cancelling out of a found game, then joining again, works every time too, including after the Joiner restarts its game or its Helper ([ticket 02](02-shared-root-cause-across-08-09-10.md)).

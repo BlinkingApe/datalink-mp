@@ -1,7 +1,7 @@
 # Confirm the leaked-Game-session fix in a real game
 
 Type: task
-Status:
+Status: resolved
 Blocked by:
 
 ## Question
@@ -18,4 +18,13 @@ Originally release-pipeline ticket 06. **Cause, already found** (2026-10-01, by 
 
 **2026-10-04 (agent):** [Ticket 03](03-joiner-leaving-tells-the-host-its-session-was-lost.md) is fixed in the code (not yet in a release). Rerun this on the first `-rc.N` that has it, with the same sequence as the rc.5 run. That run also confirms ticket 03 in the real game: the Joiner should find and join the host's new game. Record three things: whether the Joiner joined, whether the host's Multiplayer Setup showed the `Net::send` NULL pointer, and whether its drop-downs reacted.
 
+**2026-10-05 (maintainer, recorded by agent):** Run on `v0.1.0-rc.6` (host Mint, Joiner Rocky, both Linux on wifi), the rc.5 sequence and the ticket's own:
+
+- **The rc.5 sequence** (checklist C): both games left Multiplayer Setup and quit, the Helpers stayed connected for ~10 seconds, and the host hosted again. The host's new Multiplayer Setup showed **no `Net::send` popup**, its drop-downs reacted normally, and the Joiner found and joined the new game and played a couple of turns.
+- **A game killed in Multiplayer Setup** (checklist E1–E3): the host, alone, killed the game rather than leaving, restarted it and hosted with the same Helper. No `Net::send` popup, no "Failed to create session", and the drop-downs reacted normally.
+- With a Joiner in Multiplayer Setup when the host's game was killed (E4), the Joiner's game was **not** told the session ended: it stayed on the setup screen, without crashing. The host then hosted again and the Joiner, without restarting its Helper, found and joined the new game (E5). The Joiner not being told belongs to [ticket 02](02-shared-root-cause-across-08-09-10.md), not here: this ticket is about the host's next Host Game.
+- Not checked: the host's Helper log for a `CloseSession` right after the new session was created. No log files were written on either machine (see ticket 02).
+
 ## Answer
+
+**2026-10-05 (agent):** Confirmed on `v0.1.0-rc.6`. A host whose game leaves without closing its Game session, by quitting from Multiplayer Setup or by being killed, can host again with the same Helper: no `Net::send` NULL pointer, no "Failed to create session", and the drop-downs react. The fix covers the real-game path. Closing.

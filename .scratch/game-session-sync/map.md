@@ -26,7 +26,8 @@ A decision, per originating defect (release-pipeline 06, 08, 09 and 10), on whet
 
 <!-- one line per closed ticket -->
 
-- [A Joiner leaving tells the host's game its session was lost](issues/03-joiner-leaving-tells-the-host-its-session-was-lost.md): fixed in the Helper. Only the host's close ends a session (a Joiner's close sends `PlayerLeft`, and a received `SessionClosed` counts only from the host), and each Game session starts with an empty inbox. Real-game confirmation is folded into tickets 01 and 02.
+- [A Joiner leaving tells the host's game its session was lost](issues/03-joiner-leaving-tells-the-host-its-session-was-lost.md): fixed in the Helper. Only the host's close ends a session (a Joiner's close sends `PlayerLeft`, and a received `SessionClosed` counts only from the host), and each Game session starts with an empty inbox. Real-game confirmation is folded into tickets 01 and 02, and done on `-rc.6`.
+- [Confirm the leaked-Game-session fix in a real game](issues/01-confirm-ticket-06-fix-in-a-real-game.md): confirmed on `-rc.6`. A host whose game quit or was killed in Multiplayer Setup hosts again with no `Net::send` popup and working drop-downs.
 
 ## Not yet specified
 

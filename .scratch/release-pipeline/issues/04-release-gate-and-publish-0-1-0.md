@@ -10,9 +10,9 @@ Run ADR-0002 section 4 (the gate) and the per-release items of section 3 (VirusT
 
 The gate, on the archives of one `-rc.N` draft:
 
-- [ ] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
-- [ ] Windows file properties of the exe and the DLL show `0.1.0`
-- [ ] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
+- [x] Windows smoke test: extract the `.zip` into the Game folder, SmartScreen → More info → Run anyway, the page opens, a Ticket is shown
+- [x] Windows file properties of the exe and the DLL show `0.1.0`
+- [x] One real multiplayer game between Linux (Faugus, the musl `.tar.gz`) and the maintainer's own Windows machine, both sides running only the Helper and DLL from the archives
 - [ ] The same game with a Windows-using friend over the internet
 
 Trust checks:
@@ -122,3 +122,13 @@ Publish:
 - [Ticket 07](07-joiner-name-blank-in-game-ui.md) is confirmed: the Joiner's name shows. Closed.
 - helper-web-ui [ticket 23](../../archive/helper-web-ui/issues/23-second-start-leaves-two-helpers-running.md) is confirmed: a second double-click leaves one working page, and the old tab shows the earlier-run message.
 - New defect: after both games left Multiplayer Setup and quit, with the Helpers still connected, the host hosted again and the Joiner found no game. A Joiner's Helper that closes tells the host's game its session was lost, and that message waits for the host's next game. Reproduced at the Transport level. The fix is game-session-sync [ticket 03](../../game-session-sync/issues/03-joiner-leaving-tells-the-host-its-session-was-lost.md), and it probably also explains the old ticket 08. A new `-rc.N` and a fresh gate follow once it is fixed.
+
+**2026-10-05 (maintainer, recorded by agent):** Results on `v0.1.0-rc.6` (host Mint, Joiner Rocky, wifi; the rc.6 test checklist).
+
+- Three gate boxes ticked, for rc.6. **Smoke test:** a browser download showed the SmartScreen prompt, More info → Run anyway worked, the firewall alert was allowed, the page opened and a Ticket was shown. **File properties:** the exe and the DLL show `0.1.0`. **Linux ↔ Windows game:** played several turns with Windows hosting and with Linux hosting. A full Linux ↔ Linux game with simultaneous moves also played to the end.
+- `sha256sum -c` and `gh attestation verify` pass. The draft is pre-release and still says macOS is untested. The archives are flat, with the prefixed files.
+- Not run: VirusTotal for rc.6's exe and DLL, the internet or friend game, mixed rc.5/rc.6 builds, and the Peer-protocol mismatch banner. The page footer's build hash matched rc.6, but the hash itself wasn't written down.
+- game-session-sync [ticket 01](../../game-session-sync/issues/01-confirm-ticket-06-fix-in-a-real-game.md) is confirmed and closed. [Ticket 03](../../game-session-sync/issues/03-joiner-leaving-tells-the-host-its-session-was-lost.md) is confirmed in the real game, and the old ticket 08 with it.
+- [Ticket 02](../../game-session-sync/issues/02-shared-root-cause-across-08-09-10.md) is still open. 09, 10b and 10c no longer show the `Net::send` NULL pointer: the host sees "Send failed!" and then the game's own "Player not responding", with no crash. **10a still crashes the Joiner's game** when the host presses Stop mid-game. One more finding, without a crash: a host game killed in Multiplayer Setup leaves the Joiner's game on the setup screen, never told the session ended.
+- No defect new to rc.6, so no new `-rc.N` yet. The gate still waits on the map. By the map's standing preference, 10a's crash is in scope, so it decides whether rc.6 can ship.
+- No Helper or DLL log was written on either machine. Ticket 02 has the likely causes. To get logs, start the Helper from the terminal that sets `SMAC_HELPER_LOG_FILE`, and give `DPLAYX_LOG_FILE` a `Z:\…` path under Wine.
