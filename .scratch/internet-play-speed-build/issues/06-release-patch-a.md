@@ -6,6 +6,12 @@
 
 **Status:** ready-for-agent
 
-- [ ] Version bumped as a patch under ADR-0002 and release notes written
+- [x] Version bumped as a patch under ADR-0002 and release notes written
 - [ ] The release gate passes
-- [ ] Release notes tell testers to send the log, and a capture only when asked
+- [x] Release notes tell testers to send the log, and a capture only when asked
+
+## Comments
+
+Version is `0.1.1` (workspace `Cargo.toml`, `Cargo.lock`). Notes are in `docs/release-notes/0.1.1.md`; `release.yml` now puts that file at the top of the draft's notes (the release job checks out the repo for it). `docs/releasing.md` says so.
+
+**Not done: the release gate.** It needs a CI-built RC (`v0.1.1-rc.2` or later; `-rc.1` for 0.1.1 is a spent tag per the releasing doc) tested on Windows and Linux by the maintainer, so it stays unticked. Also open: ticket 03 was reopened (Relayed path not yet observed) and 01's status line still says ready-for-agent though its commit is on main. Resolve 03's manual check before tagging, so the notes' `DATALINK_RELAY_ONLY` line is true.

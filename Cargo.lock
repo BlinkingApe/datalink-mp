@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "datalink-mp"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -842,7 +842,7 @@ dependencies = [
 
 [[package]]
 name = "dp-types"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -850,7 +850,7 @@ dependencies = [
 
 [[package]]
 name = "dplayx"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dp-types",
  "embed-resource",
@@ -1624,7 +1624,7 @@ dependencies = [
 
 [[package]]
 name = "ipc-protocol"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dp-types",
  "postcard",
@@ -1823,7 +1823,7 @@ dependencies = [
 
 [[package]]
 name = "iroh-transport"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -2043,7 +2043,7 @@ dependencies = [
 
 [[package]]
 name = "mock-dp-client"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "dp-types",
  "hex",
@@ -3194,7 +3194,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "smac-fixes"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "tracing",
  "windows",

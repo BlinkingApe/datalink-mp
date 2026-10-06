@@ -21,6 +21,9 @@ The tag must match the workspace version in the root `Cargo.toml`
 else a patch), let `cargo build` update `Cargo.lock`, commit both and push
 `main`.
 
+Write the release's notes in `docs/release-notes/<version>.md`. The run puts
+that file at the top of the draft's notes, above the archive list.
+
 Push `main` before the tag. A tag pushed while `main` on GitHub lacked
 `release.yml`, pointing at commits on no GitHub branch, started no run at
 all: no failed run, nothing under Actions. Pushing `main` and a fresh tag

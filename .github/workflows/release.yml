@@ -192,6 +192,7 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
       PRERELEASE: ${{ needs.version.outputs.prerelease }}
     steps:
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
           pattern: archives-*
@@ -225,7 +226,9 @@ jobs:
           BUNDLE: ${{ steps.attest.outputs.bundle-path }}
         run: |
           cp "$BUNDLE" dist/attestation.sigstore.json
-          NOTES="$(cat <<EOF
+          CHANGES=""
+          [[ -f "docs/release-notes/$VERSION.md" ]] && CHANGES="$(cat "docs/release-notes/$VERSION.md")"$'\n\n'
+          NOTES="$CHANGES$(cat <<EOF
           - Windows: \`datalink-mp-$VERSION-windows-x86_64.zip\`
           - Linux (static, any x86_64 distro): \`datalink-mp-$VERSION-linux-x86_64.tar.gz\`
           - macOS (Apple silicon): \`datalink-mp-$VERSION-macos-aarch64.zip\`. Built in CI and untested: nobody has run it on a Mac.
