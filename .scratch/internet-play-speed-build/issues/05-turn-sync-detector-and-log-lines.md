@@ -4,8 +4,14 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The detector reports start and end of each Turn sync and of the game start on the captured game's messages
-- [ ] A log line per Turn sync and per game start with the fields above
-- [ ] The detector has unit tests driven from the captured sequence
+- [x] The detector reports start and end of each Turn sync and of the game start on the captured game's messages
+- [x] A log line per Turn sync and per game start with the fields above
+- [x] The detector has unit tests driven from the captured sequence
+
+## Comments
+
+Built in `crates/iroh-transport/src/turn_sync.rs` (the pure `TurnSyncDetector`, one per friend, and the glue that logs). Hooks: `PeerConnection::enqueue`, `handle_peer_message`'s `GameMessage` arm, and register/unregister beside the path watcher in `spawn_connection_handler`; `capture::path()` names the file. Tests use two trimmed fixtures from the captured game under `crates/iroh-transport/tests/fixtures/`.
+
+The log line is `turn sync finished` / `game start finished` with `peer`, `turn`, `duration_ms`, `out_msgs`, `out_bytes`, `in_msgs`, `in_bytes`, `idle_ms`, `rtt_median_ms` (-1 when no path is selected) and, when a capture is on, `capture`. Message and byte counts are every game message seen in the window, resent copies and acks included, so they are larger than the analysis's unique counts. The game start is found from the first `0x4101` after the lobby's setup messages, an inference from one captured game.

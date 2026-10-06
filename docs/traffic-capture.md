@@ -178,6 +178,10 @@ whether that friend was the session's host. Losing the host means the game is
 handed `SESSIONLOST`. Losing anyone else starts up to five re-dials, each
 recorded as a `reconnect` line with `attempt` (1–5) and `ok`.
 
+## The Helper's log
+
+Independent of the capture, the Helper logs at info a `turn sync finished` or `game start finished` line per friend, with raw figures (`.scratch/internet-play-speed-build` 05). With a capture on, the line names the capture file.
+
 ## Where it lives
 
 `crates/iroh-transport/src/capture.rs`. The message path calls it at four
