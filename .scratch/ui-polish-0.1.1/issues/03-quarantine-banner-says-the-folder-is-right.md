@@ -6,8 +6,8 @@ From the [post-0.1.0-polish map](../../post-0.1.0-polish/map.md): [Clarify the q
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Game executable found, DLL missing: the banner says the folder looks right and only `dplayx.dll` is missing, with no "This isn't your Game folder"
-- [ ] Game executable missing: today's wording, unchanged
-- [ ] The UI tests cover both wordings
+- [x] Game executable found, DLL missing: the banner says the folder looks right and only `dplayx.dll` is missing, with no "This isn't your Game folder"
+- [x] Game executable missing: today's wording, unchanged
+- [x] The UI tests cover both wordings

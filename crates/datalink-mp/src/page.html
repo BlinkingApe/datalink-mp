@@ -131,11 +131,12 @@
         <div class="small" id="self-check-ok" hidden><span class="pill ok">Game folder OK</span>
           Found <code>dplayx.dll</code> and <code id="game-exe"></code> in
           <code class="game-folder"></code>.</div>
-        <div class="banner bad" data-banner="not_game_folder" hidden>This isn't your Game folder.
+        <div class="banner bad" data-banner="not_game_folder" hidden><span data-folder-words="wrong_folder">This isn't your Game folder.
           Extract the whole archive into the folder that contains your game, then run datalink-mp
-          from there.
-          <span id="quarantine-hint" hidden>Your antivirus may have quarantined
-            <code>dplayx.dll</code>; restore it or extract the archive again.</span>
+          from there.</span>
+          <span data-folder-words="dll_missing" hidden>This looks like your Game folder, but
+            only <code>dplayx.dll</code> is missing. Your antivirus probably quarantined it; restore
+            it or extract the archive again.</span>
           <div class="small muted gap">datalink-mp is running from:
             <code class="game-folder"></code></div></div>
         <details class="small gap" id="wine-setup" open hidden>
@@ -228,6 +229,7 @@
   var gamePill = document.getElementById('game-pill');
   var gameFolders = document.querySelectorAll('.game-folder');
   var peersLine = document.getElementById('peers');
+  var folderWords = document.querySelectorAll('[data-folder-words]');
   var invalidTicketWords = document.querySelectorAll('[data-invalid-ticket]');
   var friendBox = document.getElementById('friend-ticket');
   var connectButton = document.getElementById('connect');
@@ -345,8 +347,13 @@
     document.getElementById('self-check-ok').hidden = !step1Done;
     setText(document.getElementById('game-exe'), s.self_check.game_exe || '');
     for (i = 0; i < gameFolders.length; i++) setText(gameFolders[i], s.self_check.folder);
-    // The game is here and only the DLL is not: something took the DLL away.
-    document.getElementById('quarantine-hint').hidden = s.self_check.dll_found || !s.self_check.game_exe;
+    // The game is here and only the DLL is not: something took the DLL away,
+    // so the folder is right and the banner must not call it wrong.
+    var onlyDllMissing = !s.self_check.dll_found && !!s.self_check.game_exe;
+    for (i = 0; i < folderWords.length; i++) {
+      folderWords[i].hidden =
+        (folderWords[i].getAttribute('data-folder-words') === 'dll_missing') !== onlyDllMissing;
+    }
     // Only Wine has to be told to load our DLL.
     document.getElementById('wine-setup').hidden = s.os === 'windows';
     document.getElementById('wine-macos').hidden = s.os !== 'macos';

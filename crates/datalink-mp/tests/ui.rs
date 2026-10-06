@@ -3065,6 +3065,36 @@ fn test_stop_is_refused_without_the_token_from_a_foreign_origin_and_by_get() {
 }
 
 #[test]
+fn test_page_has_both_wordings_of_the_not_game_folder_banner() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let page = http_get(started.ui_port(), "/", &[]).body;
+
+    // The Helper only says the banner is active; the page picks the wording
+    // from the self-check, like the invalid-Ticket words.
+    let banner = &page[page.find("data-banner=\"not_game_folder\"").expect("the page should have the banner")..];
+    let banner = &banner[..banner.find("datalink-mp is running from").expect("the banner should say where it runs")];
+    let wrong = banner.find("data-folder-words=\"wrong_folder\"").expect("a wrong-folder wording");
+    let dll = banner.find("data-folder-words=\"dll_missing\"").expect("a DLL-missing wording");
+    let (wrong_words, dll_words) = if wrong < dll {
+        (&banner[wrong..dll], &banner[dll..])
+    } else {
+        (&banner[wrong..], &banner[dll..wrong])
+    };
+    assert!(wrong_words.contains("This isn't your Game folder."));
+    assert!(dll_words.contains("This looks like your Game folder"));
+    assert!(dll_words.contains("only <code>dplayx.dll</code> is missing"));
+    assert!(dll_words.contains("antivirus"));
+    assert!(
+        !dll_words.contains("This isn't your Game folder"),
+        "the DLL-missing wording should not say the folder is wrong"
+    );
+    assert!(page.contains("data-folder-words"));
+    assert!(!page.contains("quarantine-hint"), "the old hint span should be gone");
+}
+
+#[test]
 fn test_page_has_stop_hidden_as_it_loads_and_the_words_for_after_stop() {
     let Some(started) = start(false) else {
         return;
