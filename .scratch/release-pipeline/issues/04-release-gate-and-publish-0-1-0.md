@@ -146,3 +146,10 @@ Draft known issues for the release notes:
 - If a friend's Helper drops mid-game, the host sees "Send failed!" and then the game's "Player not responding". Choose Drop.
 - If the host's game is killed during Multiplayer Setup, the Joiner stays on that screen. Cancel, then join again.
 - Pressing Stop mid-game ends the game for everyone connected through you and can crash the other player's game. Return to the game's main menu first.
+
+**2026-10-06 (agent):** `v0.1.0-rc.7` tagged on `98e87f5` (`main` pushed first). Run 37456536271 is green. The draft is a pre-release holding the Linux, macOS and Windows archives, `SHA256SUMS` and `attestation.sigstore.json`. `sha256sum -c` passes for all three; `gh attestation verify` exits 0 for all three; the Linux Helper reports `datalink-mp 0.1.0` and contains `98e87f5`; the Linux and Windows `datalink-mp-LICENSE-MIT.txt` carry the BlinkingApe line. For the VirusTotal search:
+
+- `datalink-mp.exe` sha256 `7996a47cbd49b68fcaa7d503e53b51a094a60644223e2d7188e9b93d6ee8a619`
+- `dplayx.dll` sha256 `a7c1d814fc7378193dc182f0bdf9f01f6f78cbb9294ac36dde90080031045012`
+
+The gate on rc.7's archives is now with the maintainer. The superseded rc.4, rc.5 and rc.6 drafts are still on GitHub, awaiting go-ahead to delete.
