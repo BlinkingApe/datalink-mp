@@ -1481,9 +1481,25 @@ fn test_folder_with_the_dll_and_pracx_passes_the_self_check() {
 }
 
 #[test]
+fn test_folder_with_the_dll_and_wtp_passes_the_self_check() {
+    let Some(status) = status_in_a_folder_holding(&["dplayx.dll", "wtp.exe"]) else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["passed"], true);
+    assert_eq!(status["self_check"]["dll_found"], true);
+    assert_eq!(status["self_check"]["game_exe"], "wtp.exe");
+    assert_eq!(status["banners"], serde_json::json!([]));
+}
+
+#[test]
 fn test_differently_cased_file_names_pass_the_self_check() {
     // The game's files as some installs have them, and as Wine users find them.
-    for file_names in [["DPLAYX.DLL", "Thinker.EXE"], ["Dplayx.dll", "TERRAN_pracx.exe"]] {
+    for file_names in [
+        ["DPLAYX.DLL", "Thinker.EXE"],
+        ["Dplayx.dll", "TERRAN_pracx.exe"],
+        ["Dplayx.dll", "WTP.exe"],
+    ] {
         let Some(status) = status_in_a_folder_holding(&file_names) else {
             return;
         };

@@ -19,7 +19,7 @@ The shareable string identifying one Helper's Iroh endpoint; a joiner pastes the
 _Avoid_: invite code, key, address
 
 **Game folder**:
-The folder containing the game's executable (Thinker or PRACX); the DLL and the Helper live in it too.
+The folder containing the game's executable (Thinker, PRACX or WTP); the DLL and the Helper live in it too.
 _Avoid_: install dir, game directory
 
 **Stop**:

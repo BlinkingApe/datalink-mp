@@ -16,7 +16,7 @@ live *outside* Wine.
 ## The design
 
 ```
-game (thinker.exe or terran_PRACX.exe, 32-bit, in Wine)
+game (thinker.exe, terran_PRACX.exe or wtp.exe, 32-bit, in Wine)
   │  DirectPlay COM calls (CreatePlayer, Send, Receive, EnumSessions, …)
   ▼
 DLL: dplayx.dll (crates/dplayx, 32-bit Windows, in Wine)

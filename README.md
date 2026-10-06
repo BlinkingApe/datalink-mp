@@ -43,7 +43,7 @@ and follow the section for your system.
 ### Windows
 
 1. Extract the whole zip into your Game folder, the one containing
-   `thinker.exe` or `terran_PRACX.exe`.
+   `thinker.exe`, `terran_PRACX.exe` or `wtp.exe`.
 2. Double-click `datalink-mp.exe`. Windows will say it doesn't recognise the
    app: choose **More info** → **Run anyway**. If the firewall asks, allow
    access.
@@ -154,7 +154,7 @@ The game isn't loading our `dplayx.dll`.
   `WINEDLLOVERRIDES="dplayx=n,b"` is in the environment your launcher uses to
   start the game (in Faugus, unquoted, in Game Arguments).
 - On every system, check that `dplayx.dll` sits in the same Game folder as the
-  game executable you start (`thinker.exe` or `terran_PRACX.exe`).
+  game executable you start (`thinker.exe`, `terran_PRACX.exe` or `wtp.exe`).
 - If the page says the DLL doesn't match the Helper, extract the whole archive
   into your Game folder again and restart the game.
 

@@ -35,7 +35,7 @@ Make **an embedded, local-only web UI served by the Helper itself** the default 
 - Browser opening:
   - **Windows:** do **not** use the `open` crate (5.4.x spawns a hidden `powershell.exe`, a classic AV detection pattern). Use the `webbrowser` crate or `ShellExecuteW` via `windows-sys`, implementer's choice.
   - **Linux:** `xdg-open` (or `webbrowser`). **macOS:** `/usr/bin/open` (untested).
-- **Startup self-check** of the game folder: `dplayx.dll` present, and at least one of `thinker.exe` / `terran_PRACX.exe`. Failing that, the UI shows the "not your game folder" banner; if only the DLL is missing, the banner adds that antivirus may have quarantined it.
+- **Startup self-check** of the game folder: `dplayx.dll` present, and at least one of `thinker.exe` / `terran_PRACX.exe` / `wtp.exe`. Failing that, the UI shows the "not your game folder" banner; if only the DLL is missing, the banner adds that antivirus may have quarantined it.
 - Windows keeps its console window. macOS double-click runs the Helper in a Terminal window (closing it quits); do not wrap it in a `.app` (that would trigger macOS 15's local-network prompt). Linux: the user double-clicks → Run.
 
 ### 2. Process structure

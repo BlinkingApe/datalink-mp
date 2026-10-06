@@ -12,9 +12,9 @@ use tracing::warn;
 /// The DLL's file name.
 const DLL_FILE_NAME: &str = "dplayx.dll";
 
-/// The file names of the game executables the Helper supports: Thinker's and
-/// PRACX's. One of them is enough.
-const GAME_EXES: [&str; 2] = ["thinker.exe", "terran_PRACX.exe"];
+/// The file names of the game executables the Helper supports: Thinker's,
+/// PRACX's and WTP's. One of them is enough.
+const GAME_EXES: [&str; 3] = ["thinker.exe", "terran_PRACX.exe", "wtp.exe"];
 
 /// What the Game folder self-check found.
 #[derive(Debug, Clone, Serialize)]

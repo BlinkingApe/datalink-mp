@@ -38,7 +38,7 @@ Everyone playing needs the same release of datalink-mp.
 Windows
 
   1. Extract the whole zip into your Game folder, the one containing
-     thinker.exe or terran_PRACX.exe.
+     thinker.exe, terran_PRACX.exe or wtp.exe.
   2. Double-click datalink-mp.exe. Windows will say it doesn't recognise the
      app: choose More info -> Run anyway. If the firewall asks, allow access.
   3. Your browser opens the datalink-mp page. Follow the four steps.
@@ -145,7 +145,7 @@ The game never shows "Game connected"
     WINEDLLOVERRIDES="dplayx=n,b" is in the environment your launcher uses to
     start the game (in Faugus, unquoted, in Game Arguments).
   - On every system, check that dplayx.dll sits in the same Game folder as the
-    game executable you start (thinker.exe or terran_PRACX.exe).
+    game executable you start (thinker.exe, terran_PRACX.exe or wtp.exe).
   - If the page says the DLL doesn't match datalink-mp, extract the whole
     archive into your Game folder again and restart the game.
 

@@ -19,7 +19,7 @@ binary.
    `drive_c/GOG Games/Sid Meier's Alpha Centauri Planetary Pack/`.
 2. Install [Thinker](https://github.com/induktio/thinker) or
    [PRACX](https://github.com/DrazharLn/pracx) into the same Game folder. You
-   will start `thinker.exe` or `terran_PRACX.exe`, not the stock `terran.exe`,
+   will start `thinker.exe`, `terran_PRACX.exe` or `wtp.exe`, not the stock `terran.exe`,
    which crashed during display-mode initialization in earlier testing under
    Wine on macOS.
 
