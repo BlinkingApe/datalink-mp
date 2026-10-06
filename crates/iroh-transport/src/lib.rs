@@ -10,6 +10,7 @@ pub mod session;
 pub mod connection;
 pub mod runtime;
 pub mod ticket;
+pub mod turn_sync;
 
 pub use protocol::*;
 pub use session::*;

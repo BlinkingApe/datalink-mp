@@ -39,6 +39,7 @@ static CAPTURE: OnceLock<Option<Capture>> = OnceLock::new();
 
 /// An open capture file.
 pub struct Capture {
+    path: PathBuf,
     start: Instant,
     next_id: AtomicU64,
     lines: mpsc::Sender<String>,
@@ -58,6 +59,7 @@ impl Capture {
             .spawn(move || write_lines(BufWriter::new(file), rx))?;
 
         let capture = Capture {
+            path: path.clone(),
             start: Instant::now(),
             next_id: AtomicU64::new(1),
             lines,
@@ -355,6 +357,11 @@ fn capture() -> Option<&'static Capture> {
             }
         })
         .as_ref()
+}
+
+/// The running capture's file, if there is one.
+pub fn path() -> Option<&'static Path> {
+    capture().map(|c| c.path.as_path())
 }
 
 /// Whether a capture is running.
