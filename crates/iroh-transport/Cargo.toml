@@ -17,6 +17,8 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
 anyhow = { workspace = true }
+# Stream helpers for the capture's path watcher (already in the lockfile via iroh)
+n0-future = "0.3"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }

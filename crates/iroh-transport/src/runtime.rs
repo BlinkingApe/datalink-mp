@@ -64,6 +64,8 @@ pub struct QueuedMessage {
     pub to: DPID,
     pub data: Vec<u8>,
     pub guaranteed: bool,
+    /// Its id in the traffic capture, for a game message while one is running
+    pub capture_id: Option<u64>,
 }
 
 /// Options for constructing a [`Transport`].
@@ -96,6 +98,8 @@ impl Transport {
 
     /// Create a new transport instance with non-default options
     pub fn with_options(options: TransportOptions) -> TransportResult<Self> {
+        crate::capture::init();
+
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
             .enable_all()
@@ -281,6 +285,7 @@ impl Transport {
                             to: 0,
                             data: sys_msg,
                             guaranteed: true,
+                            capture_id: None,
                         });
                         info!("Queued SETSESSIONDESC for game on join");
 
@@ -313,6 +318,7 @@ impl Transport {
                             to: 0,
                             data: sys_msg,
                             guaranteed: true,
+                            capture_id: None,
                         });
                     }
 
@@ -346,6 +352,7 @@ impl Transport {
                             to: 0,
                             data: my_msg,
                             guaranteed: true,
+                            capture_id: None,
                         });
                         info!("Queued CREATEPLAYERORGROUP for self (player_id={})", id);
                     } else {
@@ -527,6 +534,7 @@ impl Transport {
             to: 0,   // DPID_ALLPLAYERS
             data: sys_msg,
             guaranteed: true,
+            capture_id: None,
         });
         info!("Queued CREATEPLAYERORGROUP for host's local player (player_id={})", player_id);
 
@@ -573,6 +581,7 @@ impl Transport {
                 to: dpid::DPID_ALLPLAYERS,
                 data: sys_msg,
                 guaranteed: true,
+                capture_id: None,
             });
 
             true
@@ -685,11 +694,13 @@ impl Transport {
                 // LOCAL LOOPBACK: Host sending to server (itself).
                 // Game uses fire-and-receive pattern, expects to get message back.
                 if let Some(data) = loopback_data {
+                    let capture_id = crate::capture::loopback(from, to, guaranteed, &data);
                     self.message_queue.lock().push_back(QueuedMessage {
                         from,
                         to,
                         data,
                         guaranteed,
+                        capture_id,
                     });
                     debug!("queued local loopback for host->SERVERPLAYER");
                 }
@@ -735,6 +746,9 @@ impl Transport {
         let mut queue = self.message_queue.lock();
         if let Some(msg) = queue.pop_front() {
             debug!(from = msg.from, to = msg.to, size = msg.data.len(), "returning message from queue");
+            if let Some(id) = msg.capture_id {
+                crate::capture::drained(id);
+            }
             return Some(msg);
         }
 
@@ -772,11 +786,13 @@ impl Transport {
                 to,
                 data,
                 guaranteed,
+                capture_id,
             } => Some(QueuedMessage {
                 from,
                 to,
                 data,
                 guaranteed,
+                capture_id,
             }),
             ReceivedMessage::PlayerJoined(info) => {
                 // Check if we've already sent CREATEPLAYERORGROUP for this player (dedup)
@@ -799,6 +815,7 @@ impl Transport {
                     to: dpid::DPID_ALLPLAYERS,
                     data: sys_msg,
                     guaranteed: true,
+                    capture_id: None,
                 })
             }
             ReceivedMessage::PlayerLeft(player_id) => {
@@ -815,6 +832,7 @@ impl Transport {
                     to: dpid::DPID_ALLPLAYERS,
                     data: sys_msg,
                     guaranteed: true,
+                    capture_id: None,
                 })
             }
             ReceivedMessage::SessionClosed => {
@@ -824,6 +842,7 @@ impl Transport {
                     to: dpid::DPID_ALLPLAYERS,
                     data: sys_msg,
                     guaranteed: true,
+                    capture_id: None,
                 })
             }
             ReceivedMessage::ConnectionLost(endpoint_id) => {
@@ -838,6 +857,7 @@ impl Transport {
                         to: dpid::DPID_ALLPLAYERS,
                         data: sys_msg,
                         guaranteed: true,
+                        capture_id: None,
                     })
                 } else {
                     // Non-host peer lost. Heal the full mesh by re-dialing the peer
@@ -881,6 +901,7 @@ impl Transport {
                     to: dpid::DPID_ALLPLAYERS,
                     data,
                     guaranteed: true,
+                    capture_id: None,
                 })
             }
             // Internal messages don't generate game-visible messages

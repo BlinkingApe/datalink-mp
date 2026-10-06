@@ -1829,6 +1829,7 @@ dependencies = [
  "data-encoding",
  "dp-types",
  "iroh",
+ "n0-future",
  "parking_lot",
  "postcard",
  "serde",

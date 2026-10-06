@@ -3,6 +3,7 @@
 //! This crate provides the networking layer that maps DirectPlay concepts
 //! to Iroh P2P connections.
 
+pub mod capture;
 pub mod protocol;
 pub mod session;
 pub mod connection;

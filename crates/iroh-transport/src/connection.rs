@@ -97,7 +97,8 @@ pub struct PeerConnection {
     /// long-lived framed QUIC stream by the writer task. Per-peer FIFO delivery
     /// depends on this single-queue/single-stream design: separate streams or
     /// tasks per message would leave ordering to the scheduler.
-    outbox: mpsc::UnboundedSender<Vec<u8>>,
+    /// Each frame carries its capture id, if the traffic capture recorded it.
+    outbox: mpsc::UnboundedSender<(Vec<u8>, Option<u64>)>,
 }
 
 impl PeerConnection {
@@ -127,9 +128,10 @@ impl PeerConnection {
     }
 
     /// Enqueue an already-encoded message for ordered delivery to this peer.
-    fn enqueue(&self, encoded: Vec<u8>) -> TransportResult<()> {
+    fn enqueue(&self, msg: &Message, encoded: Vec<u8>) -> TransportResult<()> {
+        let capture_id = crate::capture::outbound(&self.endpoint_id, msg);
         self.outbox
-            .send(encoded)
+            .send((encoded, capture_id))
             .map_err(|_| TransportError::NotConnected)
     }
 }
@@ -150,7 +152,7 @@ fn endpoint_short(endpoint_id: &EndpointId) -> String {
 /// logged loudly — control-plane messages must never disappear silently.
 async fn ordered_writer_task(
     connection: Connection,
-    mut outbox_rx: mpsc::UnboundedReceiver<Vec<u8>>,
+    mut outbox_rx: mpsc::UnboundedReceiver<(Vec<u8>, Option<u64>)>,
     peer_label: String,
     peer_protocol_version: u16,
 ) {
@@ -174,7 +176,7 @@ async fn ordered_writer_task(
         Ok(())
     }
 
-    while let Some(data) = outbox_rx.recv().await {
+    while let Some((data, capture_id)) = outbox_rx.recv().await {
         // Ensure we have a stream
         if stream.is_none() {
             match open_stream(&connection, peer_protocol_version).await {
@@ -206,6 +208,9 @@ async fn ordered_writer_task(
                 }
             }
         }
+        if let Some(id) = capture_id {
+            crate::capture::written(id);
+        }
     }
 
     // Outbox closed (peer removed) — finish the stream gracefully.
@@ -232,6 +237,8 @@ pub enum ReceivedMessage {
         to: DPID,
         data: Vec<u8>,
         guaranteed: bool,
+        /// Its id in the traffic capture, if one is running
+        capture_id: Option<u64>,
     },
     /// Join response received
     JoinResponse {
@@ -469,7 +476,7 @@ impl ConnectionManager {
             .cloned()
             .ok_or(TransportError::NotConnected)?;
 
-        peer.enqueue(encode_message(msg)?)
+        peer.enqueue(msg, encode_message(msg)?)
     }
 
     /// Send a message to a specific player (synchronous enqueue, see send_to_peer)
@@ -481,7 +488,7 @@ impl ConnectionManager {
             .cloned()
             .ok_or(TransportError::NotConnected)?;
 
-        peer.enqueue(encode_message(msg)?)
+        peer.enqueue(msg, encode_message(msg)?)
     }
 
     /// Send a message to all peers (synchronous enqueue, see send_to_peer).
@@ -521,7 +528,7 @@ impl ConnectionManager {
         let mut success_count = 0;
 
         for peer in peers {
-            match peer.enqueue(data.clone()) {
+            match peer.enqueue(msg, data.clone()) {
                 Ok(()) => {
                     debug!(endpoint = %endpoint_short(&peer.endpoint_id), "enqueued");
                     success_count += 1;
@@ -577,6 +584,8 @@ impl ConnectionManager {
         let peers = self.peers.clone();
         let player_routes = self.player_routes.clone();
         let cm = self.clone();
+
+        crate::capture::spawn_path_watcher(connection.clone(), endpoint_id);
 
         tokio::spawn(async move {
             loop {
@@ -887,6 +896,9 @@ async fn handle_peer_message(
         } => {
             let guaranteed = flags & dp_types::DPSEND_GUARANTEED != 0;
             debug!(from, to, size = data.len(), guaranteed, "received GameMessage, queuing to channel");
+            let capture_id = EndpointId::from_bytes(&sender_endpoint_id)
+                .ok()
+                .and_then(|peer| crate::capture::inbound(&peer, from, to, guaranteed, &data));
 
             // Deliver to the local DLL/game.
             //
@@ -902,6 +914,7 @@ async fn handle_peer_message(
                 to,
                 data,
                 guaranteed,
+                capture_id,
             });
         }
 
