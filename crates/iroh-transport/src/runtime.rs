@@ -26,6 +26,20 @@ use tokio::runtime::{Builder, Runtime};
 use tokio::sync::mpsc;
 use tracing::{debug, debug_span, error, info, warn};
 
+/// Environment switch (testing aid, not documented for players): when set to a
+/// truthy value the endpoint drops its IP transports so every connection is a
+/// Relayed connection.
+pub const RELAY_ONLY_ENV: &str = "DATALINK_RELAY_ONLY";
+
+/// Whether a `DATALINK_RELAY_ONLY` value turns the switch on. Unset, empty, `0`
+/// and `false` are off; anything else is on.
+fn relay_only_enabled(value: Option<&str>) -> bool {
+    match value.map(str::trim) {
+        None | Some("") | Some("0") => false,
+        Some(v) => !v.eq_ignore_ascii_case("false"),
+    }
+}
+
 /// Network topology mode for message routing
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NetworkMode {
@@ -135,9 +149,14 @@ impl Transport {
 
         // The N0 preset provides relay + address-lookup defaults (n0 dns/pkarr);
         // the builder pre-binds IPv4 0.0.0.0 with an OS-assigned port.
-        let endpoint = match Endpoint::builder(iroh::endpoint::presets::N0)
+        let mut builder = Endpoint::builder(iroh::endpoint::presets::N0)
             .secret_key(secret_key)
-            .alpns(vec![peer_protocol_alpn(options.peer_protocol_version)])
+            .alpns(vec![peer_protocol_alpn(options.peer_protocol_version)]);
+        if relay_only_enabled(std::env::var(RELAY_ONLY_ENV).ok().as_deref()) {
+            info!("{RELAY_ONLY_ENV} is on: IP transports cleared, all connections will be Relayed");
+            builder = builder.clear_ip_transports();
+        }
+        let endpoint = match builder
             .bind()
             .await
         {
@@ -1126,6 +1145,17 @@ fn create_session_lost_msg() -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn relay_only_switch_reads_env_value() {
+        use super::relay_only_enabled;
+        assert!(!relay_only_enabled(None));
+        assert!(!relay_only_enabled(Some("")));
+        assert!(!relay_only_enabled(Some("0")));
+        assert!(!relay_only_enabled(Some("false")));
+        assert!(relay_only_enabled(Some("1")));
+        assert!(relay_only_enabled(Some("true")));
+    }
+
     use super::*;
 
     #[test]
