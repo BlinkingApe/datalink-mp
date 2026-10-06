@@ -50,6 +50,10 @@ _Avoid_: proxied connection, fallback connection
 The burst of game messages the game exchanges between turns, while its sync box shows; what a player waits through before the next turn can start.
 _Avoid_: sync (ambiguous with the sync box and with Game session state), turn data
 
+**Early ack**:
+The ack a Helper hands its own game on a friend's behalf as soon as a reliable message is on the friend's stream, instead of the game waiting a round trip for the friend's game to ack it. The friend's game still acks it, and the Helper takes that **real ack** for itself.
+_Avoid_: fake ack, made-up ack, proxy ack
+
 ### Versions
 
 **IPC version**:

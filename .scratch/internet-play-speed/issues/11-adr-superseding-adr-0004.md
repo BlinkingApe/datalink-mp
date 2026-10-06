@@ -8,7 +8,9 @@ Blocked by: 06, 07, 09, 10
 
 [What makes a Turn sync slow…](06-what-makes-turn-sync-slow.md) decided to supersede [ADR-0004](../../../docs/adr/0004-internet-play-speed-in-0-2-0.md), not amend it. Its premise (bytes) and its step order are contradicted by the data. Write the new ADR's decision:
 
-- **The reworded constraint:** the friend's game receives exactly the bytes sent, in order. The Helper never changes a game message. It may answer for the friend's JACKAL with acks and by dropping redundant resends, keeps every message until the friend's real ack, and stops answering for a friend whose connection is down. The [brief's](../analysis/turn-sync-fixes.md) section 3 has a draft.
+- **The reworded constraint:** the friend's game receives exactly the bytes sent, in order. The Helper never changes a game message. It may answer for the friend's JACKAL with acks and by dropping redundant resends, keeps every message until the friend's real ack, and stops answering for the rest of the Game session once a friend's connection is lost. The [brief's](../analysis/turn-sync-fixes.md) section 3 has a draft.
+- **Early acks are for two-player games only.** [How does the Helper ack for the friend's game?](09-helper-acks-for-the-friends-game.md) found the brief's rule 3 unsafe with three players. Record why, and the rule that would make three-player games safe.
+- **What ships besides the fix:** the traffic capture (off by default) and `DATALINK_RELAY_ONLY`, both from that ticket.
 - **The DLL's timing change,** which crosses "invisible to the DLL".
 - **Which release carries what:**
   - the Helper's acks, opt-in, then on by default
