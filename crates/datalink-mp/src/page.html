@@ -171,7 +171,10 @@
           <div><b>Hosting:</b> send your Ticket
             <input class="ticket gap" id="ticket" readonly>
             <div class="small warn gap" id="ticket-changed" hidden>Your Ticket changed. Share it again.</div>
-            <div class="gap"><button id="copy" disabled>Copy Ticket</button></div></div>
+            <div class="gap"><button id="copy" disabled>Copy Ticket</button></div>
+            <!-- Shown only while hosting with a Helper connected: the sign that a
+                 friend's Ticket worked, without scrolling to step 4. -->
+            <div class="small gap" id="hosting-peers" hidden></div></div>
           <div><b>Joining:</b> paste your friend's
             <textarea class="ticket gap" id="friend-ticket" autocomplete="off" spellcheck="false"
               placeholder="smac…"></textarea>
@@ -228,6 +231,7 @@
   var gamePill = document.getElementById('game-pill');
   var gameFolders = document.querySelectorAll('.game-folder');
   var peersLine = document.getElementById('peers');
+  var hostingPeers = document.getElementById('hosting-peers');
   var invalidTicketWords = document.querySelectorAll('[data-invalid-ticket]');
   var friendBox = document.getElementById('friend-ticket');
   var connectButton = document.getElementById('connect');
@@ -261,6 +265,11 @@
   var stopSent = false;
 
   // "Connected", not "players": a Helper can be connected only to look for a game.
+  // Step 2 and step 4 both word the count with this.
+  function peerCount(n) {
+    return n + (n === 1 ? ' Helper' : ' Helpers') + ' connected';
+  }
+
   function renderPeers(peers) {
     var key = peers.join(' ');
     if (key === shownPeersKey) return;
@@ -269,7 +278,7 @@
       peersLine.textContent = 'No Helpers connected yet.';
       return;
     }
-    peersLine.textContent = peers.length + (peers.length === 1 ? ' Helper' : ' Helpers') + ' connected: ';
+    peersLine.textContent = peerCount(peers.length) + ': ';
     for (var i = 0; i < peers.length; i++) {
       if (i > 0) peersLine.appendChild(document.createTextNode(', '));
       var id = document.createElement('code');
@@ -326,6 +335,10 @@
     setStep(4, false, step1Done && s.game_connected);
 
     renderPeers(s.peers);
+    // Only the Host sees the count at step 2: a Joiner's step 2 already says
+    // "Connected to your friend".
+    hostingPeers.hidden = s.state !== 'hosting' || !s.peers.length;
+    if (!hostingPeers.hidden) setText(hostingPeers, peerCount(s.peers.length));
     setText(document.getElementById('keep-open'), KEEP_OPEN[s.os] || '');
     renderJoin(s.state);
 

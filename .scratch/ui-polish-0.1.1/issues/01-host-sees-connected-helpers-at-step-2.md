@@ -6,9 +6,9 @@ From the [post-0.1.0-polish map](../../post-0.1.0-polish/map.md): [Show the host
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] While hosting with one or more peers, step 2 shows the count in step 4's wording
-- [ ] It isn't shown with no peers, or in any state but hosting
-- [ ] It follows the peer list as it changes, like step 4's line
-- [ ] The UI tests cover it
+- [x] While hosting with one or more peers, step 2 shows the count in step 4's wording
+- [x] It isn't shown with no peers, or in any state but hosting
+- [x] It follows the peer list as it changes, like step 4's line
+- [x] The UI tests cover it

@@ -3089,3 +3089,31 @@ fn test_page_has_stop_hidden_as_it_loads_and_the_words_for_after_stop() {
         "Stop should say what stopping during a game can do"
     );
 }
+
+// ui-polish-0.1.1 01: the Host's count of connected Helpers at step 2
+//
+// The count is page logic (shown only while hosting with peers), so this
+// checks what the page source can show: the line exists in the Hosting column
+// under the Copy Ticket button, hidden as the page loads, and is worded by the
+// same function as step 4's line.
+#[test]
+fn test_page_has_a_hidden_connected_helpers_line_under_the_hosts_ticket() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let page = http_get(started.ui_port(), "/", &[]).body;
+
+    let copy = page.find("id=\"copy\"").expect("step 2 should have the Copy Ticket button");
+    let joining = page.find("<b>Joining:</b>").expect("step 2 should have the Joining column");
+    let hosting_column = &page[copy..joining];
+    let line = hosting_column
+        .find("id=\"hosting-peers\"")
+        .expect("the Hosting column should have a connected Helpers line after Copy Ticket");
+    let tag = &hosting_column[hosting_column[..line].rfind('<').unwrap()..];
+    let tag = &tag[..=tag.find('>').unwrap()];
+    assert!(tag.contains(" hidden"), "the line should be hidden as the page loads: {tag}");
+
+    // One wording for both lines, and the count follows hosting, not the Joiner.
+    assert_eq!(page.matches("' connected'").count(), 1, "step 2 and step 4 should share one wording");
+    assert!(page.contains("hostingPeers.hidden = s.state !== 'hosting' || !s.peers.length"));
+}
