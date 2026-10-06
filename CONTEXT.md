@@ -54,6 +54,10 @@ _Avoid_: sync (ambiguous with the sync box and with Game session state), turn da
 The ack a Helper hands its own game on a friend's behalf as soon as a reliable message is on the friend's stream, instead of the game waiting a round trip for the friend's game to ack it. The friend's game still acks it, and the Helper takes that **real ack** for itself.
 _Avoid_: fake ack, made-up ack, proxy ack
 
+**Real ack**:
+The ack the friend's game itself sends for a reliable message; the Helper takes it for itself once it has made an **Early ack** for that message.
+_Avoid_: true ack
+
 ### Versions
 
 **IPC version**:

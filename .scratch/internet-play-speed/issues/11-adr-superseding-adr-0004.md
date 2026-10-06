@@ -1,7 +1,7 @@
 # 11: The ADR that supersedes ADR-0004
 
 Type: grilling
-Status: needs-triage
+Status: resolved
 Blocked by: 06, 07, 09, 10
 
 ## Question
@@ -20,3 +20,14 @@ Blocked by: 06, 07, 09, 10
   - and the fact that no minor release is needed unless compression returns
 - **What's dropped and what's conditional:** delta encoding, our own relay, `dwLatency`, and compression after a Relayed capture.
 - **ADR-0004's status line,** and the `CONTEXT.md` terms this introduces, if any.
+
+## Answer
+
+2026-10-06. Decided with the maintainer: all six proposals accepted.
+
+Written as [ADR-0005](../../../docs/adr/0005-internet-play-speed-helpers-answer-acks.md). ADR-0004 is now "Superseded by ADR-0005". `CONTEXT.md` gains **Real ack**.
+
+- **Constraint:** the friend's game gets exactly the bytes sent, in order. The Helper may ack and drop redundant resends, and keeps every message until the real ack. It stops answering for the rest of the Game session on a lost connection. The DLL's timing change is a named exception.
+- **Early acks:** two-player only, with the reason and the safe three-player rule recorded.
+- **Releases, all 0.1.x:** Patch A is measurement (badge, logs, capture, `DATALINK_RELAY_ONLY`). Patch B is opt-in Early acks and fast wake, and page activity rides with it or later. Patch C turns them on by default after validation and at least 3 tester games. No minor release unless compression returns.
+- **Dropped:** delta encoding, our own relay, `dwLatency`. **Conditional:** compression after a Relayed capture.

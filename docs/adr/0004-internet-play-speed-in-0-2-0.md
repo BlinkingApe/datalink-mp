@@ -1,6 +1,6 @@
 # ADR-0004: Internet play speed is the focus of 0.2.0
 
-- **Status:** Accepted (2026-10-01)
+- **Status:** Superseded by [ADR-0005](0005-internet-play-speed-helpers-answer-acks.md) (2026-10-06). The captured data showed per-message round trips, not bytes.
 - **Related:** [ADR-0001](0001-web-ui-frontend.md) (the page), [ADR-0002](0002-releases-versioning-pipeline-trust.md) (versioning, the release gate).
 
 The first game over the internet (Linux and Windows on different networks, 2026-10-01) connected and played, but syncing between turns was very slow. **0.1.0 ships unchanged**, through its release gate. **Speed is the focus of 0.2.0**, and the work happens between Helpers, invisible to the game and the DLL. In this order:
