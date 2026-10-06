@@ -3084,4 +3084,8 @@ fn test_page_has_stop_hidden_as_it_loads_and_the_words_for_after_stop() {
         page.contains("Return to the game\\'s main menu first"),
         "Stop should ask the player to return to the game's main menu first"
     );
+    assert!(
+        page.contains("can crash their game"),
+        "Stop should say what stopping during a game can do"
+    );
 }

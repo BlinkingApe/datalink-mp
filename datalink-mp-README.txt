@@ -99,7 +99,8 @@ THE FOUR STEPS ON THE PAGE
 Your Ticket is new every time datalink-mp starts and every time you press
 Stop, so share it again after either. Stop ends your current connections and
 gives you a new Ticket without closing datalink-mp; with the game open, return
-to the game's main menu first. Quit closes datalink-mp.
+to the game's main menu first. Stopping during a game ends it for everyone
+connected through you, and can crash their game. Quit closes datalink-mp.
 
 If you double-click datalink-mp while it's already running, the running copy
 makes way and a fresh one starts, so you always get the copy you just started

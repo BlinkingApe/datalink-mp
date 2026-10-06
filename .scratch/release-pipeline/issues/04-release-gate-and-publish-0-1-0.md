@@ -138,3 +138,11 @@ Publish:
 - **The gate moves to `-rc.7`**, so the three boxes ticked for rc.6 are unticked. rc.7 carries two changes. The first is the Stop warning saying what can happen (game-session-sync [ticket 04](../../game-session-sync/issues/04-stop-warning-says-what-can-happen.md)), a page change. The second is the `Copyright (c) 2026 BlinkingApe` line in `LICENSE-MIT` (ADR-0003, committed after rc.6 was tagged), which the archives ship. The session code is unchanged from rc.6.
 - The release notes list as known issues: 09 ("Send failed!" then "Player not responding" when a friend's Helper drops mid-game), the killed-host case (the Joiner stays on the setup screen), and Stop mid-game possibly crashing the other player's game.
 - What's left is in `docs/datalink-mp-0.1.0-release-checklist.html`.
+
+**2026-10-06 (agent):** rc.7 prepared on `main`, not yet tagged. The Stop warning now says stopping during a game ends it for everyone connected through you and can crash their game (page, README, `datalink-mp-README.txt`, `tests/ui.rs`); `LICENSE-MIT` already carries both copyright lines; `docs/releasing.md` §4 and §5 name `v0.1.0-rc.7`. `cargo test --workspace` passes.
+
+Draft known issues for the release notes:
+
+- If a friend's Helper drops mid-game, the host sees "Send failed!" and then the game's "Player not responding". Choose Drop.
+- If the host's game is killed during Multiplayer Setup, the Joiner stays on that screen. Cancel, then join again.
+- Pressing Stop mid-game ends the game for everyone connected through you and can crash the other player's game. Return to the game's main menu first.

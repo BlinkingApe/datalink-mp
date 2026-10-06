@@ -456,8 +456,9 @@
   stopButton.addEventListener('click', function () {
     // The game keeps its link to the Helper, but a game in progress is not
     // told that the session it is in has ended.
-    if (gameConnected && !confirm('Return to the game\'s main menu first. Stop disconnects ' +
-        'everyone connected through you and gives you a new Ticket. Stop now?')) return;
+    if (gameConnected && !confirm('Return to the game\'s main menu first. Stopping during a game ends it for ' +
+        'everyone connected through you, and can crash their game. Stop disconnects ' +
+        'them and gives you a new Ticket. Stop now?')) return;
     stopSent = true;
     stopButton.disabled = true;
     fetch('/api/stop', {

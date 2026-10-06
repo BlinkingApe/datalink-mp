@@ -1,7 +1,7 @@
 # The Stop warning says what can happen to the other players' games
 
 Type: task
-Status: ready-for-agent
+Status: done
 Blocked by:
 
 ## Why
