@@ -26,11 +26,11 @@ A scoped, decided plan for the first post-0.1.0 polish round: which UI/UX ideas 
 
 <!-- one line per closed ticket -->
 
-None yet — this map was charted by relocating existing, already-specified ideas (see "Decided while charting") rather than by resolving open tickets.
+- [Tell Joiners when the Host is hostable](issues/04-signal-joiners-when-host-is-hostable.md): automatic. The Joiner's Helper polls the Host's Helper with the existing session query, so there's no Peer protocol version bump. The Joiner's page and tab title change; the Host's page doesn't. "Hostable" is defined in `CONTEXT.md`.
 
 ## Not yet specified
 
-- **Tell Joiners when the Host is hostable** (parked reference: [issues/04-signal-joiners-when-host-is-hostable.md](issues/04-signal-joiners-when-host-is-hostable.md), carried over from helper-web-ui ticket 21). Two angles were on the table — an automatic Helper-to-Helper signal once the Host's game is actually hostable, versus a manual host-side signal, versus just rewording the Joiner's step 3 to say "wait for your friend" — none chosen yet. Blocked, informally, on the [game-session-sync map](../game-session-sync/map.md): decide this only after that map's shape of Helper/Game-session status is settled, since the signal this ticket wants may ride on the same channel.
+None. "Tell Joiners when the Host is hostable" graduated to a live ticket on 2026-10-06, once the [game-session-sync map](../game-session-sync/map.md) had closed its decisions: [Tell Joiners when the Host is hostable](issues/04-signal-joiners-when-host-is-hostable.md).
 
 ## Out of scope
 

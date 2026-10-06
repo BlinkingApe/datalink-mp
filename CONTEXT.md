@@ -30,6 +30,10 @@ _Avoid_: reset, disconnect, leave
 The DirectPlay-level multiplayer session the game itself is in: created by Host Game, joined by Join Game, ended by CloseSession or a crash. Tracked today in the IPC layer the DLL talks through. Distinct from the Helper's own connection state (`ready`/`joining`/`joined`/`hosting`, driven by the Transport and its peers) — the two can fall out of sync.
 _Avoid_: session (ambiguous with the Helper's connection state)
 
+**Hostable**:
+The Host's game has a Game session that a Joiner's Join Game would find and could join right now: from Host Game until the game starts (or the session closes or fills).
+_Avoid_: ready (that is a value of the Helper's connection state)
+
 ### Connections
 
 **Direct connection**:

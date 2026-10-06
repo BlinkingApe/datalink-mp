@@ -4,6 +4,6 @@
 
 **Blocked by:** None
 
-**Status:** needs-triage
+**Status:** resolved: decided while charting the map. Nothing to decide; it gets built once `/to-tickets` turns this map into build tickets.
 
 Not a blocker for 0.1.0. Carried over from helper-web-ui ticket 20 onto the [post-0.1.0-polish map](../map.md).
