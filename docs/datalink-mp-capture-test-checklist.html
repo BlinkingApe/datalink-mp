@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Captured game checklist</title>
+<style>
+  :root {
+    --bg: #f6f6f3; --card: #fff; --fg: #1d1f21; --muted: #666; --line: #d9d9d2;
+    --pass: #1a7f37; --fail: #c62828; --skip: #8a6d00; --accent: #2457c5; --warnbg: #fff6dc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16181a; --card: #1f2224; --fg: #e6e6e3; --muted: #9a9a95; --line: #34383b;
+            --pass: #4cc369; --fail: #ff6b6b; --skip: #e0b341; --accent: #7aa2ff; --warnbg: #3a3217; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 900px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 1.5rem; margin: .4rem 0; }
+  h2 { font-size: 1.15rem; margin: 0 0 .3rem; }
+  code, kbd { font: .9em ui-monospace, monospace; background: color-mix(in srgb, var(--fg) 9%, transparent);
+              padding: 1px 5px; border-radius: 4px; }
+  pre { background: color-mix(in srgb, var(--fg) 8%, transparent); padding: 10px; border-radius: 6px;
+        overflow-x: auto; margin: .5rem 0; }
+  .muted { color: var(--muted); }
+  .bar { position: sticky; top: 0; background: var(--bg); padding: 8px 0; z-index: 5;
+         border-bottom: 1px solid var(--line); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .bar .count { margin-right: auto; font-weight: 600; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg);
+           padding: 4px 12px; border-radius: 6px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+            padding: 14px 16px; margin: 16px 0; }
+  .intro { color: var(--muted); margin: 0 0 .6rem; }
+  .intro p { margin: .3rem 0; }
+  .note-box { background: var(--warnbg); border-radius: 6px; padding: 8px 10px; margin: .5rem 0; }
+  .item { border-top: 1px solid var(--line); padding: 9px 0; }
+  .row { display: flex; gap: 10px; align-items: flex-start; }
+  .row .txt { flex: 1; }
+  .why { color: var(--muted); font-size: .9em; }
+  .res { display: flex; gap: 4px; flex: none; }
+  .res button { padding: 2px 9px; font-size: .85em; }
+  .res button.on[data-v="pass"] { background: var(--pass); border-color: var(--pass); color: #fff; }
+  .res button.on[data-v="fail"] { background: var(--fail); border-color: var(--fail); color: #fff; }
+  .res button.on[data-v="skip"] { background: var(--skip); border-color: var(--skip); color: #fff; }
+  textarea { width: 100%; margin-top: 6px; font: inherit; font-size: .9em; padding: 5px 7px; min-height: 2.2em;
+             background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 6px; resize: vertical; }
+  .tag { display: inline-block; font-size: .75em; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line);
+         color: var(--muted); margin-left: 4px; vertical-align: 1px; }
+  .sec-stat { float: right; font-size: .85em; color: var(--muted); }
+  @media (max-width: 560px) { .row { flex-direction: column; } }
+  .hdr-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 8px; margin: 10px 0; }
+  .hdr-fields label { font-size: .85em; color: var(--muted); display: block; }
+  .hdr-fields input { width: 100%; font: inherit; padding: 4px 7px; background: var(--card); color: var(--fg);
+                      border: 1px solid var(--line); border-radius: 6px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>datalink-mp captured-game checklist</h1>
+  <p class="muted">Everything you need to do by hand for one session of data collection with the <b>traffic capture</b> (branch <code>capture/traffic-capture</code>). It serves three open tickets:</p>
+  <ul class="muted">
+    <li><b>internet-play-speed 04</b>, Play a captured internet game: what makes a Turn sync slow (sections B and E).</li>
+    <li><b>post-0.1.0-polish 05</b>, Does SMAC mark a started game closed to new players? This happens on its own when you start the game in B; there's nothing extra to do.</li>
+    <li><b>game-session-sync 05</b>, Tell the game when a friend's connection drops: two reproductions, after the speed game (sections C and D).</li>
+  </ul>
+  <p class="muted">Mark each step <b>Pass</b> (done, as expected), <b>Fail</b> (didn't work) or <b>Skip</b>. Write down clock times wherever asked: the capture runs on its own clock and needs your times to find the moments that matter. Everything saves in this browser automatically, and <b>Copy results</b> produces Markdown to paste back into the session.</p>
+
+  <div class="hdr-fields">
+    <div><label>Date</label><input data-meta="date" type="date"></div>
+    <div><label>Linux machine (captures)</label><input data-meta="linux" placeholder="e.g. Rocky, Faugus"></div>
+    <div><label>Windows machine (stock v0.1.0)</label><input data-meta="windows" placeholder="e.g. Windows 11 laptop"></div>
+    <div><label>Networks (which one is on the hotspot?)</label><input data-meta="net" placeholder="e.g. Linux wifi / Windows hotspot"></div>
+    <div><label>Capture files written</label><input data-meta="files" placeholder="capture-….jsonl, helper-linux.log"></div>
+  </div>
+
+  <div class="bar">
+    <span class="count" id="count"></span>
+    <button id="copy">Copy results</button>
+    <button id="reset">Reset all</button>
+  </div>
+
+  <div id="root"></div>
+</main>
+
+<script>
+const SECTIONS = [
+{
+  id: "A", title: "A. Before you start",
+  intro: `<p>Only the <b>Linux machine's Helper</b> changes. Its DLL stays the <code>v0.1.0</code> one it has now, and the Windows machine stays on stock <code>v0.1.0</code> throughout. The capture changes nothing on the wire, so they play together as usual.</p>
+  <div class="note-box">Start the Linux Helper from the repository root, with the capture and the Helper's log both on:
+<pre>DATALINK_CAPTURE=.scratch/internet-play-speed/captures \\
+SMAC_HELPER_LOG_FILE=.scratch/internet-play-speed/captures/helper-linux.log \\
+./target/release/datalink-mp</pre>
+  <code>captures/</code> is gitignored. Keep this one Helper running from B to D if you can. If you have to restart it, use the same command; it starts a new capture file, which is fine.</div>`,
+  items: [
+    {t: "On Linux, the repository is on branch <code>capture/traffic-capture</code> (<code>git branch --show-current</code>), and <code>target/release/datalink-mp</code> exists.", why: "It was built at commit fb1d579. If it's missing, run <code>cargo build --release -p datalink-mp</code> (about 5 minutes)."},
+    {t: "Start the Linux Helper with the command above. A file <code>capture-&lt;number&gt;-&lt;number&gt;.jsonl</code> appears in <code>.scratch/internet-play-speed/captures/</code>.", why: "If no file appears, the capture is off. The Helper's log says why (\"traffic capture: can't open a file\"). Stop and fix it before playing."},
+    {t: "The Linux game still starts with <code>WINEDLLOVERRIDES=dplayx=n,b</code>, as for any datalink-mp game."},
+    {t: "<b>Optional, for C and D:</b> set <code>DPLAYX_LOG_FILE</code> in the game's environment on both machines (a <code>Z:\\…</code> path under Wine, a normal path on Windows). Note the file names.", why: "The capture only sees the Linux side. game-session-sync 05 may still need the Windows side's DLL log if the capture leaves a lead unconfirmed."},
+    {t: "The two machines are on different networks, and one of them is on the mobile-data hotspot. Note which one in the header.", why: "A connection between two home networks may be Direct. The hotspot is what makes it an internet game."},
+  ]
+},
+{
+  id: "B", title: "B. The speed game: Linux hosts, Windows joins",
+  intro: `<p>For internet-play-speed 04, and post-0.1.0-polish 05 comes free with it. <b>Linux must host</b>: section C needs the capturing machine to be the one whose friend drops.</p>
+  <p>A <b>Turn sync</b> is the wait between a turn ending and the next one being playable, while the game shows its sync boxes ("Upkeep Phase: …"). For each turn, note the <b>clock time it ended</b>, roughly <b>how long the sync took</b>, and any upkeep phase that lingered.</p>`,
+  items: [
+    {t: "Linux: Host Game. Windows: find and join it over the internet. Both reach Multiplayer Setup.", why: "If the Windows page shows the \"different release\" banner, stop: that means a Peer protocol mismatch, which this build should not cause."},
+    {t: "Note whether the game uses <b>simultaneous moves</b> or one player at a time.", why: "The game syncs differently in each mode."},
+    {t: "Start the game from Multiplayer Setup (Joiners click Make Ready first if needed). Note the clock time you started it.", why: "This is the post-0.1.0-polish 05 experiment: the capture records whether SMAC closes the session to new players at this moment."},
+    {t: "Turn 1: clock time it ended, how long its Turn sync felt, any lingering phase."},
+    {t: "Turn 2: the same."},
+    {t: "Turn 3: the same."},
+    {t: "Turn 4: the same."},
+    {t: "Turn 5: the same. Play further turns if you can; the later, past-the-opening turns matter most."},
+    {t: "Further turns: note each one the same way, especially any that felt slow."},
+    {t: "Overall: which turns felt slow, and anything else odd (stalls, \"not responding\" popups, resends)."},
+    {t: "<b>Don't quit yet.</b> Leave both games in progress and go straight on to C."},
+  ]
+},
+{
+  id: "C", title: "C. A Joiner's Helper goes away mid-game",
+  intro: `<p>For game-session-sync 05 (defect 09): today the host's game isn't told, and nothing shows until the host's next action. Continue in the game from B, with Linux still the host.</p>`,
+  items: [
+    {t: "Note the clock time, then <b>quit the Windows Helper</b> (close it). Leave the Windows game as it is."},
+    {t: "On Linux, <b>wait about 30 seconds without doing anything</b>. Note what the game shows, if anything, and when."},
+    {t: "On Linux, make a move or end the turn. Note each message and its time (expected today: \"Oh no!! Send failed!\", then \"Player … not responding\")."},
+    {t: "Choose <b>Drop</b>. Note whether the Linux game carries on."},
+    {t: "Quit both games. Leave the Linux Helper running if you can."},
+  ]
+},
+{
+  id: "D", title: "D. The host's game is killed in Multiplayer Setup",
+  intro: `<p>For game-session-sync 05 (the killed-host case): today the Joiner stays on the setup screen, never told the session ended. <b>Roles swap</b>: Windows hosts and the capturing Linux machine joins, because the capture must be on the side that loses its friend.</p>`,
+  items: [
+    {t: "Start the Windows Helper again (stock <code>v0.1.0</code>) and its game. Windows: Host Game. Linux: join it and wait in Multiplayer Setup. Don't start the game."},
+    {t: "Note the clock time, then <b>kill the Windows game</b>: Task Manager → End task on the game, not on the Helper."},
+    {t: "On Linux, wait about 30 seconds. Note what the setup screen does, if anything."},
+    {t: "<b>Optional:</b> Windows hosts again, and Linux tries to join without restarting anything. Note whether it works."},
+    {t: "Quit the Linux game, then close the Linux Helper."},
+  ]
+},
+{
+  id: "E", title: "E. Optional: a game with a friend abroad",
+  intro: `<p>For internet-play-speed 04, if one can be scheduled. Connection type matters, and a friend abroad is more likely to give a Relayed connection than the hotspot. The friend runs stock <code>v0.1.0</code>, and your Linux machine captures with the same command as in A.</p>`,
+  items: [
+    {t: "Note the friend's rough location and network (e.g. \"Canada, home fibre\"), and who hosted."},
+    {t: "Start the game and note the clock time. Note whether it uses simultaneous moves."},
+    {t: "Play at least five turns, noting for each the clock time it ended and how long its Turn sync felt, as in B."},
+    {t: "Overall: which turns felt slow, compared with B."},
+  ]
+},
+{
+  id: "F", title: "F. Hand over",
+  intro: `<p>Captures contain game state: don't commit or share them. The agent reads them in place.</p>`,
+  items: [
+    {t: "<code>.scratch/internet-play-speed/captures/</code> holds the <code>capture-*.jsonl</code> file(s) and <code>helper-linux.log</code>. Write their names in the header."},
+    {t: "If you made DLL logs (A4), copy the Windows one into the same <code>captures/</code> folder on Linux, and note its name."},
+    {t: "Click <b>Copy results</b> and paste them into a Claude session with <code>/wayfinder .scratch/internet-play-speed/map.md 04</code>. The agent checks the files and records ticket 04, then posts what the capture shows on post-0.1.0-polish 05 and game-session-sync 05."},
+  ]
+}
+];
+const KEY = "datalink-mp-capture-checklist-v1";
+let state = {};
+try { state = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { state = {}; }
+state.items = state.items || {};
+state.meta = state.meta || {};
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
+
+const root = document.getElementById("root");
+const itemId = (s, i) => s.id + (i + 1);
+
+SECTIONS.forEach(s => {
+  const sec = document.createElement("section");
+  sec.innerHTML = `<h2>${s.title}<span class="sec-stat" id="stat-${s.id}"></span></h2><div class="intro">${s.intro}</div>`;
+  s.items.forEach((it, i) => {
+    const id = itemId(s, i);
+    const d = document.createElement("div");
+    d.className = "item";
+    d.innerHTML = `<div class="row"><div class="txt"><b>${id}.</b> ${it.t}${it.why ? `<div class="why">${it.why}</div>` : ""}</div>
+      <div class="res" data-id="${id}">
+        <button data-v="pass">Pass</button><button data-v="fail">Fail</button><button data-v="skip">Skip</button>
+      </div></div><textarea data-note="${id}" placeholder="Notes (what you saw, log file names, times)"></textarea>`;
+    sec.appendChild(d);
+  });
+  root.appendChild(sec);
+});
+
+function render() {
+  document.querySelectorAll(".res").forEach(r => {
+    const cur = (state.items[r.dataset.id] || {}).v;
+    r.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.v === cur));
+  });
+  let pass = 0, fail = 0, skip = 0, total = 0;
+  SECTIONS.forEach(s => {
+    let p = 0, f = 0, k = 0;
+    s.items.forEach((_, i) => {
+      total++;
+      const v = (state.items[itemId(s, i)] || {}).v;
+      if (v === "pass") p++; else if (v === "fail") f++; else if (v === "skip") k++;
+    });
+    pass += p; fail += f; skip += k;
+    document.getElementById("stat-" + s.id).textContent =
+      `${p + f + k}/${s.items.length} done${f ? " · " + f + " failed" : ""}`;
+  });
+  document.getElementById("count").textContent =
+    `${pass + fail + skip}/${total} done · ${pass} pass · ${fail} fail · ${skip} skip`;
+}
+
+document.addEventListener("click", e => {
+  const b = e.target.closest(".res button");
+  if (!b) return;
+  const id = b.parentElement.dataset.id;
+  const o = state.items[id] = state.items[id] || {};
+  o.v = o.v === b.dataset.v ? undefined : b.dataset.v;
+  save(); render();
+});
+document.querySelectorAll("textarea[data-note]").forEach(t => {
+  t.value = (state.items[t.dataset.note] || {}).n || "";
+  t.addEventListener("input", () => {
+    const o = state.items[t.dataset.note] = state.items[t.dataset.note] || {};
+    o.n = t.value; save();
+  });
+});
+document.querySelectorAll("[data-meta]").forEach(i => {
+  i.value = state.meta[i.dataset.meta] || "";
+  i.addEventListener("input", () => { state.meta[i.dataset.meta] = i.value; save(); });
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  if (!confirm("Clear every result, note and field?")) return;
+  state = {items: {}, meta: {}}; save(); location.reload();
+});
+
+const strip = h => h.replace(/<[^>]+>/g, "").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&");
+document.getElementById("copy").addEventListener("click", async () => {
+  const m = state.meta;
+  let out = `## Captured game results\n\n- Date: ${m.date || "?"}\n- Linux (captures): ${m.linux || "?"}\n- Windows: ${m.windows || "?"}\n- Networks: ${m.net || "?"}\n- Capture files: ${m.files || "?"}\n`;
+  SECTIONS.forEach(s => {
+    out += `\n### ${s.title}\n`;
+    s.items.forEach((it, i) => {
+      const id = itemId(s, i), o = state.items[id] || {};
+      const mark = {pass: "PASS", fail: "FAIL", skip: "SKIP"}[o.v] || "not run";
+      out += `- ${id} [${mark}] ${strip(it.t)}${o.n ? "\n  - " + o.n.replace(/\n/g, "\n    ") : ""}\n`;
+    });
+  });
+  try { await navigator.clipboard.writeText(out); document.getElementById("copy").textContent = "Copied"; }
+  catch (e) { prompt("Copy this:", out); }
+  setTimeout(() => document.getElementById("copy").textContent = "Copy results", 1500);
+});
+render();
+</script>
+</body>
+</html>

@@ -17,3 +17,7 @@ HITL: the maintainer runs the game, and the agent does the code change and reads
 - [ ] Agent: from the log, record whether SMAC calls `SetSessionDesc` when the game starts, and with which flags.
 
 The result decides whether the Joiner's page can say "already started", or has to call any open session hostable. See [What the Joiner's step 3 shows](06-what-the-joiners-step-3-shows.md).
+
+## Comments
+
+2026-10-06: the traffic capture built for internet-play-speed can answer this without the DLL change. Every `SetSessionDesc` the game makes already reaches the Helper over IPC, and the capture now records it (`session_desc` lines: flags, `new_players_disabled`, `join_disabled`, player counts). A Joiner's capture records the host's `SessionDescUpdate` with the same fields. It's on branch `capture/traffic-capture`, documented in `docs/traffic-capture.md`. [Play a captured internet game](../../internet-play-speed/issues/04-play-a-captured-internet-game.md) starts a game from Multiplayer Setup with the capture on, so that session answers the question for free. If it does, the first and second Needed items can be dropped.

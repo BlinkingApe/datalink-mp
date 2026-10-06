@@ -44,6 +44,12 @@ _Avoid_: P2P connection (every connection is peer-to-peer)
 A connection between two Helpers whose traffic passes through a relay server, because no direct connection could be made. It is slower than a direct connection.
 _Avoid_: proxied connection, fallback connection
 
+### Game traffic
+
+**Turn sync**:
+The burst of game messages the game exchanges between turns, while its sync box shows; what a player waits through before the next turn can start.
+_Avoid_: sync (ambiguous with the sync box and with Game session state), turn data
+
 ### Versions
 
 **IPC version**:

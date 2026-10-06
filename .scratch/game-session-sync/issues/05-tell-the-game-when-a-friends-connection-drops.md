@@ -23,3 +23,13 @@ Seen on `v0.1.0-rc.6` (2026-10-05):
 - [ ] Logs from a reproduction of each, on both sides: the Helper started from the terminal that sets `SMAC_HELPER_LOG_FILE`, and `DPLAYX_LOG_FILE` given a `Z:\…` path under Wine.
 - [ ] Reproduce 09 at the Transport level: a Joiner's connection lost mid-session gives the host's game a `DESTROYPLAYERORGROUP`.
 - [ ] Decide the fix for each, then confirm it in a real game.
+
+## Comments
+
+2026-10-06: the traffic capture built for internet-play-speed records what this ticket's logs were wanted for, on the capturing side:
+- `sys` lines: each system message the DLL drained for the game, such as `DESTROYPLAYERORGROUP` or `SESSIONLOST`, or no line if the game never got one;
+- `lost` and `reconnect` lines: when the Helper noticed the loss, and each re-dial;
+- `send_failed` lines: the game's sends to a player whose route is gone;
+- `ctl` lines: `SessionClosed` and `PlayerLeft` between Helpers.
+
+It's on branch `capture/traffic-capture`, documented in `docs/traffic-capture.md`. [Play a captured internet game](../../internet-play-speed/issues/04-play-a-captured-internet-game.md) adds both reproductions after its speed game, with the capturing machine on the side whose friend drops. That covers the first Needed item for one side. The other side's `dplayx.log` is still needed if a lead stays unconfirmed. The Transport-level reproduction and the fix are still this ticket's own work.
