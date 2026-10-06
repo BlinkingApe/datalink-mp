@@ -22,7 +22,12 @@ DATALINK_CAPTURE=.scratch/internet-play-speed/captures ./target/release/datalink
 
 The DLL stays as it is (the IPC is unchanged). The Helper creates the
 directory if needed and logs `traffic capture on` with the file's path. If it
-can't open the file, it logs an error and plays on without a capture.
+can't open the file, it logs an error and plays on without a capture. Unset or
+empty, the capture is off and the Helper does nothing extra.
+
+To analyse a capture, run `python3 .scratch/internet-play-speed/analysis/analyse_capture.py <capture.jsonl>`;
+its findings for the first captured game are in
+`.scratch/internet-play-speed/analysis/direct-game-capture.md`.
 
 Each Helper process writes one file, `capture-<unix secs>-<pid>.jsonl`. It holds
 every game from that process, one after another. In a two-player game one

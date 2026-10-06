@@ -333,11 +333,17 @@ pub fn init() {
     capture();
 }
 
+/// The directory a capture goes in, given the variable's value: none when it's
+/// unset or empty.
+fn capture_dir(value: Option<std::ffi::OsString>) -> Option<PathBuf> {
+    value.filter(|v| !v.is_empty()).map(PathBuf::from)
+}
+
 fn capture() -> Option<&'static Capture> {
     CAPTURE
         .get_or_init(|| {
-            let dir = std::env::var_os(CAPTURE_ENV)?;
-            match Capture::open(Path::new(&dir)) {
+            let dir = capture_dir(std::env::var_os(CAPTURE_ENV))?;
+            match Capture::open(&dir) {
                 Ok((capture, path)) => {
                     info!(path = %path.display(), "traffic capture on");
                     Some(capture)
@@ -544,6 +550,14 @@ mod tests {
         assert_eq!(system_message_name(0x0005), "DESTROYPLAYERORGROUP");
         assert_eq!(system_message_name(0x0031), "SESSIONLOST");
         assert_eq!(system_message_name(0x7777), "other");
+    }
+
+    #[test]
+    fn capture_is_off_unless_the_variable_names_a_directory() {
+        use std::ffi::OsString;
+        assert_eq!(capture_dir(None), None);
+        assert_eq!(capture_dir(Some(OsString::new())), None);
+        assert_eq!(capture_dir(Some(OsString::from("caps"))), Some(PathBuf::from("caps")));
     }
 
     #[test]
