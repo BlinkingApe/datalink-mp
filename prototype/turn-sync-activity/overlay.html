@@ -1,0 +1,287 @@
+<!--
+  PROTOTYPE, throwaway. Injected into the real page.html by serve.py.
+  Five variants of "what does the page show while a Turn sync runs?", on the real page.
+  The page's own script is untouched; this one peeks at the /api/status responses it already polls (1 Hz).
+-->
+<!--css-->
+  /* ===== PROTOTYPE (turn-sync-activity) ===== */
+  #proto { border: 1px dashed var(--warn); background: var(--warnbg); padding: 8px 12px; margin: 10px 0; font: 12px/1.5 var(--mono); color: var(--ink-2); }
+  #proto b.tag { color: var(--warn); letter-spacing: .08em; }
+  #proto button { padding: 3px 8px; font-size: 11px; margin: 2px 2px 2px 0; }
+  #proto pre { margin: 6px 0 0; white-space: pre-wrap; color: var(--muted); font-size: 11px; }
+  #proto label { margin-right: 10px; white-space: nowrap; }
+  #protobar { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 99; display: flex; gap: 10px;
+    align-items: center; background: #f4f4f4; color: #111; padding: 7px 14px; border-radius: 99px; box-shadow: 0 4px 22px rgba(0,0,0,.6);
+    font: 600 13px var(--mono); max-width: 96vw; }
+  #protobar button { background: #111; color: #fff; border: 0; border-radius: 99px; width: 28px; height: 28px; padding: 0; font-size: 14px; }
+  #protobar span { min-width: 12ch; text-align: center; }
+  body { padding-bottom: 70px; }
+  #tl { position: relative; height: 14px; background: var(--card); border: 1px solid var(--line); margin-top: 6px; }
+  #tl i { position: absolute; top: 0; bottom: 0; }
+  #tl i.net { background: var(--accent); } #tl i.you { background: #6aa3ff; } #tl i.friend { background: var(--warn); }
+  #tlnow { position: absolute; top: -2px; bottom: -2px; width: 2px; background: #fff; }
+
+  /* shared bits */
+  .ts { font: 13px/1.5 var(--mono); }
+  .spin { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: tsspin 1s linear infinite; vertical-align: -1px; margin-right: 6px; }
+  @keyframes tsspin { to { transform: rotate(360deg); } }
+  .indet { height: 3px; background: var(--line); overflow: hidden; position: relative; margin-top: 6px; }
+  .indet::after { content: ""; position: absolute; inset: 0 auto 0 0; width: 30%; background: var(--accent); animation: tsind 1.6s ease-in-out infinite; }
+  @keyframes tsind { 0% { left: -30%; } 100% { left: 100%; } }
+  .indet.paused::after { animation: none; width: 100%; background: repeating-linear-gradient(90deg, var(--faint) 0 6px, transparent 6px 12px); opacity: .6; }
+  .big { font: 600 26px/1.1 var(--display); color: var(--accent); }
+  /* A */ #va { margin-top: 6px; }
+  /* B */ #vb { margin: 14px 0; }
+  /* C */ .frow { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; border: 1px solid var(--line); background: var(--card-2); padding: 8px 10px; margin: 6px 0; }
+  .frow .act { flex: 1; min-width: 200px; }
+  /* D */ #vd { border: 1px solid var(--line); background: var(--card-2); padding: 10px 12px; margin: 8px 0; }
+  #strip { display: flex; height: 18px; border: 1px solid var(--line); margin: 8px 0 4px; background: var(--bg); }
+  #strip i { flex: 0 0 auto; height: 100%; }
+  #strip i.net { background: var(--accent); } #strip i.you { background: #6aa3ff; } #strip i.friend { background: var(--warn); }
+  .key i { display: inline-block; width: 10px; height: 10px; margin: 0 4px 0 10px; vertical-align: -1px; }
+  /* E */ #ve { position: sticky; top: 0; z-index: 50; background: var(--card-2); border-bottom: 2px solid var(--accent); padding: 6px 12px; margin: 0 -16px 8px; }
+<!--/css-->
+<!--body-->
+<div id="proto"><b class="tag">PROTOTYPE</b> · internet-play-speed 08 · everything on this page is fake and scripted, nothing is saved.
+  <div>Script (loops, ~52 s): idle, sync starts, burst, game computing, burst, <b>resync ~110 KB</b>, game computing, done.
+    <span id="tlnote" class="muted"></span></div>
+  <div id="tl"><span id="tlnow"></span></div>
+  <div style="margin-top:4px">
+    <button id="p-restart">Restart script</button><button id="p-pause">Pause/resume</button>
+    <button id="p-s1">1x</button><button id="p-s3">3x</button>
+    <button id="p-direct">Direct</button><button id="p-relay">Relayed</button>
+    <label><input type="checkbox" id="p-raw"> drive from RAW bursts (no debounce): watch it flicker</label>
+    <label><input type="checkbox" id="p-json"> show what the Helper reported</label></div>
+  <pre id="p-out" hidden></pre>
+  <div class="small muted">The real page's own title is <code>datalink-mp</code>; variants that change the tab title do it via <code>document.title</code>. Look at the tab.</div>
+</div>
+<div id="ve" class="ts" hidden><span class="spin"></span><span id="ve-t"></span><div class="indet" id="ve-bar"></div></div>
+<div id="vb" class="banner note ts" hidden><span class="label" id="vb-label">// Turn sync</span>
+  <div class="row"><div class="big" id="vb-big"></div><div id="vb-t" style="flex:1;min-width:200px"></div></div>
+  <div class="indet" id="vb-bar"></div></div>
+<div id="protobar"><button id="pb-prev">&#8592;</button><span id="pb-label"></span><button id="pb-next">&#8594;</button></div>
+<!--/body-->
+<!--js-->
+(function () {
+  'use strict';
+  var NAMES = { A: 'Quiet line', B: 'Banner with numbers', C: 'Friend row', D: 'Honest split', E: 'Delayed strip' };
+  var KEYS = ['A', 'B', 'C', 'D', 'E'];
+  var BASE_TITLE = 'datalink-mp';
+  var variant = 'A';
+  try { var q = new URLSearchParams(location.search).get('variant'); if (NAMES[q]) variant = q; } catch (e) {}
+  var last = null;                 // last status
+  var rawMode = false;
+  var $ = function (id) { return document.getElementById(id); };
+  function setText(el, t) { if (el && el.textContent !== t) el.textContent = t; }
+  function show(el, on) { if (el && el.hidden !== !on) el.hidden = !on; }
+  function title(t) { var w = t || BASE_TITLE; if (document.title !== w) document.title = w; }
+  function post(path, body) { return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); }
+
+  function kb(b) { return b < 1000 ? b + ' B' : (b < 100000 ? (b / 1000).toFixed(1) : Math.round(b / 1000)) + ' KB'; }
+  function secs(ms) { return Math.round(ms / 1000) + ' s'; }
+
+  // ---- what each variant sees: the debounced sync, or (checkbox) raw bursts ----
+  function view(ts) {
+    if (!ts) return { on: false };
+    if (rawMode) return { on: !!ts.raw_receiving, raw: true, ts: ts };   // blinks on every burst, off in every gap
+    return { on: !!ts.active, done: !!ts.just_finished, ts: ts };
+  }
+
+  // The honest question: who is the sync waiting on?
+  function waitWords(ts) {
+    if (ts.in_flight) return 'receiving';
+    return ts.computing === 'friend' ? 'friends-game' : ts.computing === 'you' ? 'your-game' : 'waiting';
+  }
+
+  // ---- A: quiet line under the peers, words and elapsed time only, naive wording ----
+  function renderA(v) {
+    var el = $('va');
+    if (!el) { el = document.createElement('div'); el.id = 'va'; el.className = 'small ts muted'; $('peers').parentNode.insertBefore(el, $('peers').nextSibling); }
+    show(el, v.on);
+    if (!v.on) return;
+    var w = v.ts.in_flight ? 'Receiving turn data from your friend' : 'Waiting for your friend';
+    setText(el, 'Turn sync: ' + w + '… ' + secs(v.ts.elapsed_ms));
+    el.className = 'small ts ' + (v.ts.in_flight ? 'ok' : 'muted');
+    title(null);
+  }
+
+  // ---- B: banner above the card, bytes + rate + elapsed, ADR wording; title carries bytes ----
+  function renderB(v) {
+    var el = $('vb');
+    var ts = v.ts;
+    var fin = !v.on && v.done;
+    show(el, v.on || fin);
+    if (!(v.on || fin)) { title(null); return; }
+    if (fin) {
+      setText($('vb-label'), '// Turn sync finished');
+      setText($('vb-big'), kb(ts.bytes));
+      setText($('vb-t'), 'Done in ' + secs(ts.elapsed_ms) + '.');
+      $('vb-bar').style.display = 'none';
+      title('Turn synced · ' + BASE_TITLE);
+      return;
+    }
+    $('vb-bar').style.display = '';
+    setText($('vb-label'), '// Turn sync · ' + secs(ts.elapsed_ms));
+    setText($('vb-big'), kb(ts.bytes));
+    if (ts.in_flight) setText($('vb-t'), 'Receiving turn data from your friend… ' + kb(ts.rate_bps) + '/s');
+    else setText($('vb-t'), 'Waiting for your friend… ' + kb(ts.bytes) + ' so far');
+    $('vb-bar').className = 'indet' + (ts.in_flight ? '' : ' paused');
+    title('⇩ ' + kb(ts.bytes) + ' · ' + BASE_TITLE);
+  }
+
+  // ---- C: friend row with Direct/Relayed badge and the sync as that friend's activity ----
+  function renderC(v) {
+    var peers = $('peers');
+    var host = $('vc');
+    if (!host) { host = document.createElement('div'); host.id = 'vc'; host.className = 'ts'; peers.parentNode.insertBefore(host, peers.nextSibling); }
+    var f = (last && last.friends && last.friends[0]) || null;
+    var rows = host.children;
+    if (!rows.length) {
+      host.innerHTML = '<div class="frow"><code class="fid"></code><span class="pill conn"></span><span class="small muted rtt"></span><div class="act small"></div></div>';
+    }
+    var row = host.firstChild;
+    show(peers, false);
+    show(host, !!f);
+    if (!f) return;
+    setText(row.querySelector('.fid'), f.id);
+    var pc = row.querySelector('.conn'); setText(pc, f.connection === 'direct' ? 'Direct' : 'Relayed');
+    pc.className = 'pill conn ' + (f.connection === 'direct' ? 'ok' : 'idle');
+    pc.style.color = f.connection === 'direct' ? '' : 'var(--warn)'; pc.style.borderColor = f.connection === 'direct' ? '' : 'var(--warn)';
+    setText(row.querySelector('.rtt'), f.rtt_ms + ' ms');
+    var act = row.querySelector('.act');
+    var ts = v.ts, txt = '', cls = 'act small muted';
+    if (v.on) {
+      var mover = 'Turn ' + ts.turn + ': your friend ended theirs';
+      if (ts.in_flight) { txt = mover + ' · syncing' + (ts.resync ? ', resending leaders (' + kb(ts.bytes) + ')' : ''); cls = 'act small ok'; }
+      else if (ts.computing === 'friend') { txt = mover + ' · their game is working on it · ' + secs(ts.elapsed_ms); }
+      else if (ts.computing === 'you') { txt = mover + ' · your game is working on it · ' + secs(ts.elapsed_ms); }
+      else txt = mover + ' · syncing · ' + secs(ts.elapsed_ms);
+      title('Turn sync · ' + BASE_TITLE);
+    } else if (v.done) { txt = 'Turn synced · your friend moves first · ' + secs(ts.elapsed_ms); cls = 'act small ok'; title(null); }
+    else { txt = 'Connected'; title(null); }
+    setText(act, txt); act.className = cls;
+  }
+
+  // ---- D: honest split, a strip of what the sync was doing second by second ----
+  var strip = []; var wasOn = false; var lastT = -1;
+  function renderD(v) {
+    var el = $('vd');
+    if (!el) {
+      el = document.createElement('div'); el.id = 'vd'; el.className = 'ts';
+      el.innerHTML = '<div class="row"><b id="vd-h" style="flex:1"></b><span class="muted small" id="vd-e"></span></div>' +
+        '<div id="vd-w" style="margin:4px 0"></div><div id="strip"></div>' +
+        '<div class="small muted key"><i style="background:var(--accent)"></i>data moving<i style="background:#6aa3ff"></i>your game working<i style="background:var(--warn)"></i>friend\'s game working</div>' +
+        '<div class="small muted" id="vd-s" style="margin-top:4px"></div>';
+      $('peers').parentNode.insertBefore(el, $('peers').nextSibling);
+    }
+    var ts = v.ts;
+    if (v.on && !wasOn) strip = [];
+    if (v.on && ts.t !== lastT) strip.push(ts.in_flight ? 'net' : ts.computing || 'friend');
+    lastT = ts.t;
+    wasOn = v.on;
+    var fin = !v.on && v.done;
+    show(el, v.on || fin);
+    if (!(v.on || fin)) { title(null); return; }
+    var n = function (k) { return strip.filter(function (x) { return x === k; }).length; };
+    var tot = strip.length || 1;
+    setText($('vd-h'), (fin ? 'Turn ' + ts.turn + ' synced' : 'Syncing turn ' + ts.turn));
+    setText($('vd-e'), secs(ts.elapsed_ms));
+    var w;
+    if (fin) w = 'Done. Your friend moves first.';
+    else if (ts.in_flight) w = ts.resync ? 'Games disagreed, so your friend is resending leader data: ' + kb(ts.bytes) + ' so far.' : 'Exchanging turn data with your friend.';
+    else if (ts.computing === 'friend') w = 'Your friend\'s game is working through its turn processing. Nothing is waiting on the network.';
+    else w = 'Your own game is working through its turn processing. Nothing is waiting on the network.';
+    setText($('vd-w'), w);
+    var s = $('strip');
+    // rebuild only when the count changes
+    if (s.childNodes.length !== strip.length) {
+      s.textContent = '';
+      strip.forEach(function (k) { var i = document.createElement('i'); i.className = k; i.style.width = (100 / 40) + '%'; s.appendChild(i); });
+    }
+    var net = n('net'), you = n('you'), fr = n('friend');
+    setText($('vd-s'), 'Of ' + tot + ' s: data moving ' + net + ' s (' + Math.round(100 * net / tot) + '%), games working ' + (you + fr) + ' s (' + Math.round(100 * (you + fr) / tot) + '%).');
+    if (fin) title('Turn synced · ' + BASE_TITLE);
+    else title((ts.in_flight ? 'Syncing' : ts.computing === 'friend' ? 'Friend\'s game working' : 'Your game working') + ' · ' + secs(ts.elapsed_ms) + ' · ' + BASE_TITLE);
+  }
+
+  // ---- E: sticky strip that waits 3 s before appearing; the tab title only after 10 s ----
+  function renderE(v) {
+    var el = $('ve');
+    var ts = v.ts;
+    var shown = v.on && ts.elapsed_ms >= 3000;
+    show(el, shown);
+    if (!shown) { if (!v.on) title(null); return; }
+    var long = ts.elapsed_ms >= 10000;
+    setText($('ve-t'), 'Turn sync in progress, ' + secs(ts.elapsed_ms) + '. The game is working; this can take a while.' + (ts.resync ? ' (Big one: the games disagreed, so data is being resent.)' : ''));
+    $('ve-bar').className = 'indet';
+    title(long ? 'Still syncing… ' + BASE_TITLE : null);
+  }
+
+  var RENDER = { A: renderA, B: renderB, C: renderC, D: renderD, E: renderE };
+  function hideAll() {
+    ['va', 'vb', 'vc', 'vd', 've'].forEach(function (id) { show($(id), false); });
+    show($('peers'), true);
+  }
+  var prevVariant = null;
+  function draw() {
+    if (!last) return;
+    var v = view(last.turn_sync);
+    if (prevVariant !== variant) { hideAll(); title(null); prevVariant = variant; }
+    // E and B keep their shells outside the card; the others live in step 4.
+    show($('peers'), variant !== 'C');
+    RENDER[variant](v);
+    var ts = last.turn_sync;
+    $('p-out').hidden = !$('p-json').checked;
+    if ($('p-json').checked) setText($('p-out'), JSON.stringify({ friends: last.friends, turn_sync: ts }, null, 1).replace(/\n\s*/g, ' '));
+    var pos = (ts.t / 52) * 100;
+    $('tlnow').style.left = pos + '%';
+  }
+
+  // ---- script timeline strip in the panel (static picture of the script) ----
+  (function () {
+    var segs = [[4,5,'net'],[5,7,'net'],[7,17,'friend'],[17,18,'net'],[18,22,'you'],[22,30,'net'],[30,32,'friend'],[32,36,'net']];
+    var tl = $('tl');
+    segs.forEach(function (s) { var i = document.createElement('i'); i.className = s[2]; i.style.left = (s[0] / 52 * 100) + '%'; i.style.width = ((s[1] - s[0]) / 52 * 100) + '%'; tl.insertBefore(i, $('tlnow')); });
+    setText($('tlnote'), 'Green = data moving, amber = friend\'s game computing, blue = yours. Resync is the long green part.');
+  })();
+
+  // ---- switching ----
+  function setVariant(v) {
+    variant = v;
+    try { var u = new URL(location.href); u.searchParams.set('variant', v); history.replaceState(null, '', u); } catch (e) {}
+    setText($('pb-label'), v + ' (' + NAMES[v] + ')');
+    draw();
+  }
+  function step(d) { setVariant(KEYS[(KEYS.indexOf(variant) + d + KEYS.length) % KEYS.length]); }
+  document.addEventListener('DOMContentLoaded', function () {
+    $('pb-prev').onclick = function () { step(-1); };
+    $('pb-next').onclick = function () { step(1); };
+    $('p-restart').onclick = function () { post('/proto/restart'); };
+    $('p-pause').onclick = function () { post('/proto/pause'); };
+    $('p-s1').onclick = function () { post('/proto/speed', { v: 1 }); };
+    $('p-s3').onclick = function () { post('/proto/speed', { v: 3 }); };
+    $('p-direct').onclick = function () { post('/proto/conn', { v: 'direct' }); };
+    $('p-relay').onclick = function () { post('/proto/conn', { v: 'relayed' }); };
+    $('p-raw').onchange = function () { rawMode = this.checked; draw(); };
+    $('p-json').onchange = draw;
+    setText($('pb-label'), variant + ' (' + NAMES[variant] + ')');
+  });
+  document.addEventListener('keydown', function (e) {
+    var t = e.target && e.target.tagName;
+    if (t === 'INPUT' || t === 'TEXTAREA' || (e.target && e.target.isContentEditable)) return;
+    if (e.key === 'ArrowLeft') step(-1);
+    else if (e.key === 'ArrowRight') step(1);
+    else if (KEYS.indexOf(e.key.toUpperCase()) >= 0) setVariant(e.key.toUpperCase());
+  });
+
+  // ---- listen to the page's own status polls ----
+  var realFetch = window.fetch;
+  window.fetch = function (url) {
+    var p = realFetch.apply(this, arguments);
+    if (String(url).indexOf('/api/status') >= 0) {
+      p.then(function (r) { return r.clone().json(); }).then(function (s) { last = s; draw(); }, function () {});
+    }
+    return p;
+  };
+})();
+<!--/js-->
