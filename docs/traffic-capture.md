@@ -2,7 +2,12 @@
 
 A Helper can record every game message it passes on, in both directions, plus
 each connection's route and stats. It exists to measure what makes a **Turn
-sync** slow (`.scratch/internet-play-speed`), and isn't a player feature. It's
+sync** slow (`.scratch/internet-play-speed`), and isn't a player feature. It
+also records what explains a session's life: the session settings the game
+sets, the system messages the game is handed, failed sends and lost
+connections. That answers whether SMAC closes a started game to new players
+(`.scratch/post-0.1.0-polish` 05) and what the game is told when a friend's
+connection drops (`.scratch/game-session-sync` 05). It's
 off unless you turn it on, and changes nothing on the wire: a capturing Helper
 plays against a stock `v0.1.0` Helper.
 
@@ -27,8 +32,8 @@ Captures contain game state and can be large (a few hundred bytes per message).
 Keep them in `.scratch/internet-play-speed/captures/`, which is gitignored, and
 commit only summaries.
 
-The file is flushed whenever traffic pauses for a quarter of a second. Closing
-the Helper while messages are still flowing can lose the last few.
+Lines are flushed to the file as soon as none are waiting, so a Helper that's
+closed or killed loses at most the last moment's lines.
 
 ## File format
 
@@ -125,10 +130,54 @@ Counters only grow, so take differences between samples for rates.
 `peer`: that friend's connection closed, and its `stats` lines stop. A
 reconnect starts new `path` and `stats` lines for the same `peer`.
 
+### `ctl`
+
+A Peer protocol message other than a game message, sent to or received from
+`peer` on the ordered stream. `dir` is `out` or `in`, and `msg` is the
+message's name: `PlayerLeft`, `SessionClosed`, `SessionDescUpdate`,
+`PlayerDataUpdate` and so on. Most also have `player` (the DPID the message is
+about). A `SessionDescUpdate` has the session fields listed under
+`session_desc`. A `PlayerDataUpdate` has the data's `size`. The join and
+session-query exchanges, which use their own short streams, aren't recorded.
+
+### `session_desc`
+
+The game called `SetSessionDesc`. `host` says whether this Helper is the host:
+only the host's settings are applied and sent on to friends, as a
+`SessionDescUpdate`. Fields:
+
+- `flags`: the session's flags as a hex string.
+- `new_players_disabled`, `join_disabled`: whether `DPSESSION_NEWPLAYERSDISABLED` (`0x1`) and `DPSESSION_JOINDISABLED` (`0x20`) are set.
+- `current_players`, `max_players`, `name`.
+
+### `sys`
+
+The DLL drained a DirectPlay system message for the game, at the same moment a
+`drain` line would be written. `sys` is its name, for example
+`CREATEPLAYERORGROUP`, `DESTROYPLAYERORGROUP`, `SESSIONLOST`,
+`SETPLAYERORGROUPDATA` or `SETSESSIONDESC` (`other` for the rest), and
+`sys_type` its number. Messages about one player have `player` (its DPID).
+`size` and `hex` are as for game messages. A system message the Helper queued
+but the game never drained has no line.
+
+### `send_failed`
+
+The game sent a message that the Helper couldn't queue to anyone, for example
+to a player whose connection was lost. It has the fields of an `out` line
+except `peer`, plus `error`.
+
+### `lost` and `reconnect`
+
+`lost`: the Helper learned that `peer`'s connection was lost. `host` says
+whether that friend was the session's host. Losing the host means the game is
+handed `SESSIONLOST`. Losing anyone else starts up to five re-dials, each
+recorded as a `reconnect` line with `attempt` (1–5) and `ok`.
+
 ## Where it lives
 
 `crates/iroh-transport/src/capture.rs`. The message path calls it at four
 points: queueing to a friend (`ConnectionManager`), writing the frame (the
 ordered writer task), reading a frame (`handle_peer_message`) and the DLL's
-drain (`Transport::receive`). Each call returns at once when no capture is
-running.
+drain (`Transport::receive`). `Transport` also calls it for the game's
+session settings, failed sends, lost connections and re-dials. Each call
+returns at once when no capture is running.

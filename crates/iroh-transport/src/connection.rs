@@ -129,7 +129,7 @@ impl PeerConnection {
 
     /// Enqueue an already-encoded message for ordered delivery to this peer.
     fn enqueue(&self, msg: &Message, encoded: Vec<u8>) -> TransportResult<()> {
-        let capture_id = crate::capture::outbound(&self.endpoint_id, msg);
+        let capture_id = crate::capture::outbound(self.endpoint_id.as_bytes(), msg);
         self.outbox
             .send((encoded, capture_id))
             .map_err(|_| TransportError::NotConnected)
@@ -585,7 +585,7 @@ impl ConnectionManager {
         let player_routes = self.player_routes.clone();
         let cm = self.clone();
 
-        crate::capture::spawn_path_watcher(connection.clone(), endpoint_id);
+        crate::capture::spawn_path_watcher(connection.clone(), endpoint_id_bytes);
 
         tokio::spawn(async move {
             loop {
@@ -824,6 +824,9 @@ async fn handle_peer_message(
     sender_endpoint_id: [u8; 32],
     cm: &ConnectionManager,
 ) {
+    if !matches!(msg, Message::GameMessage { .. }) {
+        crate::capture::inbound_control(&sender_endpoint_id, &msg);
+    }
     match msg {
         Message::Hello { player_id, ticket: _their_ticket } => {
             debug!("Received Hello from player {}", player_id);
@@ -896,9 +899,7 @@ async fn handle_peer_message(
         } => {
             let guaranteed = flags & dp_types::DPSEND_GUARANTEED != 0;
             debug!(from, to, size = data.len(), guaranteed, "received GameMessage, queuing to channel");
-            let capture_id = EndpointId::from_bytes(&sender_endpoint_id)
-                .ok()
-                .and_then(|peer| crate::capture::inbound(&peer, from, to, guaranteed, &data));
+            let capture_id = crate::capture::inbound(&sender_endpoint_id, from, to, guaranteed, &data);
 
             // Deliver to the local DLL/game.
             //

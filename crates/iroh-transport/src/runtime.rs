@@ -615,6 +615,8 @@ impl Transport {
 
     /// Set session description (host only)
     pub fn set_session_desc(&self, desc: SessionDesc) -> bool {
+        crate::capture::session_desc_set(&desc, self.session_manager.is_host());
+
         // Only host can modify session
         if !self.session_manager.is_host() {
             return false;
@@ -728,7 +730,12 @@ impl Transport {
 
         match &result {
             Ok(()) => debug!("send completed successfully"),
-            Err(e) => debug!(error = %e, "send failed"),
+            Err(e) => {
+                debug!(error = %e, "send failed");
+                if let Message::GameMessage { data, .. } = &msg {
+                    crate::capture::send_failed(from, to, guaranteed, data, &e.to_string());
+                }
+            }
         }
 
         result
@@ -748,6 +755,8 @@ impl Transport {
             debug!(from = msg.from, to = msg.to, size = msg.data.len(), "returning message from queue");
             if let Some(id) = msg.capture_id {
                 crate::capture::drained(id);
+            } else if msg.from == dpid::DPID_SYSMSG {
+                crate::capture::system_drained(&msg.data);
             }
             return Some(msg);
         }
@@ -847,6 +856,10 @@ impl Transport {
             }
             ReceivedMessage::ConnectionLost(endpoint_id) => {
                 let endpoint_id_bytes: [u8; 32] = *endpoint_id;
+                crate::capture::connection_lost(
+                    &endpoint_id_bytes,
+                    self.session_manager.is_node_host(&endpoint_id_bytes),
+                );
 
                 // Check if the disconnected peer was the host
                 if self.session_manager.is_node_host(&endpoint_id_bytes) {
@@ -882,10 +895,12 @@ impl Transport {
                                 match cm.connect_by_ticket(&ticket).await {
                                     Ok(_) => {
                                         info!(attempt, "reconnected to peer after transport loss");
+                                        crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
                                         break;
                                     }
                                     Err(e) => {
                                         debug!(attempt, error = %e, "reconnect attempt failed");
+                                        crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
                                     }
                                 }
                             }
