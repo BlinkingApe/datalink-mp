@@ -4,8 +4,8 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The capture is on main and does nothing unless `DATALINK_CAPTURE` is set
-- [ ] `docs/traffic-capture.md` ships with it
-- [ ] The capture's tests pass on main
+- [x] The capture is on main and does nothing unless `DATALINK_CAPTURE` is set
+- [x] `docs/traffic-capture.md` ships with it
+- [x] The capture's tests pass on main
