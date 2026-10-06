@@ -3147,3 +3147,16 @@ fn test_page_has_a_hidden_connected_helpers_line_under_the_hosts_ticket() {
     assert_eq!(page.matches("' connected'").count(), 1, "step 2 and step 4 should share one wording");
     assert!(page.contains("hostingPeers.hidden = s.state !== 'hosting' || !s.peers.length"));
 }
+
+#[test]
+fn test_page_tells_joiners_to_click_make_ready_for_simultaneous_moves() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let page = http_get(started.ui_port(), "/", &[]).body;
+
+    assert!(
+        page.contains("Make Ready") && page.contains("Simultaneous Moves"),
+        "The page should tell Joiners to click Make Ready for Simultaneous Moves"
+    );
+}

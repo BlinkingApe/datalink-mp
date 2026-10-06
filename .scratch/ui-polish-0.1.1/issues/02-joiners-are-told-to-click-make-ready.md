@@ -6,8 +6,8 @@ From the [post-0.1.0-polish map](../../post-0.1.0-polish/map.md): [Document that
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The Joiner's step 3 hint on the page mentions Make Ready for Simultaneous Moves
-- [ ] Step 3 of `datalink-mp-README.txt` says the same
-- [ ] The UI tests check that the page carries the sentence
+- [x] The Joiner's step 3 hint on the page mentions Make Ready for Simultaneous Moves
+- [x] Step 3 of `datalink-mp-README.txt` says the same
+- [x] The UI tests check that the page carries the sentence

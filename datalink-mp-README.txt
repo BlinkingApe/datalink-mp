@@ -93,7 +93,9 @@ THE FOUR STEPS ON THE PAGE
      friend's Ticket into the box and press Connect.
   3. Start the game. Choose Multiplayer -> Iroh P2P -> Host Game (if you are
      hosting) or Join Game (if you are joining). A pill on the page shows
-     "Game connected" once the game has found datalink-mp.
+     "Game connected" once the game has found datalink-mp. With Simultaneous
+     Moves, each friend who joins must click Make Ready in Multiplayer Setup
+     before the game can start.
   4. Play. The page shows who is connected.
 
 Your Ticket is new every time datalink-mp starts and every time you press
