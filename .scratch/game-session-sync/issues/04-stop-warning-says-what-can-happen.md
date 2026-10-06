@@ -1,7 +1,7 @@
 # The Stop warning says what can happen to the other players' games
 
 Type: task
-Status: done
+Status: resolved
 Blocked by:
 
 ## Why
