@@ -4,9 +4,9 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] The badge appears on each friend's row once a path is selected and updates on a path change
-- [ ] No RTT or other figures on the page
-- [ ] A log line per path change with peer, kind and address kind
-- [ ] UI tests cover the badge
+- [x] The badge appears on each friend's row once a path is selected and updates on a path change
+- [x] No RTT or other figures on the page
+- [x] A log line per path change with peer, kind and address kind
+- [x] UI tests cover the badge

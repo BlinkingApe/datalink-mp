@@ -273,8 +273,12 @@
     return n + (n === 1 ? ' Helper' : ' Helpers') + ' connected';
   }
 
-  function renderPeers(peers) {
-    var key = peers.join(' ');
+  // The badge's words, by the route status reports. Plain text, no alarm colour.
+  var PATH_WORDS = { direct: 'Direct', relayed: 'Relayed (slower)' };
+
+  function renderPeers(peers, paths) {
+    paths = paths || {};
+    var key = peers.map(function (p) { return p + ':' + (paths[p] || ''); }).join(' ');
     if (key === shownPeersKey) return;
     shownPeersKey = key;
     if (!peers.length) {
@@ -287,6 +291,13 @@
       var id = document.createElement('code');
       id.textContent = peers[i];
       peersLine.appendChild(id);
+      // Nothing until a path is selected.
+      if (PATH_WORDS[paths[peers[i]]]) {
+        var badge = document.createElement('span');
+        badge.className = 'path';
+        badge.textContent = ' ' + PATH_WORDS[paths[peers[i]]];
+        peersLine.appendChild(badge);
+      }
     }
   }
 
@@ -337,7 +348,7 @@
     // Step 4 is never ticked: it is the current step once steps 1 and 3 are done.
     setStep(4, false, step1Done && s.game_connected);
 
-    renderPeers(s.peers);
+    renderPeers(s.peers, s.peer_paths);
     // Only the Host sees the count at step 2: a Joiner's step 2 already says
     // "Connected to your friend".
     hostingPeers.hidden = s.state !== 'hosting' || !s.peers.length;

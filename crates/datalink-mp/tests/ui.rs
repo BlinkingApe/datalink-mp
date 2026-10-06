@@ -3169,3 +3169,47 @@ fn test_page_tells_joiners_to_click_make_ready_for_simultaneous_moves() {
         "the Joiner's hint should say to click Make Ready for Simultaneous Moves: {hint}"
     );
 }
+
+#[test]
+fn test_status_gives_no_path_for_a_friend_until_one_is_selected_and_direct_after() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+    assert_eq!(started.status()["peer_paths"], serde_json::json!({}));
+
+    dial_the_helper(&friend, &started);
+    started.wait_for_peers(&[short_id(&friend)]);
+
+    // A friend on loopback is a direct connection. The path may be selected a
+    // moment after the connection, so the badge's data is waited for.
+    let id = short_id(&friend);
+    common::poll_until(PEER_NOTICE_DEADLINE, || {
+        (started.status()["peer_paths"][&id] == "direct").then_some(())
+    })
+    .unwrap_or_else(|| panic!("expected a direct path for {id}, got {}", started.status()["peer_paths"]));
+
+    // Only the route, never RTT or other figures.
+    assert_eq!(started.status()["peer_paths"], serde_json::json!({ id: "direct" }));
+
+    friend.shutdown();
+    started.wait_for_peers(&[]);
+    assert_eq!(started.status()["peer_paths"], serde_json::json!({}));
+}
+
+#[test]
+fn test_page_badges_each_friend_direct_or_relayed_slower_in_plain_text() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let page = http_get(started.ui_port(), "/", &[]).body;
+
+    assert!(page.contains("peer_paths"), "the page should read each friend's path from status");
+    assert!(page.contains("'Direct'"), "the page should say Direct");
+    assert!(page.contains("Relayed (slower)"), "the page should say Relayed (slower)");
+    // Plain text: no alarm colour, no figures.
+    assert!(page.contains("class=\"path\"") || page.contains("className = 'path'"), "the badge should have its own element");
+    assert!(!page.contains("rtt"), "the page should show no RTT figures");
+}
