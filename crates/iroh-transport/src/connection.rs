@@ -462,6 +462,16 @@ impl ConnectionManager {
             .collect()
     }
 
+    /// The class of each connected peer's selected path; a peer without a
+    /// selected path yet is left out.
+    pub fn peer_paths(&self) -> Vec<(EndpointId, crate::path::PathClass)> {
+        self.peers
+            .read()
+            .values()
+            .filter_map(|p| Some((p.endpoint_id, crate::path::selected_path(&p.connection)?)))
+            .collect()
+    }
+
     /// Send a message to a specific peer by EndpointId.
     ///
     /// Synchronous: encodes and enqueues to the peer's ordered stream. Enqueue
@@ -586,6 +596,7 @@ impl ConnectionManager {
         let cm = self.clone();
 
         crate::capture::spawn_path_watcher(connection.clone(), endpoint_id_bytes);
+        crate::path::spawn_path_logger(connection.clone(), endpoint_short(&endpoint_id));
 
         tokio::spawn(async move {
             loop {

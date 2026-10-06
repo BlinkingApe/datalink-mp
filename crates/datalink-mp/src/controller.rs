@@ -231,6 +231,9 @@ pub struct Status {
     /// Short IDs of the connected Helpers: iroh's short form of each endpoint
     /// ID, sorted
     pub peers: Vec<String>,
+    /// How each peer's connection goes, `direct` or `relayed`, by short ID.
+    /// A peer whose path isn't selected yet has no entry.
+    pub peer_paths: std::collections::BTreeMap<String, iroh_transport::path::PathKind>,
     /// Codes of the active banners
     pub banners: Vec<Banner>,
     /// Why the `invalid_ticket` banner is up, while it is
@@ -341,6 +344,11 @@ impl SessionController {
             .iter()
             .map(|id| id.fmt_short().to_string())
             .collect::<Vec<_>>();
+        let peer_paths = transport
+            .peer_paths()
+            .into_iter()
+            .map(|(id, class)| (id.fmt_short().to_string(), class.kind))
+            .collect();
         let state = session_state(&mut joins, !peers.is_empty());
         let failure = joins.failure;
         drop(joins);
@@ -380,6 +388,7 @@ impl SessionController {
             self_check,
             game_connected: self.game_connected.load(Ordering::Relaxed),
             peers,
+            peer_paths,
             banners,
             invalid_ticket,
         }

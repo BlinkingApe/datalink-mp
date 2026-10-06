@@ -1036,6 +1036,12 @@ impl Transport {
         self.connection_manager.get_connected_peers()
     }
 
+    /// How each connected Helper's connection goes, Direct or Relayed, once its
+    /// path is selected. A plain lock read, like `connected_peers`.
+    pub fn peer_paths(&self) -> Vec<(EndpointId, crate::path::PathClass)> {
+        self.connection_manager.peer_paths()
+    }
+
     /// Upper bound on how long `shutdown` blocks.
     pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
