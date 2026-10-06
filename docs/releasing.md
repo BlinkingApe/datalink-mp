@@ -130,6 +130,13 @@ game, so `-rc.7` carries both. The remaining session defects ship as known
 issues (`.scratch/game-session-sync/`). The notes below marked `0.1.0-rc.2`
 are from its run.
 
+`0.1.0` shipped from `-rc.7`'s bytes, published 2026-10-06. Gotchas from that
+run: the first `v0.1.0` tag was made on `-rc.7`'s commit (`git tag v0.1.0
+v0.1.0-rc.7^{}`), not on `main`, which was ahead by ticket notes; the
+`gh release download` and `upload` commands must run inside the repository
+checkout, or `gh` fails with "not a git repository"; and `gh attestation
+verify` prints nothing on success, so check its exit code.
+
 - **Get the Windows `.zip` onto Windows with a browser download** from the
   draft, then extract it. A copy over a USB stick carries no download mark, so
   Windows skips SmartScreen and the smoke test proves nothing about it. That

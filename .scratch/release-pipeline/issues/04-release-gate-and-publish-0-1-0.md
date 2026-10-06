@@ -6,7 +6,7 @@ Run ADR-0002 section 4 (the gate) and the per-release items of section 3 (VirusT
 
 **Blocked by:** 03 (macOS archive in the same release)
 
-**Status:** ready-for-human
+**Status:** resolved
 
 The gate, on the archives of one `-rc.N` draft:
 
@@ -153,3 +153,5 @@ Draft known issues for the release notes:
 - `dplayx.dll` sha256 `a7c1d814fc7378193dc182f0bdf9f01f6f78cbb9294ac36dde90080031045012`
 
 The gate on rc.7's archives is now with the maintainer. The superseded rc.4, rc.5 and rc.6 drafts are still on GitHub, awaiting go-ahead to delete.
+
+**2026-10-06 (agent):** Published. `v0.1.0` was tagged on `-rc.7`'s commit (`98e87f5`), its draft's archives and `SHA256SUMS` were replaced with rc.7's and verified fresh (`sha256sum -c`, `gh attestation verify`), the notes name rc.7's run and the VirusTotal links, and the maintainer published it by hand. `/releases/latest` opens it. The rc.4 to rc.7 drafts and tags are deleted. Closed. Only game-session-sync ticket 05 remains, after 0.1.0.
