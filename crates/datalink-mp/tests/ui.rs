@@ -3156,7 +3156,7 @@ fn test_page_has_a_hidden_connected_helpers_line_under_the_hosts_ticket() {
 }
 
 #[test]
-fn test_page_tells_joiners_to_click_make_ready_for_simultaneous_moves() {
+fn test_page_tells_joiners_to_click_make_ready() {
     let Some(started) = start(false) else {
         return;
     };
@@ -3165,8 +3165,8 @@ fn test_page_tells_joiners_to_click_make_ready_for_simultaneous_moves() {
     let hint = &page[page.find("id=\"menu-hint-joined\"").expect("step 3 should have the Joiner's hint")..];
     let hint = &hint[..hint.find("</div>").unwrap()];
     assert!(
-        hint.contains("Simultaneous Moves") && hint.contains("<b>Make Ready</b>"),
-        "the Joiner's hint should say to click Make Ready for Simultaneous Moves: {hint}"
+        hint.contains("<b>Make Ready</b>") && !hint.contains("Simultaneous"),
+        "the Joiner's hint should say to click Make Ready, whatever the turn mode: {hint}"
     );
 }
 
