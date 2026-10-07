@@ -82,7 +82,7 @@ All endpoints require the token (header `X-Token`; the page moves it from the la
 - `POST /api/stop`: leave the session, new Transport, new Ticket
 - `POST /api/quit`
 
-**Ticket validation:** `iroh_transport::Ticket::parse` (`ticket.rs`), with no I/O. **Trim whitespace first** (parse doesn't). Also reject our own Ticket, and warn when a Ticket carries no addresses.
+**Ticket validation:** `datalink_transport::Ticket::parse` (`ticket.rs`), with no I/O. **Trim whitespace first** (parse doesn't). Also reject our own Ticket, and warn when a Ticket carries no addresses.
 
 **Observability:** keep one shared status struct, written at the existing sites:
 - DLL connect/disconnect in `main.rs`
@@ -160,7 +160,7 @@ How the archives are built, versioned and released: [ADR-0002](0002-releases-ver
 4. `datalink-mp host` and `datalink-mp join --ticket` behave as `smac-helper`'s did.
 5. Requests are rejected if they lack the token, carry a wrong `Host` header, or come from a foreign `Origin`.
 6. Each banner is triggered by its condition, including the Peer protocol mismatch between builds with different ALPNs and the self-check outside a game folder.
-7. `cargo test` still passes, including the mesh test in `crates/iroh-transport`.
+7. `cargo test` still passes, including the mesh test in `crates/datalink-transport`.
 8. The release pipeline in ADR-0002 produces all three archives.
 
 ## Changes from the draft

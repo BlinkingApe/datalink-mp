@@ -6,8 +6,8 @@ mod common;
 
 use common::{hold_port, note_transport_unavailable, FakeDll};
 use datalink_mp::{Config, Helper, StartError};
-use ipc_protocol::{IpcRequest, IpcResponse, PROTOCOL_VERSION};
-use iroh_transport::{Ticket, TransportOptions};
+use datalink_ipc::{IpcRequest, IpcResponse, PROTOCOL_VERSION};
+use datalink_transport::{Ticket, TransportOptions};
 
 /// The configuration the tests start a Helper with. Port 0 picks a free IPC port.
 fn test_config(ipc_port: u16) -> Config {

@@ -1,0 +1,28 @@
+# Allowlist for scripts/check-links.py: broken links that may stay broken.
+#
+# Same format as scripts/old-names-allowlist.txt:
+#   <path glob>   [<regex>]   [# comment]
+# The glob matches the file holding the link (* also matches /); the optional
+# regex (Python syntax) is searched for in the link target. A !<glob> [<regex>]
+# entry reports a link even when another entry allows it.
+# Add an entry only for a link that is meant to stay as written, and say why.
+
+# Archived history keeps the paths it was written with.
+.scratch/archive/*
+docs/archive/*
+
+# The repo-layout effort's own spec, ledger, decision and build tickets name
+# paths from before and after the move.
+.scratch/repo-layout/*
+.scratch/repo-layout-build/*
+
+# Capture folders are gitignored, so they never appear in the index.
+*   (^|/)captures/?$
+
+# ADR-0001 describes the seed project's layout, where the Helper was
+# crates/smac-helper. The folder is deleted; the ADR keeps the history.
+docs/adr/0001-web-ui-frontend.md   ^crates/smac-helper$
+
+# Internet-play-speed 09 plans a new module that the build creates
+# (internet-play-speed-build 07); the path is right, the file doesn't exist yet.
+.scratch/internet-play-speed/issues/09-helper-acks-for-the-friends-game.md   ^crates/datalink-transport/src/early_ack\.rs$

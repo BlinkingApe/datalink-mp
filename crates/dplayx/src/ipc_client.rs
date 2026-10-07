@@ -4,7 +4,7 @@
 //! native datalink-mp process and proxies all Transport operations.
 
 use dp_types::{PlayerName, SessionDesc, DPID, GUID};
-use ipc_protocol::{
+use datalink_ipc::{
     decode_response, encode_request, read_message, IpcError, IpcRequest, IpcResponse,
     PlayerListEntry, QueuedMessage, SessionListEntry, DEFAULT_PORT, PROTOCOL_VERSION,
 };

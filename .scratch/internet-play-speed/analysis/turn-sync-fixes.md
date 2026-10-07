@@ -2,7 +2,7 @@
 
 Prepared for the grilling of the internet-play-speed ticket of that name. What was decided is in [that ticket's answer](../issues/06-what-makes-turn-sync-slow.md); it follows section 4's recommendations, except that the Helper's acks ship **opt-in** in their first 0.1.x patch.
 
-**Sources.** The measured numbers come from the captured Direct game (`.scratch/internet-play-speed/analysis/direct-game-capture.md`) and a rerun of `analysis/analyse_capture.py` on `captures/capture-1791300326-1036127.jsonl`. JACKAL's behaviour comes from `docs/research/smac-jackal-turn-sync.md` (branch `research/smac-jackal-turn-sync`). The code facts come from `crates/dplayx/src/directplay.rs` and `crates/iroh-transport/src/runtime.rs`.
+**Sources.** The measured numbers come from the captured Direct game (`.scratch/internet-play-speed/analysis/direct-game-capture.md`) and a rerun of `analysis/analyse_capture.py` on `captures/capture-1791300326-1036127.jsonl`. JACKAL's behaviour comes from `docs/archive/research/smac-jackal-turn-sync.md`. The code facts come from `crates/dplayx/src/directplay.rs` and `crates/datalink-transport/src/runtime.rs`.
 
 **New in this brief: a replay model.** The analysis's "upper bounds" assume each fix removes its whole bucket. That overstates the gain, because some round trips are dependencies that no ack trick removes. For example, the host can't release a barrier before the Joiner's `0x2303` has crossed the network. So I replayed each Turn sync message by message:
 

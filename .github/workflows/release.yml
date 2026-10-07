@@ -1,6 +1,6 @@
 # Builds the release archives for a pushed v* tag and opens a draft GitHub
 # Release with them. It never publishes: a maintainer does that by hand after
-# the release gate (docs/releasing.md, ADR-0002).
+# the release gate (docs/maintainers/releasing.md, ADR-0002).
 name: Release
 
 on:
@@ -89,12 +89,12 @@ jobs:
         run: |
           # Everything but the binaries carries a datalink-mp- prefix, so
           # extracting into the Game folder can't overwrite the game's own
-          # readme or licence files.
+          # readme or licence files. The README's source is packaging/README.txt.
           COMMON=(datalink-mp-README.txt datalink-mp-LICENSE-MIT.txt
             datalink-mp-LICENSE-APACHE.txt datalink-mp-LICENSE-FONTS.txt)
           mkdir -p dist stage/windows stage/linux
           for d in stage/windows stage/linux; do
-            cp datalink-mp-README.txt "$d/"
+            cp packaging/README.txt "$d/datalink-mp-README.txt"
             for l in MIT APACHE FONTS; do cp "LICENSE-$l" "$d/datalink-mp-LICENSE-$l.txt"; done
           done
 
@@ -164,7 +164,8 @@ jobs:
       # as-is (upload-artifact wraps it, and download-artifact unwraps it).
       - name: Pack the archive
         run: |
-          cp "$HELPER" datalink-mp-README.txt stage/
+          cp "$HELPER" stage/
+          cp packaging/README.txt stage/datalink-mp-README.txt
           for l in MIT APACHE FONTS; do cp "LICENSE-$l" "stage/datalink-mp-LICENSE-$l.txt"; done
           chmod 755 stage/datalink-mp
           mkdir dist

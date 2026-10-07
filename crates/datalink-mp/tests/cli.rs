@@ -4,7 +4,7 @@
 mod common;
 
 use common::{free_port, hold_port, http_get, note_transport_unavailable, poll_until, FakeDll};
-use iroh_transport::{Ticket, Transport};
+use datalink_transport::{Ticket, Transport};
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc;

@@ -18,8 +18,8 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use datalink_mp::{Config, Helper, StartError, UiConfig};
-use ipc_protocol::DEFAULT_PORT;
-use iroh_transport::TransportOptions;
+use datalink_ipc::DEFAULT_PORT;
+use datalink_transport::TransportOptions;
 use std::path::PathBuf;
 use tracing::info;
 use tracing_subscriber::prelude::*;
@@ -90,7 +90,7 @@ fn init_logging() {
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new("debug")
             .add_directive("datalink_mp=debug".parse().unwrap())
-            .add_directive("iroh_transport=debug".parse().unwrap())
+            .add_directive("datalink_transport=debug".parse().unwrap())
     });
 
     let file = StdMutex::new(file);

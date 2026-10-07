@@ -17,7 +17,7 @@ What does a Turn sync consist of, and where does its time go? From [the captured
 - **Connection:** Direct or Relayed, and whether that changed during the game.
 - **A rough budget:** for one slow Turn sync, how much of its time each cause accounts for (bytes on the wire, round trips, Helper queueing, game pacing).
 
-Check the data against [the JACKAL research](02-what-is-known-about-jackal-and-turn-sync.md), and answer its open questions (section 9 of `docs/research/smac-jackal-turn-sync.md`):
+Check the data against [the JACKAL research](02-what-is-known-about-jackal-and-turn-sync.md), and answer its open questions (section 9 of `docs/archive/research/smac-jackal-turn-sync.md`):
 - Does every send arrive with `dwFlags = 0`?
 - How many reliable messages and barriers make up a Turn sync?
 - How many retransmits are there, and are they spaced at 50 ms × 1.5ⁿ?

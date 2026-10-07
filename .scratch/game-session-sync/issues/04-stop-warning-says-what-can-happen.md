@@ -15,5 +15,5 @@ It's needed in `0.1.0`, so it goes into `-rc.7`.
 ## What to build
 
 - [ ] The confirm shown when Stop is pressed with the game connected (`crates/datalink-mp/src/page.html`, the `stopButton` handler) says that stopping during a game ends that game for everyone connected through you and can crash their game. Keep the instruction first and the dialog short. Suggested wording: "Return to the game's main menu first. Stopping during a game ends it for everyone connected through you, and can crash their game. Stop disconnects them and gives you a new Ticket. Stop now?"
-- [ ] The README's paragraph on Stop (under "The four steps on the page") says the same, in the same words where they fit. `datalink-mp-README.txt` follows the README.
+- [ ] The README's paragraph on Stop (under "The four steps on the page") says the same, in the same words where they fit. `packaging/README.txt` follows the README.
 - [ ] Any test that matches the old wording is updated, and `cargo test --workspace` passes.

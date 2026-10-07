@@ -12,7 +12,7 @@ mod common;
 
 use common::{note_transport_unavailable, FakeDll};
 use datalink_mp::{Config, StartError, UiConfig};
-use iroh_transport::{Ticket, Transport, TransportOptions};
+use datalink_transport::{Ticket, Transport, TransportOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::os::fd::AsRawFd;
@@ -167,9 +167,9 @@ fn test_stop_that_cannot_create_the_new_transport_reports_it_and_changes_nothing
     assert_eq!(after["peers"], before_peers(&friend));
     assert_eq!(after["game_connected"], true);
     assert!(friend.connected_peers().contains(&helper_id), "the friend should still be connected");
-    let answer = dll.request(&ipc_protocol::IpcRequest::GetOurTicket);
+    let answer = dll.request(&datalink_ipc::IpcRequest::GetOurTicket);
     assert!(
-        matches!(&answer, ipc_protocol::IpcResponse::StringValue { value } if *value == ticket),
+        matches!(&answer, datalink_ipc::IpcResponse::StringValue { value } if *value == ticket),
         "the game should still be answered by the same Transport, got {answer:?}"
     );
 }

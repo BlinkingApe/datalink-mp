@@ -1,0 +1,11 @@
+[package]
+name = "datalink-ipc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dp-types = { path = "../dp-types" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+postcard = { workspace = true }

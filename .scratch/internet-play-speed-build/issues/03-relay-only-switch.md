@@ -13,7 +13,7 @@
 
 ## Comments
 
-Implemented in `crates/iroh-transport/src/runtime.rs` (`relay_only_enabled`, applied in `init_async`). Unset, empty, `0` and `false` are off; anything else is on. When on, the Helper logs at info: `DATALINK_RELAY_ONLY is on: IP transports cleared, all connections will be Relayed`.
+Implemented in `crates/datalink-transport/src/runtime.rs` (`relay_only_enabled`, applied in `init_async`). Unset, empty, `0` and `false` are off; anything else is on. When on, the Helper logs at info: `DATALINK_RELAY_ONLY is on: IP transports cleared, all connections will be Relayed`.
 
 The env parsing is unit-tested (`relay_only_switch_reads_env_value`). A Relayed path cannot be asserted offline: with IP transports cleared the endpoint needs a reachable relay server.
 

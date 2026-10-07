@@ -20,15 +20,15 @@ Decide which one ships, and for the automatic one, what the Joiner's page shows 
 
 ## Facts from the code (2026-10-06)
 
-- The peer protocol already has `Message::SessionAnnounce { session: SessionInfo }`, documented as "host broadcasts this" (`crates/iroh-transport/src/protocol.rs`). A receiving Helper already handles it: it records the session as discovered and raises `ReceivedMessage::SessionDiscovered` (`crates/iroh-transport/src/connection.rs`). Nothing sends it today, except a test. There is no message for "Game session closed while the Helpers stay connected"; `SessionClosed` is what the Host's Helper sends when its game's session ends.
-- A Joiner's Join Game today runs `enum_sessions`, which queries every connected peer with `SessionQuery` and waits for `SessionList` (`crates/iroh-transport/src/runtime.rs`). So a Joiner's Helper can already ask the Host's Helper whether a Game session exists. It just doesn't, until the game asks.
+- The peer protocol already has `Message::SessionAnnounce { session: SessionInfo }`, documented as "host broadcasts this" (`crates/datalink-transport/src/protocol.rs`). A receiving Helper already handles it: it records the session as discovered and raises `ReceivedMessage::SessionDiscovered` (`crates/datalink-transport/src/connection.rs`). Nothing sends it today, except a test. There is no message for "Game session closed while the Helpers stay connected"; `SessionClosed` is what the Host's Helper sends when its game's session ends.
+- A Joiner's Join Game today runs `enum_sessions`, which queries every connected peer with `SessionQuery` and waits for `SessionList` (`crates/datalink-transport/src/runtime.rs`). So a Joiner's Helper can already ask the Host's Helper whether a Game session exists. It just doesn't, until the game asks.
 - The Joiner's step 3 is `<h2>Start the game</h2>` with the menu hint "Multiplayer → Iroh P2P → Join Game" (`crates/datalink-mp/src/page.html`).
 
 ## Answer
 
 **2026-10-06 (maintainer, recorded by agent):**
 
-- **Hostable** means a Join Game from this Joiner would find the session and could join it right now: from Host Game until the game starts, the session closes, or it fills. A started game is not hostable. Added to `CONTEXT.md`.
+- **Hostable** means a Join Game from this Joiner would find the session and could join it right now: from Host Game until the game starts, the session closes, or it fills. A started game is not hostable. Added to `GLOSSARY.md`.
 - **The signal is automatic.** The Joiner's Helper asks the Host's Helper every 2 seconds or so with the existing session query (`SessionQuery` / `SessionList`). It asks while it is connected and its own game isn't in a Game session. No new message and no Peer protocol version bump, so it also works against a Host still on `0.1.0`. A Host push (`SessionAnnounce`) was turned down: "no longer hostable" would need a new message, and with it a version bump that splits `0.1.0` players from the next release.
 - **The Host's page doesn't change.**
 - **The Joiner's page also changes its tab title** (e.g. "● Friend is hosting"), so a Joiner sitting in the game sees it in the taskbar. No browser notification. SMAC's Join Game can't be told anything, since it runs one search and then shows its "game not found".

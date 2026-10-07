@@ -15,7 +15,7 @@ Seen on `v0.1.0-rc.6` (2026-10-05):
 
 ## Leads, from reading the code (unconfirmed without logs)
 
-- **09:** when a non-host peer's connection is lost, the host's Helper re-dials it up to five times and does nothing else (`convert_received_to_queued`, `ReceivedMessage::ConnectionLost`, `crates/iroh-transport/src/runtime.rs`). The loss also removes the player's route, so the game's next send fails with `NotConnected`. A possible fix: once the re-dial gives up, queue `DESTROYPLAYERORGROUP` for that peer's players and drop them from the session, as a received `PlayerLeft` does. Real DirectPlay sends it when a player times out. Unknown: whether SMAC takes a mid-game `DESTROYPLAYERORGROUP` quietly. In Multiplayer Setup it does.
+- **09:** when a non-host peer's connection is lost, the host's Helper re-dials it up to five times and does nothing else (`convert_received_to_queued`, `ReceivedMessage::ConnectionLost`, `crates/datalink-transport/src/runtime.rs`). The loss also removes the player's route, so the game's next send fails with `NotConnected`. A possible fix: once the re-dial gives up, queue `DESTROYPLAYERORGROUP` for that peer's players and drop them from the session, as a received `PlayerLeft` does. Real DirectPlay sends it when a player times out. Unknown: whether SMAC takes a mid-game `DESTROYPLAYERORGROUP` quietly. In Multiplayer Setup it does.
 - **Killed host:** the host's Helper closes the session (`dll_disconnected` → `close_session`) and sends `SessionClosed`. The Joiner's Helper turns that into `DPSYS_SESSIONLOST` for its game, which, in Multiplayer Setup, the game seems to ignore. A `dplayx.log` from the Joiner would show whether the message was handed over. If it was, SMAC may simply not act on it in the setup screen, and there may be nothing to fix.
 
 ## Needed
@@ -32,7 +32,7 @@ Seen on `v0.1.0-rc.6` (2026-10-05):
 - `send_failed` lines: the game's sends to a player whose route is gone;
 - `ctl` lines: `SessionClosed` and `PlayerLeft` between Helpers.
 
-It's on branch `capture/traffic-capture`, documented in `docs/traffic-capture.md`. [Play a captured internet game](../../internet-play-speed/issues/04-play-a-captured-internet-game.md) adds both reproductions after its speed game, with the capturing machine on the side whose friend drops. That covers the first Needed item for one side. The other side's `dplayx.log` is still needed if a lead stays unconfirmed. The Transport-level reproduction and the fix are still this ticket's own work.
+It was built in [internet-play-speed 03](../../internet-play-speed/issues/03-dev-only-traffic-capture.md) (commit `b90a677`), documented in `docs/contributors/traffic-capture.md`. [Play a captured internet game](../../internet-play-speed/issues/04-play-a-captured-internet-game.md) adds both reproductions after its speed game, with the capturing machine on the side whose friend drops. That covers the first Needed item for one side. The other side's `dplayx.log` is still needed if a lead stays unconfirmed. The Transport-level reproduction and the fix are still this ticket's own work.
 
 2026-10-06: both reproductions were captured on the Linux side, in [Play a captured internet game](../../internet-play-speed/issues/04-play-a-captured-internet-game.md). The file is `capture-1791300326-1036127.jsonl` in `.scratch/internet-play-speed/captures/` (gitignored). There are no DLL logs and no Helper log from this run, and Windows ran stock `v0.1.0` with no capture. Times are the Linux machine's.
 
@@ -41,7 +41,7 @@ It's on branch `capture/traffic-capture`, documented in `docs/traffic-capture.md
 - 17:44:04.209: the connection closed. 17:44:04.217: `lost`, `host: false`.
 - 17:44:19, 17:44:35, 17:44:52, 17:45:09, 17:45:26: `reconnect` attempts 1 to 5, all failed, about 16–17 s apart. The Helper gave up 82 s after the loss.
 - **The game was handed nothing:** no `sys` line from the loss to the end of the capture.
-- **No `send_failed` either.** The host's game kept no direct sends going during the Joiner's turn, only its keep-alive, which goes to `DPID_ALLPLAYERS`. A broadcast with no peers left returns `Ok` without sending (`broadcast_filtered`, `crates/iroh-transport/src/connection.rs:522`). So the game got no error at all. "Send failed" only shows when the host has a direct send to make, which is why C3 couldn't be reproduced on the Joiner's turn.
+- **No `send_failed` either.** The host's game kept no direct sends going during the Joiner's turn, only its keep-alive, which goes to `DPID_ALLPLAYERS`. A broadcast with no peers left returns `Ok` without sending (`broadcast_filtered`, `crates/datalink-transport/src/connection.rs:522`). So the game got no error at all. "Send failed" only shows when the host has a direct send to make, which is why C3 couldn't be reproduced on the Joiner's turn.
 - The maintainer saw SMAC's own "Player … not responding" popup within about 30 s (exact time not noted). That's the game's own timeout. Drop recovered, and the game carried on.
 
 This confirms the lead: the host's Helper re-dials, and the game is never told. Still unknown: whether SMAC takes a mid-game `DESTROYPLAYERORGROUP` quietly.

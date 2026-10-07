@@ -124,11 +124,11 @@ pub unsafe extern "system" fn DllMain(
             *DLL_HANDLE.lock() = hinstDLL;
 
             // Apply game bug fixes (blit fix, etc.)
-            smac_fixes::apply_all_patches();
+            datalink_fixes::apply_all_patches();
 
             // Install debug probes for game start investigation
             // Set SMAC_PROBE_LOG env var to enable probe logging
-            smac_fixes::install_debug_probes();
+            datalink_fixes::install_debug_probes();
 
             1 // TRUE
         }

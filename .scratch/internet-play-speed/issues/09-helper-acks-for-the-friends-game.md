@@ -27,7 +27,7 @@ Blocked by: 06
 
 ## Answer
 
-2026-10-06. The Helper's ack is now called an **Early ack** (in `CONTEXT.md`), and the friend's game's own ack is the **real ack**.
+2026-10-06. The Helper's ack is now called an **Early ack** (in `GLOSSARY.md`), and the friend's game's own ack is the **real ack**.
 
 **Two-player games only.** The Helper makes early acks only while the Game session holds our player and exactly one remote player. With three or more players it behaves exactly as `0.1.0`.
 - **This replaces rule 3 of [What makes a Turn sync slow…](06-what-makes-turn-sync-slow.md)**, which isn't safe. If the host broadcasts M1 and then M2 to friends X and Y, X can receive M2 and send something to Y before M1 reaches Y. The recipients never changed, so rule 3 would hold nothing.
@@ -44,7 +44,7 @@ Blocked by: 06
 - **Connection lost:** clear the friend's state, make no early acks for the rest of that Game session, and don't replay across a reconnect. In a two-player game the session is over by then anyway: the Joiner's game gets `SESSIONLOST`. Today's behaviour carries on unchanged.
 - **Stream reopened while the connection lives** (`connection.rs:193`): the writer replays the in-flight frames first, in order, then the frame it was retrying. The friend's JACKAL drops any seq not above the last one it saw, so copies it already has are dropped. Control messages lost on a reopen are an existing hole that this doesn't fix.
 
-**Where it lives:** a new module, `crates/iroh-transport/src/early_ack.rs`, holding each friend's state. The `ConnectionManager` owns it. The hooks:
+**Where it lives:** a new module, `crates/datalink-transport/src/early_ack.rs`, holding each friend's state. The `ConnectionManager` owns it. The hooks:
 - `Transport::send` (`runtime.rs:639`): drop resends, record the message, make its early ack.
 - The stream reader (`handle_peer_message`, `connection.rs:894`): swallow real acks and release withheld early acks into the channel.
 - Connection cleanup (`connection.rs:656`) and a new Game session (`runtime.rs:229`): clear the state.

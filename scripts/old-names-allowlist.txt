@@ -1,0 +1,36 @@
+# Allowlist for scripts/check-old-names.sh: hits that may keep a pre-layout name.
+#
+# One entry per line:   <path glob>   [<regex>]   [# comment]
+#   <path glob>  matched against the repo-relative path; * also matches /,
+#                so docs/adr/* covers everything under docs/adr/
+#   <regex>      optional bash extended regex; when given, the hit's line must
+#                match it too (use it to allow one line rather than a file)
+#   !<glob> [<regex>]   deny entry: a hit it matches is reported even when
+#                another entry allows it
+# A comment starts at whitespace followed by #, so a regex can't contain " #".
+# Add an entry only for a hit that must keep the old name, and say why.
+
+# Accepted ADRs keep the names they were written with (spec, "Crate renames"),
+# except crate paths, which the renames edit.
+docs/adr/*
+!docs/adr/*   (crates|tools)/(ipc-protocol|iroh-transport|smac-fixes|mock-dp-client)
+
+# Archived history keeps old names.
+.scratch/archive/*
+docs/archive/*
+
+# The repo-layout effort's own spec, ledger, decision and build tickets name the
+# old paths because they describe the move.
+.scratch/repo-layout/*
+.scratch/repo-layout-build/*
+
+# The proof scripts name the old names to look for them.
+scripts/check-old-names.sh
+scripts/old-names-allowlist.txt
+scripts/test-proof-scripts.sh
+
+# The release archives still ship the README as datalink-mp-README.txt, copied
+# from packaging/README.txt (spec, "Release workflow"). Only the lines that name
+# the shipped file are allowed.
+.github/workflows/release.yml   COMMON=\(|cp packaging/README\.txt
+docs/maintainers/releasing.md   name `datalink-mp-README\.txt`

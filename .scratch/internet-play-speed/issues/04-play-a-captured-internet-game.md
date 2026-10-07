@@ -19,7 +19,7 @@ We need one real internet game's traffic. The game is played with the capture on
 
 ## Riding along: two questions from other efforts
 
-The capture also records the session settings the game sets, the system messages it's handed, failed sends and lost connections (`docs/traffic-capture.md`, branch `capture/traffic-capture`). So this session can answer two open questions for the cost of a few extra minutes. Both are optional, and neither changes the speed game.
+The capture also records the session settings the game sets, the system messages it's handed, failed sends and lost connections (`docs/contributors/traffic-capture.md`). So this session can answer two open questions for the cost of a few extra minutes. Both are optional, and neither changes the speed game.
 
 - **[Does SMAC mark a started game closed to new players?](../../post-0.1.0-polish/issues/05-does-smac-mark-a-started-game-closed.md)** costs nothing extra: starting the speed game from Multiplayer Setup is the experiment. The capture's `session_desc` lines (if Linux hosts) or `ctl` `SessionDescUpdate` lines (if Linux joins) show whether SMAC sets `DPSESSION_NEWPLAYERSDISABLED` or `DPSESSION_JOINDISABLED` when the game starts.
 - **[Tell the game when a friend's connection drops](../../game-session-sync/issues/05-tell-the-game-when-a-friends-connection-drops.md)** needs its two reproductions, each after the speed game is over. The capturing Linux machine must be the side whose friend drops:
@@ -36,7 +36,7 @@ The capture also records the session settings the game sets, the system messages
 
 ### What was played
 
-- **Setup:** Linux (Rocky Faugus) ran the capturing build from `capture/traffic-capture` on the mobile-data hotspot. Windows 11 ran stock `v0.1.0` on home Wi-Fi. Linux hosted a session named `TEST`. The game ran one player at a time. The game with a friend abroad was skipped.
+- **Setup:** Linux (Rocky Faugus) ran the capturing build from [ticket 03](03-dev-only-traffic-capture.md) on the mobile-data hotspot. Windows 11 ran stock `v0.1.0` on home Wi-Fi. Linux hosted a session named `TEST`. The game ran one player at a time. The game with a friend abroad was skipped.
 - **Turns:** five, from the maintainer's notes. The capture puts the game's start at 17:34:05, when the first data message went out (the maintainer noted 17:33). Turn ends: 17:37 (turn 1, both players), then 17:39, 17:40, 17:41 and 17:43. No turn was recorded as slow (B9 and B10 were skipped), so the analysis has clock times, not felt slowness.
 - **Afterwards:** both reproductions for game-session-sync 05 (see below). C3 is incomplete because the Joiner dropped during their own turn.
 

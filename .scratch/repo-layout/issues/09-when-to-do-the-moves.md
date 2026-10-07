@@ -12,7 +12,7 @@ Does the layout build run before, during or after `internet-play-speed-build`? T
 
 Decided with the maintainer, 2026-10-06. They accepted the recommendation: the layout build runs **between Patch A and the code tickets**.
 
-- **Before the layout build:** [internet-play-speed-build](../internet-play-speed-build/) 01–06. Ticket 02 merges `capture/traffic-capture` into `main` and the branch goes. Ticket 06 releases Patch A, so testers get the measurement patch with no delay. Patch A is Helper-only and small, so the old paths cost little.
+- **Before the layout build:** [internet-play-speed-build](../../internet-play-speed-build/) 01–06. Ticket 02 merges `capture/traffic-capture` into `main` and the branch goes. Ticket 06 releases Patch A, so testers get the measurement patch with no delay. Patch A is Helper-only and small, so the old paths cost little.
 - **Layout build:** the whole of it in one run, crate renames and checkout-folder rename included. The `pre-layout` tag is taken at the Patch A release commit (after 08's branch merges, as 08 orders).
 - **After the layout build:** build tickets 07–12 (the code-heavy early acks, `dev-faults`, fast wake, page activity), 13–16 (HITL validation), 17 (Patch B) and 18. No code is in flight during the renames, so nothing needs rebasing.
 - **Ticket paths:** the layout build rewrites the paths and crate names in every still-open build ticket (and ADR-0005 and `docs/traffic-capture.md`) in the same commit as the moves. That is one step in the move list, covered by the link check in the proof step.
