@@ -2,7 +2,7 @@
 
 - **Date:** 2026-09-29
 - **Question:** Which Windows target should the x86_64 `smac-helper.exe` use, and how is it built (locally for experiments, in GitHub Actions for tagged releases)? Also: confirm the CI recipe for the 32-bit `dplayx.dll`.
-- **Context:** [ADR 0001](../adr/0001-web-ui-frontend.md) section 7 leaves `x86_64-pc-windows-msvc` vs `-gnu` open. Already decided: the Windows release is a `.zip` holding `smac-helper.exe` and `dplayx.dll` side by side (the DLL is not embedded). Experiments are cross-built on the Linux dev host. Tagged releases are built by GitHub Actions. CI changes should be additive so the fork stays upstream-friendly.
+- **Context:** [ADR 0001](../../adr/0001-web-ui-frontend.md) section 7 leaves `x86_64-pc-windows-msvc` vs `-gnu` open. Already decided: the Windows release is a `.zip` holding `smac-helper.exe` and `dplayx.dll` side by side (the DLL is not embedded). Experiments are cross-built on the Linux dev host. Tagged releases are built by GitHub Actions. CI changes should be additive so the fork stays upstream-friendly.
 
 ## TL;DR
 

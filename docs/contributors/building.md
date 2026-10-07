@@ -2,7 +2,7 @@
 
 This document is for people who want to build datalink-mp themselves. If you
 just want to play, download a release and follow the quickstart in the
-[README](../README.md).
+[README](../../README.md).
 
 Nothing here is needed to play, and everything below the build step describes
 how to assemble by hand what a release archive already contains. The
@@ -91,7 +91,7 @@ CC_x86_64_unknown_linux_musl=musl-gcc \
 ```
 
 These cross-builds are for experiments. The archives players download are
-built by CI from a tag; see [releasing.md](releasing.md).
+built by CI from a tag; see [releasing.md](../maintainers/releasing.md).
 
 ## 3. Assemble your Game folder
 
@@ -126,7 +126,7 @@ Start it before the game reaches the multiplayer menu.
 The Helper listens for the game on localhost TCP port **47624** by default.
 If you run more than one game on the same machine (for example when testing),
 give each Helper its own port and point the matching game at it with
-`SMAC_HELPER_PORT`; see "For power users" in the [README](../README.md).
+`SMAC_HELPER_PORT`; see "For power users" in the [README](../../README.md).
 
 ## 5. In the game
 
@@ -150,7 +150,7 @@ a DirectPlay service provider under that name.
 | `crates/smac-fixes` | in-memory game patches + diagnostic probe system |
 | `tools/mock-dp-client` | interactive transport test client (no game needed) |
 
-The design is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The design is in [architecture.md](architecture.md).
 
 ## Diagnosing problems
 
@@ -162,7 +162,7 @@ Every layer can log:
 | `RUST_LOG=debug` | Helper | log verbosity |
 | `DPLAYX_LOG_FILE='Z:\path'` | DLL | DirectPlay call/traffic log (Wine's `Z:` drive maps `/`) |
 | `DPLAYX_RXTRACE=1` | DLL | per-message send/receive trace lines |
-| `SMAC_PROBE_LOG=/path` | DLL | game-internal diagnostic probes (see [ARCHITECTURE.md](ARCHITECTURE.md)) |
+| `SMAC_PROBE_LOG=/path` | DLL | game-internal diagnostic probes (see [architecture.md](architecture.md)) |
 
 Set `DPLAYX_LOG_FILE` and `RUST_LOG=debug`, then read the two logs side by
 side; timestamps are correlated.
@@ -178,4 +178,4 @@ Symptoms and their usual causes:
   Build and deploy the same one everywhere.
 - **Faction colors:** vanilla multiplayer colors units by seat, not faction;
   this project fixes that. Set `SMAC_NO_CLASSIC_COLORS=1` for vanilla behavior.
-  See [faction-colors.md](faction-colors.md).
+  See [faction-colors.md](../players/faction-colors.md).

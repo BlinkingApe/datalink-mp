@@ -2,7 +2,7 @@
 
 **What to build:** While the Helper is hosting, step 2 ("Share or paste a Ticket") shows how many Helpers are connected, under the Host's own Ticket and its Copy Ticket button. It uses step 4's wording ("1 Helper connected", "2 Helpers connected"), and it updates live as friends connect and drop. A hosting player can then see a friend's Ticket worked without scrolling to step 4. Step 4 is unchanged. A Joiner's step 2 is unchanged: it already says "Connected to your friend".
 
-From the [post-0.1.0-polish map](../../post-0.1.0-polish/map.md): [Show the host's connected-peer count earlier](../../post-0.1.0-polish/issues/01-show-friends-connected-earlier.md).
+From the [post-0.1.0-polish map](../../../post-0.1.0-polish/map.md): [Show the host's connected-peer count earlier](../../../post-0.1.0-polish/issues/01-show-friends-connected-earlier.md).
 
 **Blocked by:** None (can start immediately)
 

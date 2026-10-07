@@ -4,7 +4,7 @@ Play **Sid Meier's Alpha Centauri** (1999) online with your friends. No port
 forwarding, no VPN, no IPX emulator: one of you shares a Ticket, the others
 paste it, and you are connected.
 
-<p align="center"><img src="docs/images/page-connected.png" width="600" alt="The datalink-mp page with steps 1 to 3 ticked green, the game connected and three friends' Helpers connected"></p>
+<p align="center"><img src="docs/players/images/page-connected.png" width="600" alt="The datalink-mp page with steps 1 to 3 ticked green, the game connected and three friends' Helpers connected"></p>
 
 You extract one archive into your Game folder and double-click `datalink-mp`.
 Your browser opens a page with four numbered steps that tick off as you go.
@@ -48,8 +48,8 @@ and follow the section for your system.
    app: choose **More info** → **Run anyway**. If the firewall asks, allow
    access.
 
-   <img src="docs/images/smartscreen-more-info.png" width="260" alt="Windows protected your PC, with the More info link">
-   <img src="docs/images/smartscreen-run-anyway.png" width="260" alt="Windows protected your PC after More info, with the Run anyway button">
+   <img src="docs/players/images/smartscreen-more-info.png" width="260" alt="Windows protected your PC, with the More info link">
+   <img src="docs/players/images/smartscreen-run-anyway.png" width="260" alt="Windows protected your PC after More info, with the Run anyway button">
 
 3. Your browser opens the datalink-mp page. Follow the four steps.
 4. Keep the console window open while you play.
@@ -92,23 +92,23 @@ Nobody has run these steps on a Mac. They are what should work.
    executable are next to `datalink-mp`. On Linux and macOS this step also
    shows the Wine override.
 
-   <img src="docs/images/step-1-game-folder.png" width="560" alt="Step 1, Game folder: Game folder OK, found dplayx.dll and thinker.exe">
+   <img src="docs/players/images/step-1-game-folder.png" width="560" alt="Step 1, Game folder: Game folder OK, found dplayx.dll and thinker.exe">
 
 2. **Share or paste a Ticket.** Your own Ticket is there from the start, with a
    Copy button. To host, send it to your friends. To join, paste your friend's
    Ticket into the box and press Connect.
 
-   <img src="docs/images/step-2-ticket.png" width="560" alt="Step 2, Share or paste a Ticket: your Ticket with a Copy Ticket button, and a box to paste your friend's">
+   <img src="docs/players/images/step-2-ticket.png" width="560" alt="Step 2, Share or paste a Ticket: your Ticket with a Copy Ticket button, and a box to paste your friend's">
 
 3. **Start the game.** Choose Multiplayer → Iroh P2P → Host Game (if you are
    hosting) or Join Game (if you are joining). A pill on the page shows "Game
    connected" once the game has found datalink-mp.
 
-   <img src="docs/images/step-3-start-the-game.png" width="560" alt="Step 3, Start the game: the menu path in the game, and the Game connected pill">
+   <img src="docs/players/images/step-3-start-the-game.png" width="560" alt="Step 3, Start the game: the menu path in the game, and the Game connected pill">
 
 4. **Play.** The page shows who is connected.
 
-   <img src="docs/images/step-4-play.png" width="560" alt="Step 4, Play: three Helpers connected, with their short IDs">
+   <img src="docs/players/images/step-4-play.png" width="560" alt="Step 4, Play: three Helpers connected, with their short IDs">
 
 Your Ticket is new every time datalink-mp starts and every time you press
 **Stop**, so share it again after either. Stop ends your current connections
@@ -191,19 +191,21 @@ Both accept `--port`, and `SMAC_HELPER_PORT` works as above.
 
 ## Building from source
 
-See [docs/building.md](docs/building.md). It also lists the diagnostic logs.
+See [docs/contributors/building.md](docs/contributors/building.md). It also lists the diagnostic logs.
 
 ## How it works
 
 The game does multiplayer through DirectPlay, a retired Windows API. The DLL
 implements DirectPlay and forwards everything over localhost to the Helper,
 which owns the Iroh endpoint. The split exists because Iroh cannot run inside
-Wine. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
-[docs/wine-compatibility.md](docs/wine-compatibility.md) for the investigation.
+Wine. See [docs/contributors/architecture.md](docs/contributors/architecture.md)
+for the design and
+[docs/players/wine-compatibility.md](docs/players/wine-compatibility.md) for
+the investigation.
 
 Vanilla multiplayer colors units, flags and labels by seat, not faction;
 datalink-mp fixes that so every faction wears its classic colors. See
-[docs/faction-colors.md](docs/faction-colors.md).
+[docs/players/faction-colors.md](docs/players/faction-colors.md).
 
 ## Credits
 

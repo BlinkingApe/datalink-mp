@@ -1,13 +1,13 @@
 # Releasing
 
 This document is for maintainers cutting a release. Players download releases
-and follow the [README](../README.md); people building for themselves follow
-[building.md](building.md).
+and follow the [README](../../README.md); people building for themselves follow
+[building.md](../contributors/building.md).
 
-Pushing a `v*` tag runs [`release.yml`](../.github/workflows/release.yml),
+Pushing a `v*` tag runs [`release.yml`](../../.github/workflows/release.yml),
 which builds every archive and opens a **draft** GitHub Release. CI never
 publishes; a maintainer does, by hand, after the release gate
-([ADR-0002](adr/0002-releases-versioning-pipeline-trust.md), section 4). The
+([ADR-0002](../adr/0002-releases-versioning-pipeline-trust.md), section 4). The
 bytes players get always come from CI, never from a local build.
 
 You need the [GitHub CLI](https://cli.github.com/) (`gh`), logged in to an
@@ -62,6 +62,8 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
 | `SHA256SUMS` | checksums of the archives |
 | `attestation.sigstore.json` | the archives' build provenance, for offline checks |
 
+- The README in each archive is `packaging/README.txt`, copied in under the
+  name `datalink-mp-README.txt` so it can't overwrite the game's own readme.
 - Archive names carry the **version, not the tag**, so an RC and its final
   release have identically named assets. That is what makes
   `gh release upload --clobber` replace them in section 5.
@@ -85,7 +87,7 @@ people with push access see drafts), marked pre-release for an `-rc.N` tag:
 
 - The DLL step retries with `--allow-multiple-definition` if CI's mingw ever
   reports a `multiple definition of '_Unwind_Resume'` clash (see
-  [building.md](building.md)). The run then shows a warning annotation; the
+  [building.md](../contributors/building.md)). The run then shows a warning annotation; the
   retry is a fallback, not the expected path, and `v0.1.0-rc.2` didn't need
   it. The linker's `resolving _DirectPlayCreate by linking to
   _DirectPlayCreate@12` warning is expected: the `.def` file exports the

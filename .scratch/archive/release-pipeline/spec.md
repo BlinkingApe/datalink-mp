@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-Source decisions: [ADR-0002](../../docs/adr/0002-releases-versioning-pipeline-trust.md) sections 2 (Pipeline), 3 (Trust posture — the per-release checklist items only) and 4 (Release gate for 0.1.0). Decision trail: [the web UI v1 map](../archive/web-ui-v1/map.md). Vocabulary: `CONTEXT.md`.
+Source decisions: [ADR-0002](../../../docs/adr/0002-releases-versioning-pipeline-trust.md) sections 2 (Pipeline), 3 (Trust posture — the per-release checklist items only) and 4 (Release gate for 0.1.0). Decision trail: [the web UI v1 map](../web-ui-v1/map.md). Vocabulary: `CONTEXT.md`.
 
 Where this spec and ADR-0002 disagree, the ADR wins, except for the items listed under "Decisions this spec adds", which the ADR left to the spec.
 
@@ -10,7 +10,7 @@ Where this spec and ADR-0002 disagree, the ADR wins, except for the items listed
 
 Nothing today produces a release a player could actually receive. Every artifact that exists is a local, ad hoc cross-build: the DLL's link step fails on current mingw toolchains without an undocumented workaround, no Windows build of the Helper is ever persisted, neither Windows binary carries a version a player could check without starting the app, and no tagged version's bytes have ever been verified end to end before being handed to anyone. `datalink-mp` has no CI at all.
 
-This isn't abstract: [ticket 17](../archive/helper-web-ui/issues/17-manual-check-of-the-page.md) of the web UI spec is blocked on exactly this gap — there's no Windows archive to run the manual check against.
+This isn't abstract: [ticket 17](../helper-web-ui/issues/17-manual-check-of-the-page.md) of the web UI spec is blocked on exactly this gap — there's no Windows archive to run the manual check against.
 
 ## Solution
 
@@ -69,7 +69,7 @@ A maintainer pushes a `vX.Y.Z` tag. GitHub Actions builds and uploads all three 
 
 ## Out of Scope
 
-- ADR-0002 section 1 (Versioning) — already implemented ([helper-web-ui ticket 02](../archive/helper-web-ui/issues/02-transport-versioned-alpn-and-dial-errors.md)).
+- ADR-0002 section 1 (Versioning) — already implemented ([helper-web-ui ticket 02](../helper-web-ui/issues/02-transport-versioned-alpn-and-dial-errors.md)).
 - The player-facing trust documentation (SmartScreen, firewall, quarantine recovery, Gatekeeper, Smart App Control) — already written in `README.md`.
 - Code signing, the SignPath Foundation application, a clean-VM Smart App Control test — ADR-0002 marks these as follow-ups after v1.
 - `-msvc` as the primary Windows target — stays the documented fallback only.
@@ -77,4 +77,4 @@ A maintainer pushes a `vX.Y.Z` tag. GitHub Actions builds and uploads all three 
 
 ## Further Notes
 
-Completing this spec is what unblocks the Windows half of [ticket 17](../archive/helper-web-ui/issues/17-manual-check-of-the-page.md): the first CI-built `-rc.N` Windows archive is the first real bytes that ticket has to test against.
+Completing this spec is what unblocks the Windows half of [ticket 17](../helper-web-ui/issues/17-manual-check-of-the-page.md): the first CI-built `-rc.N` Windows archive is the first real bytes that ticket has to test against.

@@ -8,7 +8,7 @@
 //! Around those it records what explains a session's life: the Peer protocol's
 //! other messages, the session settings the game sets, the system messages the
 //! game is handed, failed sends, and lost connections.
-//! `docs/traffic-capture.md` describes the format.
+//! `docs/contributors/traffic-capture.md` describes the format.
 //!
 //! Nothing here changes what the Helper sends or delivers. Lines go to a writer
 //! thread, so the message path only formats a line and hands it over.

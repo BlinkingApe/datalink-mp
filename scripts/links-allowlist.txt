@@ -18,3 +18,7 @@ docs/archive/*
 
 # Capture folders are gitignored, so they never appear in the index.
 *   (^|/)captures/?$
+
+# ADR-0001 describes the seed project's layout, where the Helper was
+# crates/smac-helper. The folder is deleted; the ADR keeps the history.
+docs/adr/0001-web-ui-frontend.md   ^crates/smac-helper$

@@ -8,7 +8,7 @@
 
 Leads, unconfirmed:
 
-- Ticket 06 (the leaked-Game-session defect, since moved to the [game-session-sync map](../../game-session-sync/map.md)) already found that `GetSessionDesc` can hand the game a session description whose `lpszSessionName` is null (`crates/dplayx/src/directplay.rs`, around line 1468, marked "Caller must handle"). That investigation decided the null name wasn't the cause of the `Net::send` crash it was looking at, and left it as "a known oddity, not a cause." This ticket's repeated, cross-machine blank-name report is evidence that oddity is real and visible to players, even if harmless so far.
+- Ticket 06 (the leaked-Game-session defect, since moved to the [game-session-sync map](../../../game-session-sync/map.md)) already found that `GetSessionDesc` can hand the game a session description whose `lpszSessionName` is null (`crates/dplayx/src/directplay.rs`, around line 1468, marked "Caller must handle"). That investigation decided the null name wasn't the cause of the `Net::send` crash it was looking at, and left it as "a known oddity, not a cause." This ticket's repeated, cross-machine blank-name report is evidence that oddity is real and visible to players, even if harmless so far.
 
 Needed:
 
@@ -34,6 +34,6 @@ Needed:
 
 - Only the host's game's CREATEPLAYERORGROUP is held back. Between the JoinRequest and the joiner's CreatePlayer (milliseconds), the host's `EnumPlayers`, `GetPlayerName` and the session's player count already include the nameless joiner, and so does the roster a later joiner gets in its `JoinResponse`. That was also true before the fix.
 - Other joiners' Helpers still hand `PlayerJoined` to their games at the JoinRequest, unnamed. By the disassembly above, joiners don't register players from CREATEPLAYERORGROUP but copy the host's roster, so this should be harmless. A game with three or more players would confirm it: every row named on every screen.
-- A joiner whose connection drops without a `PlayerLeft` is never removed from the host's roster. That's the same for named joiners and belongs to the [game-session-sync map](../../game-session-sync/map.md), not this ticket.
+- A joiner whose connection drops without a `PlayerLeft` is never removed from the host's roster. That's the same for named joiners and belongs to the [game-session-sync map](../../../game-session-sync/map.md), not this ticket.
 
 **2026-10-04 (maintainer, recorded by agent):** Confirmed on `v0.1.0-rc.5`: the Joiner's name now shows. Closing.

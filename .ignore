@@ -1,0 +1,6 @@
+# Hides archived material from ripgrep-based search (ripgrep, Claude Code's
+# Grep and Glob), so stale history isn't read as current. The files are still
+# tracked; search them on purpose with `rg --no-ignore --hidden` or by naming
+# the path.
+/.scratch/archive/
+/docs/archive/

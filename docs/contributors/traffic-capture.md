@@ -76,9 +76,8 @@ Fields:
 - `type`, `faction`: only when `kind` has bit `0x4` (data). `type` is the game's message type, the u16 at offset 8, as a hex string such as `"0x2303"`. `faction` is the sender's faction, the u32 at offset 12. Acks have neither, because the bytes after an ack's header are never written.
 
 All values are little-endian. These offsets come from
-`docs/research/smac-jackal-turn-sync.md` (on branch
-`research/smac-jackal-turn-sync`) and still need checking against a real
-capture. `hex` keeps the raw bytes, so a different reading can be applied later.
+[the JACKAL write-up](../archive/research/smac-jackal-turn-sync.md) and still
+need checking against a real capture. `hex` keeps the raw bytes, so a different reading can be applied later.
 
 To find retransmits, look for the same sender (`peer` for `in`, the capturing
 side for `out`), `kind` 4 and `seq` more than once. To pair a data message with

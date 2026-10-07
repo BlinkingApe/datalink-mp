@@ -23,7 +23,7 @@ EXE="$GAME_DIR/terran_PRACX.exe"
 [ -d "$BOTTLE" ]      || { echo "error: bottle not found: $BOTTLE" >&2; exit 1; }
 [ -x "$WHISKY_WINE" ] || { echo "error: Whisky wine64 not found: $WHISKY_WINE" >&2; exit 1; }
 [ -f "$EXE" ]         || { echo "error: terran_PRACX.exe not found in $GAME_DIR (install PRACX)" >&2; exit 1; }
-[ -f "$GAME_DIR/dplayx.dll" ] || { echo "error: dplayx.dll not installed in $GAME_DIR (see docs/building.md)" >&2; exit 1; }
+[ -f "$GAME_DIR/dplayx.dll" ] || { echo "error: dplayx.dll not installed in $GAME_DIR (see docs/contributors/building.md)" >&2; exit 1; }
 
 export WINEPREFIX="$BOTTLE"
 export WINEDEBUG="${WINEDEBUG:-fixme-all}"

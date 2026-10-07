@@ -10,7 +10,7 @@ open ports) that are useless across today's NATed internet.
 The obvious modern fix — put a P2P library inside a replacement `dplayx.dll` —
 does not work: tokio (which Iroh needs) cannot run under Wine at all. mio's
 Windows backend requires `\Device\Afd`-based IOCP that Wine does not implement
-(see [wine-compatibility.md](wine-compatibility.md)). So the networking must
+(see [wine-compatibility.md](../players/wine-compatibility.md)). So the networking must
 live *outside* Wine.
 
 ## The design

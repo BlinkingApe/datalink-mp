@@ -28,3 +28,9 @@ docs/archive/*
 scripts/check-old-names.sh
 scripts/old-names-allowlist.txt
 scripts/test-proof-scripts.sh
+
+# The release archives still ship the README as datalink-mp-README.txt, copied
+# from packaging/README.txt (spec, "Release workflow"). Only the lines that name
+# the shipped file are allowed.
+.github/workflows/release.yml   COMMON=\(|cp packaging/README\.txt
+docs/maintainers/releasing.md   name `datalink-mp-README\.txt`
