@@ -38,3 +38,15 @@ Spec: [../../repo-layout/spec.md](../../repo-layout/spec.md), and the decision t
 - `docs/release-notes/0.1.1.md:16`, a `blob/main/docs/contributors/traffic-capture.md` URL that resolves once `layout` reaches `main`. The published v0.1.1 Release body still links the old `blob/main/docs/traffic-capture.md` and needs a hand edit after merge.
 
 No grep hits remain outside the allowlist.
+
+### Code review fixes
+
+2026-10-07, after review of the proof scripts and docs. Each script fix has a failing case in `scripts/test-proof-scripts.sh` first (29 tests, all pass).
+
+- `scripts/check-old-names.sh`: a git grep error (exit above 1, or anything on stderr, such as an unreadable file) now fails with exit 2 instead of reporting "0 hits"; the allowlist's last entry is read when the file has no final newline; a pathspec matching no tracked file is an error (exit 2); `--all` works in any position; `-h`/`--help` prints the header usage.
+- `scripts/check-links.py`: links with single-quoted or parenthesised titles are checked; fences follow CommonMark (a fence closes only on its own character, at least as long, with nothing after), so a ``` line inside a ~~~ block no longer flips it; a path naming no tracked file is an error (exit 2); `--all` works in any position; `-h`/`--help` prints usage.
+- Both script headers name the effort (repo-layout-build 04) and `CONTRIBUTING.md`'s Checks section instead of the spec path, which moves on archive.
+- `docs/adr/0001-web-ui-frontend.md`: `iroh_transport::Ticket::parse` is now `datalink_transport::Ticket::parse` (crate path only).
+- `docs/archive/README.md`: says relative links in archived files were fixed so they resolve, while backticked paths and crate names keep their old names; notes that `prototype/turn-sync-activity` is still live (internet-play-speed-build 12) with its tip equal to the tag.
+
+Rerun: `scripts/check-old-names.sh` 0 not allowlisted, 166 allowlisted, exit 0; `scripts/check-links.py` 0 broken not allowlisted, 430 allowlisted, 5 branch references (the same 5 as above), exit 0. On the current tree the new link checker's `--all` output is identical to the old one's.

@@ -5,9 +5,10 @@ are under `docs/players/`, `docs/contributors/` and `docs/maintainers/`. The roo
 `.ignore` hides this folder and `.scratch/archive/` from ripgrep-based search,
 so look here on purpose (`rg --no-ignore --hidden`, or name the path).
 
-Archived files keep the paths and names they were written with, so their links
-may point at files that have since moved. The tables below map old paths to
-new ones.
+Relative links in archived files were fixed when they were archived, so they
+resolve. Paths and crate names in backticks in the prose keep the names they
+were written with, and may name files that have since moved. The tables below
+map old paths to new ones.
 
 To get an old file back, check it out from the tag in the last column:
 `git show pre-layout:<old path>` prints it, and
@@ -54,6 +55,9 @@ commit before the 2026-10 repo layout change.
 | `research/macos-artifact` | `archive/research-macos-artifact` |
 | `research/av-risk` | `archive/research-av-risk` |
 | `prototype/turn-sync-activity` | `archive/prototype-turn-sync-activity` |
+
+The `prototype/turn-sync-activity` branch itself still exists as live work
+(internet-play-speed-build 12); its tip equals the tag.
 
 ## Moved live files
 

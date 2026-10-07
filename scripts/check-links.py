@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Check that relative links in the repo's markdown resolve (.scratch/repo-layout/spec.md, "Proof").
+"""Check that relative links in the repo's markdown resolve (repo-layout-build
+04; see the Checks section of CONTRIBUTING.md).
 
 Usage:
-  scripts/check-links.py [--all] [<path>...]
+  scripts/check-links.py [--all] [-h|--help] [<path>...]
 
 Reads the tracked *.md files at the root (README, CONTRIBUTING, CLAUDE.md, ...),
 under docs/ (ADRs included) and under .scratch/, and checks against the index
@@ -25,9 +26,11 @@ prototype/, capture/, origin/, upstream/ or worktree-agent- name) for review by
 hand, then a summary. Exits 1 if any broken link remains; branch references
 alone don't fail.
 
-  --all    also print allowlisted broken links and branch references,
-           prefixed "allowed "
-  <path>   check only these files or folders
+  --all       also print allowlisted broken links and branch references,
+              prefixed "allowed " (any position)
+  -h, --help  print this usage and exit
+  <path>      check only these files or folders; one that names no tracked
+              file is an error (exit 2)
 
 The allowlist is scripts/links-allowlist.txt (LINKS_ALLOWLIST overrides it), in
 the format of scripts/old-names-allowlist.txt; an entry's regex (Python syntax)
@@ -46,11 +49,17 @@ ROOT = subprocess.run(["git", "rev-parse", "--show-toplevel"],
 # Markdown files in scope: root *.md, docs/ (ADRs included) and .scratch/.
 SCOPE = re.compile(r"^([^/]+\.md|docs/.+\.md|\.scratch/.+\.md)$")
 
-LINK = re.compile(r"!?\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)(?:\s+\"[^\"]*\")?\s*\)")
+# A link title may be "double-quoted", 'single-quoted' or (parenthesised).
+LINK = re.compile(r"!?\[[^\]]*\]\(\s*(<[^>]*>|[^)\s]+)"
+                  r"(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^)]*\)))?\s*\)")
 REF_DEF = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*(\S+)")
 HTML_ATTR = re.compile(r"\b(?:src|href)=\"([^\"]+)\"")
 CODE_SPAN = re.compile(r"(`+)(.+?)\1")
-FENCE = re.compile(r"^\s{0,3}(```|~~~)")
+# CommonMark fences: an opening run of 3+ backticks (info string without
+# backticks) or tildes; it closes only on a run of the same character at least
+# as long, with nothing but spaces after it.
+FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}(?=[^`]*$)|~{3,})")
+FENCE_CLOSE = re.compile(r"^ {0,3}(`{3,}|~{3,})[ \t]*$")
 SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
 
 # Branch references: a GitHub URL into this repo (any remote) at a ref that
@@ -196,29 +205,43 @@ def check_line(line, here, tree):
             yield "broken", target, target
 
 
+def under(path, prefix):
+    return path == prefix or path.startswith(prefix.rstrip("/") + "/")
+
+
 def main(argv):
-    show_allowed = bool(argv) and argv[0] == "--all"
-    if show_allowed:
-        argv = argv[1:]
-    only = [os.path.relpath(os.path.abspath(a), ROOT) for a in argv]
+    if "-h" in argv or "--help" in argv:
+        print(__doc__.strip())
+        return 0
+    show_allowed = "--all" in argv
+    args = [a for a in argv if a != "--all"]
+    only = [os.path.relpath(os.path.abspath(a), ROOT) for a in args]
     allowlist = read_allowlist(os.environ.get(
         "LINKS_ALLOWLIST", os.path.join(ROOT, "scripts", "links-allowlist.txt")))
     files = tracked()
+    for arg, o in zip(args, only):
+        if not any(under(p, o) for p in files):
+            print(f"check-links: {arg} names no tracked file", file=sys.stderr)
+            return 2
     tree = Tree(files)
     broken, excused, branches = [], [], []
     for path in files:
         if not SCOPE.match(path):
             continue
-        if only and not any(path == o or path.startswith(o.rstrip("/") + "/") for o in only):
+        if only and not any(under(path, o) for o in only):
             continue
         here = os.path.dirname(path)
-        fenced = False
+        fence = None  # the open fence's run, such as ``` or ~~~~
         with open(os.path.join(ROOT, path), encoding="utf-8") as f:
             for n, line in enumerate(f, 1):
-                if FENCE.match(line):
-                    fenced = not fenced
+                if fence is not None:
+                    m = FENCE_CLOSE.match(line)
+                    if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
+                        fence = None
                     continue
-                if fenced:
+                m = FENCE_OPEN.match(line)
+                if m:
+                    fence = m.group(1)
                     continue
                 for kind, target, shown in check_line(line, here, tree):
                     found = f"{path}:{n}: {shown}"

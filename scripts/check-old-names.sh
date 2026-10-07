@@ -1,23 +1,34 @@
 #!/bin/bash
-# Find old names left behind by the repo layout change (.scratch/repo-layout/spec.md, "Proof").
+# Find old names left behind by the repo layout change (repo-layout-build 04;
+# see the Checks section of CONTRIBUTING.md).
 #
 # Usage:
-#   scripts/check-old-names.sh [--all] [<pathspec>...]
+#   scripts/check-old-names.sh [--all] [-h|--help] [<pathspec>...]
 #
 # Searches tracked files for the pre-layout crate names (ipc-protocol,
 # iroh-transport, smac-fixes, mock-dp-client, in hyphen and underscore form),
 # datalink-mp-README.txt and tools/. Prints each hit that the allowlist doesn't
 # cover as path:line: text, then a summary. Exits 1 if any such hit remains.
 #
-#   --all        also print allowlisted hits, prefixed "allowed "
-#   <pathspec>   search only these paths (git pathspecs), e.g. .scratch/foo/
+#   --all        also print allowlisted hits, prefixed "allowed " (any position)
+#   -h, --help   print this usage and exit
+#   <pathspec>   search only these paths (git pathspecs), e.g. .scratch/foo/;
+#                one that matches no tracked file is an error (exit 2)
 #
 # The allowlist is scripts/old-names-allowlist.txt (OLD_NAMES_ALLOWLIST
 # overrides it); its header explains the format.
 set -euo pipefail
 
 ALL=false
-if [[ "${1:-}" == --all ]]; then ALL=true; shift; fi
+SPECS=()
+for arg in "$@"; do
+  case "$arg" in
+    --all) ALL=true ;;
+    -h|--help) sed -n '2,/^set -euo/{/^set -euo/d;s/^# \{0,1\}//;p}' "$0"; exit 0 ;;
+    *) SPECS+=("$arg") ;;
+  esac
+done
+set -- ${SPECS[@]+"${SPECS[@]}"}
 
 ROOT="$(git rev-parse --show-toplevel)"
 
@@ -29,7 +40,7 @@ PATTERN="$EDGE$CRATES([^[:alnum:]]|\$)|datalink-mp-README\.txt|${EDGE}tools/"
 
 ALLOWLIST="${OLD_NAMES_ALLOWLIST:-$ROOT/scripts/old-names-allowlist.txt}"
 GLOBS=() REGEXES=()
-while IFS= read -r entry; do
+while IFS= read -r entry || [[ -n "$entry" ]]; do
   entry="${entry%%[[:space:]]#*}"
   [[ "$entry" =~ ^[[:space:]]*(#|$) ]] && continue
   read -r glob regex <<< "$entry"
@@ -54,6 +65,26 @@ allowed() {
   return $ok
 }
 
+# A pathspec that names no tracked file is a typo, not a clean result.
+for spec in "$@"; do
+  if ! git ls-files --error-unmatch -- "$spec" > /dev/null 2>&1; then
+    echo "check-old-names: pathspec '$spec' matches no tracked file" >&2
+    exit 2
+  fi
+done
+
+# git grep exits 1 for no matches; anything above that is a real error. It
+# also exits 0 or 1 after a file it couldn't read, so any stderr is one too.
+HITS="$(mktemp)" ERRS="$(mktemp)"
+trap 'rm -f "$HITS" "$ERRS"' EXIT
+STATUS=0
+git grep -I -n -z --full-name -E "$PATTERN" -- "$@" > "$HITS" 2> "$ERRS" || STATUS=$?
+if (( STATUS > 1 )) || [[ -s "$ERRS" ]]; then
+  cat "$ERRS" >&2
+  echo "check-old-names: git grep failed (exit $STATUS)" >&2
+  exit 2
+fi
+
 FOUND=0 ALLOWED=0
 while IFS= read -r -d '' path && IFS= read -r -d '' line && IFS= read -r text; do
   if allowed "$path" "$text"; then
@@ -63,7 +94,7 @@ while IFS= read -r -d '' path && IFS= read -r -d '' line && IFS= read -r text; d
     FOUND=$((FOUND + 1))
     echo "$path:$line: $text"
   fi
-done < <(git grep -I -n -z --full-name -E "$PATTERN" -- "$@" || true)
+done < "$HITS"
 
 echo "$FOUND hit(s) not on the allowlist, $ALLOWED allowlisted"
 [[ $FOUND -eq 0 ]]

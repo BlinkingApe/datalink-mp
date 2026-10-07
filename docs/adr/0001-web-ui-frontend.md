@@ -82,7 +82,7 @@ All endpoints require the token (header `X-Token`; the page moves it from the la
 - `POST /api/stop`: leave the session, new Transport, new Ticket
 - `POST /api/quit`
 
-**Ticket validation:** `iroh_transport::Ticket::parse` (`ticket.rs`), with no I/O. **Trim whitespace first** (parse doesn't). Also reject our own Ticket, and warn when a Ticket carries no addresses.
+**Ticket validation:** `datalink_transport::Ticket::parse` (`ticket.rs`), with no I/O. **Trim whitespace first** (parse doesn't). Also reject our own Ticket, and warn when a Ticket carries no addresses.
 
 **Observability:** keep one shared status struct, written at the existing sites:
 - DLL connect/disconnect in `main.rs`

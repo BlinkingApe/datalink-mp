@@ -124,6 +124,35 @@ check "grep --all also lists allowlisted hits" \
   "$(has 'allowed docs/adr/0001.md:1:')" "$(has 'docs/live.md:1:')"
 run "$D" "$GREP" docs/adr/
 check "grep with a pathspec searches only those paths" "$(code 0)"
+run "$D" "$GREP" docs/adr/ --all
+check "grep accepts --all after a pathspec" \
+  "$(code 0)" "$(has 'allowed docs/adr/0001.md:1:')" "$(lacks 'docs/live.md')"
+for flag in -h --help; do
+  run "$D" "$GREP" docs/ "$flag"
+  check "grep $flag prints usage and exits 0" \
+    "$(code 0)" "$(has 'Usage:')" "$(has 'scripts/check-old-names.sh [--all]')" "$(lacks 'hit(s)')"
+done
+
+D="$(fixture 'README.md=nothing old here' 'docs/x.md=smac-fixes')"
+chmod 000 "$D/docs/x.md"
+run "$D" "$GREP"
+chmod 644 "$D/docs/x.md"
+check "grep fails when git grep itself fails, rather than reporting no hits" \
+  "$(code 2)" "$(lacks 'hit(s)')"
+run "$D" "$GREP" ../
+check "grep fails on a pathspec outside the repository" \
+  "$(code 2)" "$(lacks 'hit(s)')"
+
+D="$(fixture 'docs/y.md=smac-fixes')"
+printf 'docs/*' > "$D/.allow"
+run "$D" "$GREP"
+check "grep reads an allowlist's last entry when the file lacks a final newline" \
+  "$(code 0)" "$(lacks 'docs/y.md:1:')"
+
+D="$(fixture 'docs/y.md=nothing old here')"
+run "$D" "$GREP" docs/ no-such-dir/
+check "grep fails on a pathspec that matches no tracked file" \
+  "$(code 2)" "$(has 'no-such-dir/')" "$(lacks 'hit(s)')"
 
 # --- check-links.py ---
 
@@ -145,6 +174,28 @@ run "$D" "$LINKS"
 check "links: resolves dirs, %20, <>, images and src=, skips URLs, anchors and code" \
   "$(has 'docs/index.md:3: img/missing.png')" "$(has 'docs/index.md:4: ../nowhere.md')" \
   "$(lacks 'example.com')" "$(lacks 'mailto')" "$(lacks ':2:')" "$(lacks 'gone')"
+
+D="$(fixture 'docs/x.md=x' "docs/t.md=[a](gone1.md 'T') [b](gone2.md (T)) [c](gone3.md \"T\") [d](x.md 'T') [e](x.md (T))")"
+run "$D" "$LINKS"
+check "links: checks links with double-quoted, single-quoted and parenthesised titles" \
+  "$(code 1)" "$(has 'docs/t.md:1: gone1.md')" "$(has 'docs/t.md:1: gone2.md')" \
+  "$(has 'docs/t.md:1: gone3.md')" "$(has '3 broken link(s)')"
+
+D="$(fixture 'docs/f.md=~~~
+```
+[in](gone1.md)
+~~~
+[after](out1.md)
+````md
+```
+[in](gone2.md)
+```` not a close, it has text
+[in](gone3.md)
+````
+[after](out2.md)')"
+run "$D" "$LINKS"
+check "links: a fence closes only on its own character, at least as long, with nothing after" \
+  "$(code 1)" "$(lacks 'gone')" "$(has 'docs/f.md:5: out1.md')" "$(has 'docs/f.md:12: out2.md')"
 
 D="$(fixture 'docs/x.md=x' 'crates/a/src/lib.rs=x' '.scratch/e/analysis/x.py=x' '.scratch/e/map.md=x' \
   '.scratch/e/issues/01.md=Gone: `docs/gone.md`, `crates/old/`, `crates/a/src/nope.rs`.
@@ -189,5 +240,17 @@ check "links: --all also lists allowlisted broken links" \
 run "$D" "$LINKS" .scratch/live/a.md .scratch/archive/
 check "links: path arguments limit the files checked" \
   "$(code 1)" "$(lacks 'b.md')" "$(has '1 broken link(s)')"
+run "$D" "$LINKS" .scratch/live/a.md --all
+check "links: --all is accepted after a path" \
+  "$(code 1)" "$(has '.scratch/live/a.md:1: `docs/gone.md`')" "$(has 'allowed .scratch/live/a.md:1: `.scratch/live/captures/`')" \
+  "$(lacks 'b.md')"
+run "$D" "$LINKS" .scratch/live/ .scratch/no-such/
+check "links: a path that names no tracked file is an error" \
+  "$(code 2)" "$(has '.scratch/no-such/')" "$(lacks 'broken link(s)')"
+for flag in -h --help; do
+  run "$D" "$LINKS" .scratch/live/ "$flag"
+  check "links: $flag prints usage and exits 0" \
+    "$(code 0)" "$(has 'Usage:')" "$(has 'scripts/check-links.py [--all]')" "$(lacks 'broken link(s)')"
+done
 
 exit "$FAILED"
