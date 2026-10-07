@@ -2,7 +2,7 @@
 
 Play **Sid Meier's Alpha Centauri** (1999) online with your friends. No port
 forwarding, no VPN, no IPX emulator: one of you shares a Ticket, the others
-paste it, and you are connected.
+paste it, and you are connected - works on Windows, Linux, and Mac, in any mix: a Windows host can play with Linux and Mac friends.
 
 <p align="center"><img src="docs/players/images/page-connected.png" width="600" alt="The datalink-mp page with steps 1 to 3 ticked green, the game connected and three friends' Helpers connected"></p>
 
