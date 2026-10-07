@@ -1,3 +1,6 @@
 /target
 *.log
 .DS_Store
+
+# Raw captures can hold peers' IP addresses and iroh node IDs; keep them local.
+.scratch/**/captures/
