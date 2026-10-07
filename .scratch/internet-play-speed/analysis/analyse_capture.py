@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Analyse a traffic capture (docs/traffic-capture.md, format 1) for Turn sync timing.
+"""Analyse a traffic capture (docs/contributors/traffic-capture.md, format 1) for Turn sync timing.
 
 Usage:  python3 analyse_capture.py <capture.jsonl> [peer]
 

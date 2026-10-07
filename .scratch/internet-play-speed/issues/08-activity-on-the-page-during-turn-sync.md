@@ -15,7 +15,7 @@ ADR-0004's step 4 shows activity on the page, such as "Receiving turn data from 
 
 ## Answer
 
-2026-10-06. Decided from the prototype on branch `prototype/turn-sync-activity` (`prototype/turn-sync-activity/serve.py`, five variants over a scripted Turn sync on the real `page.html`).
+2026-10-06. Decided from the prototype at tag `archive/prototype-turn-sync-activity` (its `serve.py`, five variants over a scripted Turn sync on the real `page.html`).
 
 **Priority is low.** The maintainer's view: players are in the game during a Turn sync, and never look at the Helper. So build the decided version below cheaply, and don't let it hold up the speed fixes. Of everything here, the tab title is the part most likely to be seen.
 

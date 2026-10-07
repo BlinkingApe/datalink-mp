@@ -4,11 +4,11 @@ Type: research
 Status: resolved
 Blocked by:
 
-Research: branch `research/smac-jackal-turn-sync` (commit `c9045fb`), file `docs/research/smac-jackal-turn-sync.md`.
+Research: `docs/archive/research/smac-jackal-turn-sync.md` (commit `c9045fb`).
 
 ## Question
 
-SMAC's own network layer (JACKAL, per `docs/ARCHITECTURE.md`) runs its own reliability over DirectPlay: sequence numbers, acks and retransmits. What can public sources tell us about it? Look at Thinker's source and docs, OpenSMACX or other decompilation projects, PRACX, and community write-ups.
+SMAC's own network layer (JACKAL, per `docs/contributors/architecture.md`) runs its own reliability over DirectPlay: sequence numbers, acks and retransmits. What can public sources tell us about it? Look at Thinker's source and docs, OpenSMACX or other decompilation projects, PRACX, and community write-ups.
 
 - **Reliability:** is it stop-and-wait or windowed? What window size, and what ack and retransmit timeouts? If acks are slow (for example, over a Relayed connection), does it resend whole messages?
 - **Turn sync:** what does the game send between turns? The whole game state, per-faction deltas, or something else? In what size of messages, and in which order?
@@ -19,7 +19,7 @@ It's fine if the answer is "nothing public". Say so, and say which sources were 
 
 ## Answer
 
-Resolved 2026-10-06. Nothing public describes JACKAL's transport. Thinker names the functions and decompiles the turn loop; OpenSMACX only names JACKAL; PRACX has no network code; the Apolyton threads are anecdotes. So the transport was read by disassembling `terranx.exe` v2.0, the binary every player has. The details, each marked fact or inference, and how to reproduce the disassembly, are in `docs/research/smac-jackal-turn-sync.md` on branch `research/smac-jackal-turn-sync`.
+Resolved 2026-10-06. Nothing public describes JACKAL's transport. Thinker names the functions and decompiles the turn loop; OpenSMACX only names JACKAL; PRACX has no network code; the Apolyton threads are anecdotes. So the transport was read by disassembling `terranx.exe` v2.0, the binary every player has. The details, each marked fact or inference, and how to reproduce the disassembly, are in `docs/archive/research/smac-jackal-turn-sync.md`.
 
 - **Reliability is strict stop-and-wait: a window of one message** (fact). Each reliable send blocks the game until **every** recipient acks it, or until 20 s pass ("SEND MESSAGE TIME EXPIRED"). An ack is a 12-byte echo of the header, and it's itself a game message passing through the Helpers. The game sends with `dwFlags = 0`, so all reliability is its own.
 - **Slow acks mean whole-message resends** (fact), with ×1.5 backoff. The first retransmit timeout is `DPCAPS.dwLatency`, which **our DLL hardcodes to 50 ms** (`crates/dplayx/src/directplay.rs:1166`, confirmed). It then adapts as `(sample + old + 20) / 2`. Inference: on a 250 ms relayed link that's up to 3 spurious resends per message, and the timeout can settle below the true RTT.

@@ -6,7 +6,7 @@
 
 **Status:** ready-for-agent
 
-- [ ] New capture lines appear as described, documented in `docs/traffic-capture.md`
+- [ ] New capture lines appear as described, documented in `docs/contributors/traffic-capture.md`
 - [ ] The analysis reports hop time, network time and delivery-check results on a capture with early acks
 - [ ] The Turn sync log lines carry the new fields
 - [ ] A sample capture exercises the delivery check, including a failing case

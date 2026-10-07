@@ -22,3 +22,7 @@ docs/archive/*
 # ADR-0001 describes the seed project's layout, where the Helper was
 # crates/smac-helper. The folder is deleted; the ADR keeps the history.
 docs/adr/0001-web-ui-frontend.md   ^crates/smac-helper$
+
+# Internet-play-speed 09 plans a new module that the build creates
+# (internet-play-speed-build 07); the path is right, the file doesn't exist yet.
+.scratch/internet-play-speed/issues/09-helper-acks-for-the-friends-game.md   ^crates/datalink-transport/src/early_ack\.rs$

@@ -20,8 +20,8 @@ Decide which one ships, and for the automatic one, what the Joiner's page shows 
 
 ## Facts from the code (2026-10-06)
 
-- The peer protocol already has `Message::SessionAnnounce { session: SessionInfo }`, documented as "host broadcasts this" (`crates/iroh-transport/src/protocol.rs`). A receiving Helper already handles it: it records the session as discovered and raises `ReceivedMessage::SessionDiscovered` (`crates/iroh-transport/src/connection.rs`). Nothing sends it today, except a test. There is no message for "Game session closed while the Helpers stay connected"; `SessionClosed` is what the Host's Helper sends when its game's session ends.
-- A Joiner's Join Game today runs `enum_sessions`, which queries every connected peer with `SessionQuery` and waits for `SessionList` (`crates/iroh-transport/src/runtime.rs`). So a Joiner's Helper can already ask the Host's Helper whether a Game session exists. It just doesn't, until the game asks.
+- The peer protocol already has `Message::SessionAnnounce { session: SessionInfo }`, documented as "host broadcasts this" (`crates/datalink-transport/src/protocol.rs`). A receiving Helper already handles it: it records the session as discovered and raises `ReceivedMessage::SessionDiscovered` (`crates/datalink-transport/src/connection.rs`). Nothing sends it today, except a test. There is no message for "Game session closed while the Helpers stay connected"; `SessionClosed` is what the Host's Helper sends when its game's session ends.
+- A Joiner's Join Game today runs `enum_sessions`, which queries every connected peer with `SessionQuery` and waits for `SessionList` (`crates/datalink-transport/src/runtime.rs`). So a Joiner's Helper can already ask the Host's Helper whether a Game session exists. It just doesn't, until the game asks.
 - The Joiner's step 3 is `<h2>Start the game</h2>` with the menu hint "Multiplayer → Iroh P2P → Join Game" (`crates/datalink-mp/src/page.html`).
 
 ## Answer

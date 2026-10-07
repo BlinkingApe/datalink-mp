@@ -10,7 +10,7 @@ A decision, per originating defect (release-pipeline 06, 08, 09 and 10), on whet
 
 - Domain: Rust workspace; see `CONTEXT.md` (Helper, DLL, **Game session**, Ticket, IPC version, Peer protocol version) and the helper-web-ui spec's "Session model" and "Shared status and banners" sections — the currently accepted behavior this map may revise. `docs/adr/0001-web-ui-frontend.md` covers Stop's intent.
 - Tracker: local markdown, this directory.
-- Pulled out of release-pipeline: tickets 06, 08, 09 and 10 originated there (`../release-pipeline/issues/`), where each has the original repro detail and dated history; release-pipeline ticket 04 (the gate) now blocks on this map's resolution instead of on those tickets directly. Ticket 07 (Joiner's in-game name blank) was considered and left out: a data field not making it across doesn't obviously implicate session lifecycle.
+- Pulled out of release-pipeline: tickets 06, 08, 09 and 10 originated there (`../archive/release-pipeline/issues/`), where each has the original repro detail and dated history; release-pipeline ticket 04 (the gate) now blocks on this map's resolution instead of on those tickets directly. Ticket 07 (Joiner's in-game name blank) was considered and left out: a data field not making it across doesn't obviously implicate session lifecycle.
 - Standing preference (revised 2026-10-05): Stop mid-game already warns the player. Proceeding past that warning is not our problem, even when it crashes the other player's game. The warning must say so (see ticket 04). It was first set as "may cost the Game session, but must not crash the other game"; the maintainer revised it after `-rc.6`.
 - Skills for grilling tickets: `grilling` + `domain-modeling`.
 

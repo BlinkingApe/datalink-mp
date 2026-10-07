@@ -14,7 +14,7 @@ This is probably also the cause of the old release-pipeline ticket 08, one of th
 
 Two Helper defects add up to this:
 
-1. **A Joiner's close is sent as the end of the whole session.** `Transport::close_session` (`crates/iroh-transport/src/runtime.rs`) broadcasts `Message::SessionClosed { reason: "Host closed session" }` whatever this Helper's role is. A Joiner's Helper closes when its game calls `Close`, and also from `SessionController::dll_disconnected` when the game quits without closing (the ticket 06 fix). Either way, every peer is told the session is over. The host's Helper turns that into `DPSYS_SESSIONLOST` for the host's game (`convert_received_to_queued`, `ReceivedMessage::SessionClosed`). Real DirectPlay does differently: a non-host's Close sends `DPSYS_DESTROYPLAYERORGROUP` for its players, and only the host going away loses the session.
+1. **A Joiner's close is sent as the end of the whole session.** `Transport::close_session` (`crates/datalink-transport/src/runtime.rs`) broadcasts `Message::SessionClosed { reason: "Host closed session" }` whatever this Helper's role is. A Joiner's Helper closes when its game calls `Close`, and also from `SessionController::dll_disconnected` when the game quits without closing (the ticket 06 fix). Either way, every peer is told the session is over. The host's Helper turns that into `DPSYS_SESSIONLOST` for the host's game (`convert_received_to_queued`, `ReceivedMessage::SessionClosed`). Real DirectPlay does differently: a non-host's Close sends `DPSYS_DESTROYPLAYERORGROUP` for its players, and only the host going away loses the session.
 2. **Messages outlive the session they belong to.** The game's inbox (the Transport's `message_rx` channel and its `message_queue`) is never emptied when a session closes or a new one starts. When the host's game has already quit, the Joiner's `SessionClosed` waits there. The next game the host starts is handed it once it has hosted again.
 
 The likely chain in today's run: the host's game hosts again and reads the stale `DPSYS_SESSIONLOST`. It stops hosting (unconfirmed: probably by calling `Close`). The host's Helper then answers the Joiner's `SessionQuery` with nothing, because only a hosting Helper answers one. The Joiner finds no game. In ticket 08's run, the same message reached the live host game directly, with the same result.
@@ -23,7 +23,7 @@ A third, smaller oddity, unconfirmed whether it matters: a Joiner's Helper that 
 
 ## Tests
 
-Both are in `crates/iroh-transport/tests/mesh_networking.rs`, marked `#[ignore = "fails until game-session-sync ticket 03 is fixed"]`. Remove the `#[ignore]` as part of the fix. Run them with `cargo test -p iroh-transport --test mesh_networking -- --ignored`.
+Both are in `crates/datalink-transport/tests/mesh_networking.rs`, marked `#[ignore = "fails until game-session-sync ticket 03 is fixed"]`. Remove the `#[ignore]` as part of the fix. Run them with `cargo test -p datalink-transport --test mesh_networking -- --ignored`.
 
 - `test_joiner_that_closes_tells_the_host_its_player_left_not_that_the_session_is_lost` fails today: the host's game hears `DPSYS_SESSIONLOST` and never a `DESTROYPLAYERORGROUP` for the Joiner.
 - `test_messages_from_a_closed_session_do_not_reach_the_next_game_the_host_hosts` fails today: after both close and the host hosts again, the new session's game is handed `DPSYS_SESSIONLOST` (0x31).

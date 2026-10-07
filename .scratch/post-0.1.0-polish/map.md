@@ -17,7 +17,7 @@ A scoped, decided plan for the first post-0.1.0 polish round: which UI/UX ideas 
 
 - **20, 22 and 24 need no further decision.** Each is already fully specified; they carry over as settled scope, unordered relative to each other (ordering is an implementation-time call):
   - [Show the host's connected-peer count earlier](issues/01-show-friends-connected-earlier.md) (was helper-web-ui ticket 20): surface the peer count at step 2, not just step 4.
-  - [Document that Simultaneous Moves needs Joiners to click Make Ready](issues/02-document-make-ready-for-simultaneous-moves.md) (was helper-web-ui ticket 22): a line on the page or in `datalink-mp-README.txt`.
+  - [Document that Simultaneous Moves needs Joiners to click Make Ready](issues/02-document-make-ready-for-simultaneous-moves.md) (was helper-web-ui ticket 22): a line on the page or in `packaging/README.txt`.
   - [Clarify the quarantine sentence in the not_game_folder banner](issues/03-quarantine-banner-wording.md) (was helper-web-ui ticket 24): say plainly that the folder is right and only the DLL is missing.
 - **Term: Host is hostable**, for the condition ticket 21 is about (the Host's game has reached the point where it can accept a Join). Avoids colliding with the Helper's own `ready` connection-state value, which means something else (no peers, no dial in progress).
 - **Ticket 21's design question stays unanswered for now.** The automatic-signal-vs-manual-signal choice depends on what the Helper-to-Helper status channel looks like once the [game-session-sync map](../game-session-sync/map.md)'s work lands — deciding today risks deciding against a foundation that's about to move.

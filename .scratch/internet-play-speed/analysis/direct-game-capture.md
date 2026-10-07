@@ -26,7 +26,7 @@ Look for message types. Idle gaps don't work: a Turn sync has idle gaps of up to
 
 Both Helpers see all of these (the Joiner receives the `0x43xx` broadcasts), so either side can tell a Turn sync is running, and which phase it's in.
 
-A correction to [the JACKAL research](../../../docs/research/smac-jackal-turn-sync.md) (on branch `research/smac-jackal-turn-sync`) §3.1, which reads `0x4309` and `0x8301`/`0x4301` as belonging to different modes: this one-player-at-a-time game used both. `0x4309` hands the turn from one player to the next within a turn, and `0x8301`/`0x4301` end the turn. A simultaneous-moves game hasn't been captured.
+A correction to [the JACKAL research](../../../docs/archive/research/smac-jackal-turn-sync.md) §3.1, which reads `0x4309` and `0x8301`/`0x4301` as belonging to different modes: this one-player-at-a-time game used both. `0x4309` hands the turn from one player to the next within a turn, and `0x8301`/`0x4301` end the turn. A simultaneous-moves game hasn't been captured.
 
 ## The Turn syncs
 

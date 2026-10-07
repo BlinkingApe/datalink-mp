@@ -44,7 +44,7 @@ Blocked by: 06
 - **Connection lost:** clear the friend's state, make no early acks for the rest of that Game session, and don't replay across a reconnect. In a two-player game the session is over by then anyway: the Joiner's game gets `SESSIONLOST`. Today's behaviour carries on unchanged.
 - **Stream reopened while the connection lives** (`connection.rs:193`): the writer replays the in-flight frames first, in order, then the frame it was retrying. The friend's JACKAL drops any seq not above the last one it saw, so copies it already has are dropped. Control messages lost on a reopen are an existing hole that this doesn't fix.
 
-**Where it lives:** a new module, `crates/iroh-transport/src/early_ack.rs`, holding each friend's state. The `ConnectionManager` owns it. The hooks:
+**Where it lives:** a new module, `crates/datalink-transport/src/early_ack.rs`, holding each friend's state. The `ConnectionManager` owns it. The hooks:
 - `Transport::send` (`runtime.rs:639`): drop resends, record the message, make its early ack.
 - The stream reader (`handle_peer_message`, `connection.rs:894`): swallow real acks and release withheld early acks into the channel.
 - Connection cleanup (`connection.rs:656`) and a new Game session (`runtime.rs:229`): clear the state.

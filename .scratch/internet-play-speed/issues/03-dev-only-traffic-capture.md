@@ -6,7 +6,7 @@ Blocked by: 01
 
 AFK: the agent builds it. It's the one piece of building this map allows (see the map's Notes), and isn't the shipped step 1 feature.
 
-Build: branch `capture/traffic-capture` (commit `b90a677`), code in `crates/iroh-transport/src/capture.rs`, docs in `docs/traffic-capture.md`.
+Build: commit `b90a677`, code in `crates/datalink-transport/src/capture.rs`, docs in `docs/contributors/traffic-capture.md`.
 
 ## Question
 
@@ -27,7 +27,7 @@ Keep it simple and out of the shipped path: no page changes, no Peer protocol ch
 
 ## Answer
 
-Built 2026-10-06 on branch `capture/traffic-capture` (commit `b90a677`). How to turn it on and the full file format are in `docs/traffic-capture.md` on that branch.
+Built 2026-10-06 (commit `b90a677`). How to turn it on and the full file format are in `docs/contributors/traffic-capture.md`.
 
 - **Turning it on:** start the Helper with `DATALINK_CAPTURE=<dir>`. Only the Helper changes: the DLL and IPC are untouched, and the Peer protocol is unchanged, so the other machine stays on stock `v0.1.0`. Each Helper process writes one `capture-<unix secs>-<pid>.jsonl`. Captures go in `captures/` here, which this directory's `.gitignore` already covers.
 - **Format:** JSON Lines, each line with `ev` and `t_us` (microseconds on a monotonic clock).
