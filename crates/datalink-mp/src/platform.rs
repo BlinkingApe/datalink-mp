@@ -12,9 +12,12 @@ use tracing::warn;
 /// The DLL's file name.
 const DLL_FILE_NAME: &str = "dplayx.dll";
 
-/// The file names of the game executables the Helper supports: Thinker's,
-/// PRACX's and WTP's. One of them is enough.
-const GAME_EXES: [&str; 3] = ["thinker.exe", "terran_PRACX.exe", "wtp.exe"];
+/// The file names of the game executables the Helper prefers: Thinker's and
+/// WTP's. Either is enough, and both are reported if both are there.
+const PREFERRED_GAME_EXES: [&str; 2] = ["thinker.exe", "wtp.exe"];
+
+/// PRACX's executable: reported only when neither preferred one is present.
+const PRACX_EXE: &str = "terran_PRACX.exe";
 
 /// What the Game folder self-check found.
 #[derive(Debug, Clone, Serialize)]
@@ -23,8 +26,9 @@ pub struct SelfCheck {
     pub folder: String,
     /// Whether the DLL is in the folder
     pub dll_found: bool,
-    /// The file name of the game executable in the folder, if there is one
-    pub game_exe: Option<String>,
+    /// The file names of the game executables in the folder, as they are
+    /// there. Thinker's and WTP's when present; PRACX's only when neither is.
+    pub game_exes: Vec<String>,
     /// Whether this is a Game folder: it holds the DLL and a game executable
     pub passed: bool,
 }
@@ -40,12 +44,16 @@ pub(crate) fn check_game_folder(folder: &Path) -> SelfCheck {
     let find = |wanted: &str| file_names.iter().find(|name| name.eq_ignore_ascii_case(wanted));
 
     let dll_found = find(DLL_FILE_NAME).is_some();
-    let game_exe = GAME_EXES.iter().find_map(|exe| find(exe)).cloned();
+    let mut game_exes: Vec<String> =
+        PREFERRED_GAME_EXES.iter().filter_map(|exe| find(exe)).cloned().collect();
+    if game_exes.is_empty() {
+        game_exes.extend(find(PRACX_EXE).cloned());
+    }
     SelfCheck {
         folder: folder.display().to_string(),
         dll_found,
-        passed: dll_found && game_exe.is_some(),
-        game_exe,
+        passed: dll_found && !game_exes.is_empty(),
+        game_exes,
     }
 }
 

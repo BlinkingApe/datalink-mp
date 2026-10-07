@@ -129,7 +129,7 @@
     <div class="step"><div class="num" id="num1">1</div>
       <div><h2>Game folder</h2>
         <div class="small" id="self-check-ok" hidden><span class="pill ok">Game folder OK</span>
-          Found <code>dplayx.dll</code> and <code id="game-exe"></code> in
+          Found <span id="found-files"></span> in
           <code class="game-folder"></code>.</div>
         <div class="banner bad" data-banner="not_game_folder" hidden><span data-folder-words="wrong_folder">This isn't your Game folder.
           Extract the whole archive into the folder that contains your game, then run datalink-mp
@@ -370,11 +370,21 @@
     // Step 1 shows what the self-check found. When the check fails, the
     // not_game_folder banner, which sits in this step, is shown in its place.
     document.getElementById('self-check-ok').hidden = !step1Done;
-    setText(document.getElementById('game-exe'), s.self_check.game_exe || '');
+    var foundFiles = document.getElementById('found-files');
+    var foundNames = ['dplayx.dll'].concat(s.self_check.game_exes);
+    foundFiles.textContent = '';
+    for (i = 0; i < foundNames.length; i++) {
+      if (i > 0) {
+        foundFiles.appendChild(document.createTextNode(i === foundNames.length - 1 ? ' and ' : ', '));
+      }
+      var code = document.createElement('code');
+      code.textContent = foundNames[i];
+      foundFiles.appendChild(code);
+    }
     for (i = 0; i < gameFolders.length; i++) setText(gameFolders[i], s.self_check.folder);
     // The game is here and only the DLL is not: something took the DLL away,
     // so the folder is right and the banner must not call it wrong.
-    var onlyDllMissing = !s.self_check.dll_found && !!s.self_check.game_exe;
+    var onlyDllMissing = !s.self_check.dll_found && s.self_check.game_exes.length > 0;
     for (i = 0; i < folderWords.length; i++) {
       folderWords[i].hidden =
         (folderWords[i].getAttribute('data-folder-words') === 'dll_missing') !== onlyDllMissing;

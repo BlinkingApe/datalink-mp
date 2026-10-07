@@ -1428,7 +1428,7 @@ fn test_empty_folder_fails_the_self_check_and_sets_the_not_game_folder_banner() 
 
     assert_eq!(status["self_check"]["passed"], false);
     assert_eq!(status["self_check"]["dll_found"], false);
-    assert_eq!(status["self_check"]["game_exe"], serde_json::Value::Null);
+    assert_eq!(status["self_check"]["game_exes"], serde_json::json!([]));
     assert_eq!(status["banners"], serde_json::json!(["not_game_folder"]));
 }
 
@@ -1440,7 +1440,7 @@ fn test_folder_with_only_the_dll_fails_the_self_check_and_reports_the_dll_as_fou
 
     assert_eq!(status["self_check"]["passed"], false);
     assert_eq!(status["self_check"]["dll_found"], true);
-    assert_eq!(status["self_check"]["game_exe"], serde_json::Value::Null);
+    assert_eq!(status["self_check"]["game_exes"], serde_json::json!([]));
     assert_eq!(status["banners"], serde_json::json!(["not_game_folder"]));
 }
 
@@ -1452,7 +1452,7 @@ fn test_folder_with_only_a_game_executable_fails_the_self_check_and_reports_the_
 
     assert_eq!(status["self_check"]["passed"], false);
     assert_eq!(status["self_check"]["dll_found"], false);
-    assert_eq!(status["self_check"]["game_exe"], "thinker.exe");
+    assert_eq!(status["self_check"]["game_exes"], serde_json::json!(["thinker.exe"]));
     assert_eq!(status["banners"], serde_json::json!(["not_game_folder"]));
 }
 
@@ -1464,7 +1464,7 @@ fn test_folder_with_the_dll_and_thinker_passes_the_self_check() {
 
     assert_eq!(status["self_check"]["passed"], true);
     assert_eq!(status["self_check"]["dll_found"], true);
-    assert_eq!(status["self_check"]["game_exe"], "thinker.exe");
+    assert_eq!(status["self_check"]["game_exes"], serde_json::json!(["thinker.exe"]));
     assert_eq!(status["banners"], serde_json::json!([]));
 }
 
@@ -1476,7 +1476,7 @@ fn test_folder_with_the_dll_and_pracx_passes_the_self_check() {
 
     assert_eq!(status["self_check"]["passed"], true);
     assert_eq!(status["self_check"]["dll_found"], true);
-    assert_eq!(status["self_check"]["game_exe"], "terran_PRACX.exe");
+    assert_eq!(status["self_check"]["game_exes"], serde_json::json!(["terran_PRACX.exe"]));
     assert_eq!(status["banners"], serde_json::json!([]));
 }
 
@@ -1488,8 +1488,30 @@ fn test_folder_with_the_dll_and_wtp_passes_the_self_check() {
 
     assert_eq!(status["self_check"]["passed"], true);
     assert_eq!(status["self_check"]["dll_found"], true);
-    assert_eq!(status["self_check"]["game_exe"], "wtp.exe");
+    assert_eq!(status["self_check"]["game_exes"], serde_json::json!(["wtp.exe"]));
     assert_eq!(status["banners"], serde_json::json!([]));
+}
+
+#[test]
+fn test_thinker_and_wtp_are_both_reported_and_pracx_is_left_out_when_either_is_present() {
+    let Some(status) =
+        status_in_a_folder_holding(&["dplayx.dll", "wtp.exe", "terran_PRACX.exe", "thinker.exe"])
+    else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["passed"], true);
+    assert_eq!(status["self_check"]["game_exes"], serde_json::json!(["thinker.exe", "wtp.exe"]));
+}
+
+#[test]
+fn test_wtp_alone_hides_pracx() {
+    let Some(status) = status_in_a_folder_holding(&["dplayx.dll", "wtp.exe", "terran_PRACX.exe"])
+    else {
+        return;
+    };
+
+    assert_eq!(status["self_check"]["game_exes"], serde_json::json!(["wtp.exe"]));
 }
 
 #[test]
@@ -1507,7 +1529,7 @@ fn test_differently_cased_file_names_pass_the_self_check() {
         assert_eq!(status["self_check"]["passed"], true, "{file_names:?} should pass");
         assert_eq!(status["self_check"]["dll_found"], true, "{file_names:?}");
         assert_eq!(
-            status["self_check"]["game_exe"], file_names[1],
+            status["self_check"]["game_exes"], serde_json::json!([file_names[1]]),
             "the game executable is named as it is in the folder"
         );
         assert_eq!(status["banners"], serde_json::json!([]), "{file_names:?}");

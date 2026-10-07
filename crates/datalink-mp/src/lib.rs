@@ -183,8 +183,8 @@ fn start_with(config: Config, listener: Option<TcpListener>, ipc_port: u16) -> R
         info!("Running from the Game folder {}", self_check.folder);
     } else {
         warn!(
-            "{} is not the Game folder (DLL found: {}, game executable: {:?})",
-            self_check.folder, self_check.dll_found, self_check.game_exe
+            "{} is not the Game folder (DLL found: {}, game executables: {:?})",
+            self_check.folder, self_check.dll_found, self_check.game_exes
         );
     }
 
