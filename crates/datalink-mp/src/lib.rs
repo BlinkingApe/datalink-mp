@@ -18,7 +18,7 @@ pub use controller::{
 pub use http::generate_token;
 pub use platform::{system_browser_opener, SelfCheck};
 
-use iroh_transport::{TransportError, TransportOptions};
+use datalink_transport::{TransportError, TransportOptions};
 use std::path::PathBuf;
 use std::net::TcpListener;
 use std::sync::Arc;

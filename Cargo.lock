@@ -691,6 +691,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "datalink-fixes"
+version = "0.1.1"
+dependencies = [
+ "tracing",
+ "windows",
+]
+
+[[package]]
+name = "datalink-ipc"
+version = "0.1.1"
+dependencies = [
+ "dp-types",
+ "postcard",
+ "serde",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "datalink-mock-client"
+version = "0.1.1"
+dependencies = [
+ "datalink-transport",
+ "dp-types",
+ "hex",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "datalink-mp"
 version = "0.1.1"
 dependencies = [
@@ -698,13 +728,13 @@ dependencies = [
  "axum",
  "clap",
  "data-encoding",
+ "datalink-ipc",
+ "datalink-transport",
  "dp-types",
  "embed-resource",
  "getrandom 0.3.4",
  "hex",
- "ipc-protocol",
  "iroh",
- "iroh-transport",
  "libc",
  "serde",
  "serde_json",
@@ -716,6 +746,24 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "datalink-transport"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "data-encoding",
+ "dp-types",
+ "iroh",
+ "n0-future",
+ "parking_lot",
+ "postcard",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -852,12 +900,12 @@ dependencies = [
 name = "dplayx"
 version = "0.1.1"
 dependencies = [
+ "datalink-fixes",
+ "datalink-ipc",
  "dp-types",
  "embed-resource",
- "ipc-protocol",
  "once_cell",
  "parking_lot",
- "smac-fixes",
  "tracing",
  "tracing-subscriber",
  "windows-sys 0.61.2",
@@ -1623,16 +1671,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ipc-protocol"
-version = "0.1.1"
-dependencies = [
- "dp-types",
- "postcard",
- "serde",
- "thiserror 2.0.18",
-]
-
-[[package]]
 name = "ipconfig"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1819,24 +1857,6 @@ dependencies = [
  "vergen-gitcl",
  "webpki-roots",
  "ws_stream_wasm",
-]
-
-[[package]]
-name = "iroh-transport"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "data-encoding",
- "dp-types",
- "iroh",
- "n0-future",
- "parking_lot",
- "postcard",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
 ]
 
 [[package]]
@@ -2039,18 +2059,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "mock-dp-client"
-version = "0.1.1"
-dependencies = [
- "dp-types",
- "hex",
- "iroh-transport",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -3191,14 +3199,6 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
-
-[[package]]
-name = "smac-fixes"
-version = "0.1.1"
-dependencies = [
- "tracing",
- "windows",
-]
 
 [[package]]
 name = "smallvec"

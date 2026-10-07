@@ -5,7 +5,7 @@
 
 use crate::controller::SessionController;
 use anyhow::Result;
-use ipc_protocol::{
+use datalink_ipc::{
     decode_request, encode_response, read_message, IpcError, IpcRequest, IpcResponse,
     PlayerListEntry, QueuedMessage, SessionListEntry, PROTOCOL_VERSION,
 };

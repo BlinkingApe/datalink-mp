@@ -20,10 +20,10 @@ game (thinker.exe, terran_PRACX.exe or wtp.exe, 32-bit, in Wine)
   │  DirectPlay COM calls (CreatePlayer, Send, Receive, EnumSessions, …)
   ▼
 DLL: dplayx.dll (crates/dplayx, 32-bit Windows, in Wine)
-  │  length-prefixed binary IPC over localhost TCP (crates/ipc-protocol)
+  │  length-prefixed binary IPC over localhost TCP (crates/datalink-ipc)
   ▼
 Helper: datalink-mp (crates/datalink-mp, native)
-  │  session/roster state + system-message synthesis (crates/iroh-transport)
+  │  session/roster state + system-message synthesis (crates/datalink-transport)
   ▼
 Iroh endpoint — one QUIC connection per peer, full mesh
 ```
@@ -49,7 +49,7 @@ Two details matter more than the rest:
   reorder, dedupe, or retry — it is a dumb, ordered pipe. Every place the DLL
   tried to be smart turned out to fight the game.
 
-### The IPC layer (`crates/ipc-protocol`)
+### The IPC layer (`crates/datalink-ipc`)
 
 Simple request/response over localhost TCP: the DLL is the client, the Helper
 is the listener, one request at a time (the handshake carries the IPC version;
@@ -57,7 +57,7 @@ a DLL whose IPC version doesn't match the Helper's fails it). `Receive` is
 polled by the game every frame, so the hot call is `ReceiveMessage` → drained
 from the Helper's queue.
 
-### The transport (`crates/iroh-transport`)
+### The transport (`crates/datalink-transport`)
 
 - **Full mesh.** The joiner connects to the host by Ticket; the host announces
   new players (with their Tickets) to everyone; existing players dial the
@@ -70,7 +70,7 @@ from the Helper's queue.
   strictly sequentially. This makes per-peer FIFO a structural property rather
   than a hope; an integration test drives 200 messages through two real
   endpoints and asserts exact order
-  (`crates/iroh-transport/tests/mesh_networking.rs`).
+  (`crates/datalink-transport/tests/mesh_networking.rs`).
 - **Name-table at join.** The host answers a join with the complete player
   table — IDs, names, Tickets, and per-player data — applied atomically by the
   joiner before it processes anything else, mirroring real DirectPlay's
@@ -106,7 +106,7 @@ name update (its CreatePlayer) arrives, and announces it then, already named,
 which is the order real DirectPlay uses. Announcing the joiner at the
 JoinRequest left its name blank for the whole game, on every machine.
 
-### smac-fixes (`crates/smac-fixes`)
+### datalink-fixes (`crates/datalink-fixes`)
 
 In-memory patches applied when the DLL loads into the game process:
 
@@ -120,7 +120,7 @@ In-memory patches applied when the DLL loads into the game process:
   installed probes partition the game's reliable-send funnel so that a failure
   names the gate that ate the message.
 
-### mock-dp-client (`tools/mock-dp-client`)
+### datalink-mock-client (`crates/datalink-mock-client`)
 
 An interactive CLI that drives the transport like the game would (create
 session, join, send) — useful for exercising networking with no game or Wine

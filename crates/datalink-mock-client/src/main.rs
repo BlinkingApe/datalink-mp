@@ -3,7 +3,7 @@
 //! This program simulates how a DirectPlay application would use our library.
 
 use dp_types::*;
-use iroh_transport::Transport;
+use datalink_transport::Transport;
 use std::io::{self, BufRead, Write};
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;

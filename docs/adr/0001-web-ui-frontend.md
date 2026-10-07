@@ -160,7 +160,7 @@ How the archives are built, versioned and released: [ADR-0002](0002-releases-ver
 4. `datalink-mp host` and `datalink-mp join --ticket` behave as `smac-helper`'s did.
 5. Requests are rejected if they lack the token, carry a wrong `Host` header, or come from a foreign `Origin`.
 6. Each banner is triggered by its condition, including the Peer protocol mismatch between builds with different ALPNs and the self-check outside a game folder.
-7. `cargo test` still passes, including the mesh test in `crates/iroh-transport`.
+7. `cargo test` still passes, including the mesh test in `crates/datalink-transport`.
 8. The release pipeline in ADR-0002 produces all three archives.
 
 ## Changes from the draft

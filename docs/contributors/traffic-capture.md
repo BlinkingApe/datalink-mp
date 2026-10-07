@@ -183,7 +183,7 @@ Independent of the capture, the Helper logs at info a `turn sync finished` or `g
 
 ## Where it lives
 
-`crates/iroh-transport/src/capture.rs`. The message path calls it at four
+`crates/datalink-transport/src/capture.rs`. The message path calls it at four
 points: queueing to a friend (`ConnectionManager`), writing the frame (the
 ordered writer task), reading a frame (`handle_peer_message`) and the DLL's
 drain (`Transport::receive`). `Transport` also calls it for the game's

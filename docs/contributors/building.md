@@ -144,11 +144,11 @@ a DirectPlay service provider under that name.
 |---|---|
 | `crates/dplayx` | the DirectPlay replacement DLL (32-bit Windows) |
 | `crates/datalink-mp` | the Helper: native networking, session state and web page |
-| `crates/iroh-transport` | Iroh session/mesh/ordered-stream transport |
+| `crates/datalink-transport` | Iroh session/mesh/ordered-stream transport |
 | `crates/dp-types` | DirectPlay structs, GUIDs, serialization |
-| `crates/ipc-protocol` | DLL ↔ Helper localhost protocol |
-| `crates/smac-fixes` | in-memory game patches + diagnostic probe system |
-| `tools/mock-dp-client` | interactive transport test client (no game needed) |
+| `crates/datalink-ipc` | DLL ↔ Helper localhost protocol |
+| `crates/datalink-fixes` | in-memory game patches + diagnostic probe system |
+| `crates/datalink-mock-client` | interactive transport test client (no game needed) |
 
 The design is in [architecture.md](architecture.md).
 

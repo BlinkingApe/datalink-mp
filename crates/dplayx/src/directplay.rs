@@ -3,7 +3,7 @@
 use crate::globals;
 use crate::ipc_client::IpcClient;
 use dp_types::*;
-use ipc_protocol::SessionListEntry;
+use datalink_ipc::SessionListEntry;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};

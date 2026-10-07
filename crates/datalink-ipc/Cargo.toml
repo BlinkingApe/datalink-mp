@@ -1,5 +1,5 @@
 [package]
-name = "ipc-protocol"
+name = "datalink-ipc"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

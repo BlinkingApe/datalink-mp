@@ -31,7 +31,7 @@ use tracing::info;
 ///
 /// Call this from the host DLL's DllMain during DLL_PROCESS_ATTACH.
 pub fn apply_all_patches() {
-    info!("smac-fixes: applying patches...");
+    info!("datalink-fixes: applying patches...");
 
     #[cfg(target_os = "windows")]
     match unsafe { blit_fix::apply() } {
@@ -52,9 +52,9 @@ pub fn apply_all_patches() {
     }
 
     #[cfg(not(target_os = "windows"))]
-    info!("smac-fixes: no patches to apply (non-Windows)");
+    info!("datalink-fixes: no patches to apply (non-Windows)");
 
-    info!("smac-fixes: patching complete");
+    info!("datalink-fixes: patching complete");
 }
 
 /// Install the diagnostic probe set.
@@ -69,7 +69,7 @@ pub fn apply_all_patches() {
 /// SMAC_PROBE_LOG environment variable is set to a file path.
 #[cfg(target_os = "windows")]
 pub fn install_debug_probes() {
-    info!("smac-fixes: installing debug probes...");
+    info!("datalink-fixes: installing debug probes...");
 
     // Initialize probe system (spawns background drain thread)
     if let Err(e) = init_probes() {
@@ -405,11 +405,11 @@ pub fn install_debug_probes() {
         Err(e) => warn!("Failed to install probe H1b: {}", e),
     }
 
-    info!("smac-fixes: debug probes installation complete");
+    info!("datalink-fixes: debug probes installation complete");
 }
 
 /// Stub for non-Windows builds
 #[cfg(not(target_os = "windows"))]
 pub fn install_debug_probes() {
-    info!("smac-fixes: debug probes not available (non-Windows)");
+    info!("datalink-fixes: debug probes not available (non-Windows)");
 }

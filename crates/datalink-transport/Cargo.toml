@@ -1,5 +1,5 @@
 [package]
-name = "iroh-transport"
+name = "datalink-transport"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

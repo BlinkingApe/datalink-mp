@@ -348,7 +348,7 @@ fn drain_thread() {
         Ok(path) => match OpenOptions::new().create(true).append(true).open(&path) {
             Ok(f) => Some(f),
             Err(e) => {
-                eprintln!("smac-fixes: failed to open probe log {}: {}", path, e);
+                eprintln!("datalink-fixes: failed to open probe log {}: {}", path, e);
                 None
             }
         },

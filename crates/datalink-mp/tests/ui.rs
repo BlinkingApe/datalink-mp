@@ -7,7 +7,7 @@ mod common;
 
 use common::{http_get, note_transport_unavailable};
 use datalink_mp::{Config, Helper, StartError, UiConfig};
-use iroh_transport::{Ticket, TransportOptions};
+use datalink_transport::{Ticket, TransportOptions};
 use std::net::{TcpStream, UdpSocket};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -115,10 +115,10 @@ fn test_fresh_helper_reports_ready_with_a_ticket_and_its_versions() {
     Ticket::parse(ticket).expect("the Ticket in status should parse");
     assert_eq!(status["ticket_seq"], 1);
     assert_eq!(status["release_version"], env!("CARGO_PKG_VERSION"));
-    assert_eq!(status["ipc_version"], ipc_protocol::PROTOCOL_VERSION);
+    assert_eq!(status["ipc_version"], datalink_ipc::PROTOCOL_VERSION);
     assert_eq!(
         status["peer_protocol_version"],
-        iroh_transport::STREAM_PROTO_VERSION
+        datalink_transport::STREAM_PROTO_VERSION
     );
     let os = status["os"].as_str().expect("status should carry the OS");
     assert!(["windows", "linux", "macos"].contains(&os), "unexpected OS {os}");
@@ -1062,7 +1062,7 @@ fn test_game_connected_follows_the_dll_connection() {
     };
     let mut dll = started.connect_fake_dll();
     // Whatever the answer, the Helper has taken the connection up by now.
-    dll.request(&ipc_protocol::IpcRequest::GetOurTicket);
+    dll.request(&datalink_ipc::IpcRequest::GetOurTicket);
     assert_eq!(
         started.status()["game_connected"], false,
         "a connection that has not shaken hands is not the game yet"
@@ -1103,7 +1103,7 @@ fn test_handshake_with_the_wrong_ipc_version_sets_the_ipc_version_mismatch_banne
     };
     let mut dll = started.connect_fake_dll();
 
-    dll.handshake_with_version(ipc_protocol::PROTOCOL_VERSION + 1);
+    dll.handshake_with_version(datalink_ipc::PROTOCOL_VERSION + 1);
 
     assert_eq!(started.banners(), ["ipc_version_mismatch"]);
     assert_eq!(
@@ -1144,13 +1144,13 @@ fn test_later_good_handshake_clears_the_ipc_version_mismatch_banner() {
         return;
     };
     let mut mismatched = started.connect_fake_dll();
-    mismatched.handshake_with_version(ipc_protocol::PROTOCOL_VERSION + 1);
+    mismatched.handshake_with_version(datalink_ipc::PROTOCOL_VERSION + 1);
     assert_eq!(started.banners(), ["ipc_version_mismatch"]);
     drop(mismatched);
     // The Helper serves one DLL connection at a time: an answer on a new
     // one, whatever it is, says the Helper has seen the old one close.
     let mut matching = started.connect_fake_dll();
-    matching.request(&ipc_protocol::IpcRequest::GetOurTicket);
+    matching.request(&datalink_ipc::IpcRequest::GetOurTicket);
     assert_eq!(
         started.banners(),
         ["ipc_version_mismatch"],
@@ -1617,8 +1617,8 @@ fn test_ticket_is_still_in_status_when_the_self_check_fails() {
 
 /// A friend's Transport. None when one cannot be created (sandboxed
 /// environments); the test then returns early.
-fn friend() -> Option<iroh_transport::Transport> {
-    match iroh_transport::Transport::new() {
+fn friend() -> Option<datalink_transport::Transport> {
+    match datalink_transport::Transport::new() {
         Ok(friend) => Some(friend),
         Err(e) => {
             note_transport_unavailable(&e);
@@ -1629,14 +1629,14 @@ fn friend() -> Option<iroh_transport::Transport> {
 
 /// Dial the Helper's Ticket from `friend`, the way a friend who was sent the
 /// Ticket does.
-fn dial_the_helper(friend: &iroh_transport::Transport, started: &Started) {
+fn dial_the_helper(friend: &datalink_transport::Transport, started: &Started) {
     friend
         .connect_to_peer(&started.ticket())
         .expect("the friend should reach the Helper on loopback");
 }
 
 /// Wait for `friend` to list the Helper among its connected Helpers.
-fn wait_until_the_friend_lists_the_helper(friend: &iroh_transport::Transport, started: &Started) {
+fn wait_until_the_friend_lists_the_helper(friend: &datalink_transport::Transport, started: &Started) {
     let helper_id = Ticket::parse(&started.ticket()).expect("the Ticket should parse").addr().id;
     common::poll_until(PEER_NOTICE_DEADLINE, || {
         friend.connected_peers().contains(&helper_id).then_some(())
@@ -1682,7 +1682,7 @@ fn test_friend_dialling_the_helpers_ticket_makes_the_state_hosting() {
 
 /// The short ID the page shows for `transport`'s Helper: iroh's short form of
 /// its endpoint ID.
-fn short_id(transport: &iroh_transport::Transport) -> String {
+fn short_id(transport: &datalink_transport::Transport) -> String {
     transport.endpoint_id().fmt_short().to_string()
 }
 
@@ -2580,15 +2580,15 @@ fn test_fresh_helper_has_no_invalid_ticket_reason() {
 /// protocol version, so this build's Helpers refuse it, and it them.
 fn options_of_another_release() -> TransportOptions {
     TransportOptions {
-        peer_protocol_version: iroh_transport::STREAM_PROTO_VERSION + 1,
+        peer_protocol_version: datalink_transport::STREAM_PROTO_VERSION + 1,
         ..TransportOptions::default()
     }
 }
 
 /// A friend's Transport from another release. None when one cannot be
 /// created (sandboxed environments); the test then returns early.
-fn friend_of_another_release() -> Option<iroh_transport::Transport> {
-    match iroh_transport::Transport::with_options(options_of_another_release()) {
+fn friend_of_another_release() -> Option<datalink_transport::Transport> {
+    match datalink_transport::Transport::with_options(options_of_another_release()) {
         Ok(friend) => Some(friend),
         Err(e) => {
             note_transport_unavailable(&e);
@@ -2618,19 +2618,19 @@ impl Started {
 
     /// Ask the Helper to join `ticket` from a fake DLL, the way the game does
     /// when the player picks Join Game, and return the reply.
-    fn join_from_the_game(&self, ticket: &str) -> ipc_protocol::IpcResponse {
+    fn join_from_the_game(&self, ticket: &str) -> datalink_ipc::IpcResponse {
         let mut dll = self.connect_fake_dll();
         dll.handshake();
-        dll.request(&ipc_protocol::IpcRequest::JoinSessionByTicket {
+        dll.request(&datalink_ipc::IpcRequest::JoinSessionByTicket {
             host_ticket: ticket.to_string(),
         })
     }
 }
 
 /// Assert that the game's join was answered with an error, and return its message.
-fn join_failed(reply: ipc_protocol::IpcResponse) -> String {
+fn join_failed(reply: datalink_ipc::IpcResponse) -> String {
     match reply {
-        ipc_protocol::IpcResponse::Error { message } => message,
+        datalink_ipc::IpcResponse::Error { message } => message,
         other => panic!("the join should fail, got {other:?}"),
     }
 }
@@ -2863,7 +2863,7 @@ impl Started {
 
 /// Start a Helper with a friend's Helper connected to it: a player hosting.
 /// None when a Transport cannot be created.
-fn start_hosting_a_friend() -> Option<(Started, iroh_transport::Transport)> {
+fn start_hosting_a_friend() -> Option<(Started, datalink_transport::Transport)> {
     let started = start(false)?;
     let friend = friend()?;
     dial_the_helper(&friend, &started);
@@ -2977,7 +2977,7 @@ fn test_stop_leaves_the_condition_banners_alone() {
         return;
     };
     let mut dll = started.connect_fake_dll();
-    dll.handshake_with_version(ipc_protocol::PROTOCOL_VERSION + 1);
+    dll.handshake_with_version(datalink_ipc::PROTOCOL_VERSION + 1);
     started.wait_for_banners(&["ipc_version_mismatch"]);
 
     started.stop();
@@ -3014,8 +3014,8 @@ fn test_games_link_survives_stop_and_its_requests_are_answered_by_the_new_transp
 
     started.stop();
 
-    let answer = dll.request(&ipc_protocol::IpcRequest::GetOurTicket);
-    let ipc_protocol::IpcResponse::StringValue { value: ticket } = answer else {
+    let answer = dll.request(&datalink_ipc::IpcRequest::GetOurTicket);
+    let datalink_ipc::IpcResponse::StringValue { value: ticket } = answer else {
         panic!("the game's request after Stop should be answered, got {answer:?}");
     };
     assert_ne!(ticket, old_ticket, "the game should be talking to the new Transport");

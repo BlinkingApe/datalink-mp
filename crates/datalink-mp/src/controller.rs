@@ -9,7 +9,7 @@
 
 use crate::platform::{self, SelfCheck};
 use dp_types::DPID;
-use iroh_transport::{
+use datalink_transport::{
     Ticket, TicketError, Transport, TransportError, TransportOptions, TransportResult,
     STREAM_PROTO_VERSION,
 };
@@ -233,7 +233,7 @@ pub struct Status {
     pub peers: Vec<String>,
     /// How each peer's connection goes, `direct` or `relayed`, by short ID.
     /// A peer whose path isn't selected yet has no entry.
-    pub peer_paths: std::collections::BTreeMap<String, iroh_transport::path::PathKind>,
+    pub peer_paths: std::collections::BTreeMap<String, datalink_transport::path::PathKind>,
     /// Codes of the active banners
     pub banners: Vec<Banner>,
     /// Why the `invalid_ticket` banner is up, while it is
@@ -378,7 +378,7 @@ impl SessionController {
         Status {
             release_version: env!("CARGO_PKG_VERSION"),
             build_id: BUILD_ID,
-            ipc_version: ipc_protocol::PROTOCOL_VERSION,
+            ipc_version: datalink_ipc::PROTOCOL_VERSION,
             peer_protocol_version: STREAM_PROTO_VERSION,
             os: OS,
             state,

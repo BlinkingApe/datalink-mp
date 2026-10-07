@@ -3,7 +3,7 @@
 //! Each test file compiles this module separately and uses only part of it.
 #![allow(dead_code)]
 
-use ipc_protocol::{
+use datalink_ipc::{
     decode_response, encode_request, read_message, IpcRequest, IpcResponse, PROTOCOL_VERSION,
 };
 use std::io::{Read, Write};
@@ -42,7 +42,7 @@ impl FakeDll {
     /// Send one framed message whose payload is `payload` as it is, the way a
     /// DLL that speaks another protocol would. The Helper gives it no reply.
     pub fn send_undecodable(&mut self, payload: &[u8]) {
-        ipc_protocol::write_message(&mut self.stream, payload)
+        datalink_ipc::write_message(&mut self.stream, payload)
             .expect("message should be written to the Helper");
     }
 

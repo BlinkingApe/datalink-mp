@@ -8,18 +8,18 @@
 //! 5. Messages are routed correctly in the mesh
 
 use dp_types::{PlayerName, SessionDesc, GUID};
-use iroh_transport::Transport;
+use datalink_transport::Transport;
 use std::time::Duration;
 
 /// Helper to create a test transport
 /// Transport::new() creates its own runtime, so these tests must be synchronous
 fn create_transport() -> Option<Transport> {
-    create_transport_with_options(iroh_transport::TransportOptions::default())
+    create_transport_with_options(datalink_transport::TransportOptions::default())
 }
 
 /// Helper to create a test transport with non-default options: a different
 /// Peer protocol version (a stand-in for a different build) or a short dial timeout
-fn create_transport_with_options(options: iroh_transport::TransportOptions) -> Option<Transport> {
+fn create_transport_with_options(options: datalink_transport::TransportOptions) -> Option<Transport> {
     // Transport creation involves network binding which may fail in restricted environments
     match Transport::with_options(options) {
         Ok(t) => Some(t),
@@ -56,7 +56,7 @@ fn test_session_creation_and_ticket() {
 
     // Ticket should be valid (smac prefix + base32 encoded)
     assert!(ticket.starts_with("smac"), "Ticket should start with 'smac' prefix");
-    let parsed = iroh_transport::Ticket::parse(ticket);
+    let parsed = datalink_transport::Ticket::parse(ticket);
     assert!(parsed.is_ok(), "Ticket should be parseable: {:?}", parsed.err());
 
     // Check session state
@@ -193,7 +193,7 @@ fn test_player_info_with_ticket() {
 
 #[test]
 fn test_protocol_encoding() {
-    use iroh_transport::protocol::{encode_message, decode_message, Message, PlayerInfo};
+    use datalink_transport::protocol::{encode_message, decode_message, Message, PlayerInfo};
 
     // Test encoding/decoding a PlayerJoined message with ticket
     let player_info = PlayerInfo {
@@ -224,7 +224,7 @@ fn test_protocol_encoding() {
 
 #[test]
 fn test_join_request_with_ticket() {
-    use iroh_transport::protocol::{encode_message, decode_message, Message};
+    use datalink_transport::protocol::{encode_message, decode_message, Message};
 
     let msg = Message::JoinRequest {
         session_id: GUID::new_random(),
@@ -250,7 +250,7 @@ fn test_join_request_with_ticket() {
 
 #[test]
 fn test_session_manager_identity() {
-    use iroh_transport::session::SessionManager;
+    use datalink_transport::session::SessionManager;
 
     let manager = SessionManager::new();
 
@@ -266,8 +266,8 @@ fn test_session_manager_identity() {
 
 #[test]
 fn test_session_with_remote_players() {
-    use iroh_transport::session::SessionManager;
-    use iroh_transport::protocol::PlayerInfo;
+    use datalink_transport::session::SessionManager;
+    use datalink_transport::protocol::PlayerInfo;
 
     let manager = SessionManager::new();
     manager.set_identity([1; 32], "host_ticket".to_string());
@@ -458,7 +458,7 @@ fn test_join_and_ordered_delivery_end_to_end() {
 }
 
 /// The DPID a queued DPSYS_CREATEPLAYERORGROUP announces, if `qm` is one.
-fn created_player(qm: &iroh_transport::QueuedMessage) -> Option<u32> {
+fn created_player(qm: &datalink_transport::QueuedMessage) -> Option<u32> {
     let word = |at: usize| Some(u32::from_le_bytes(qm.data.get(at..at + 4)?.try_into().ok()?));
     if qm.from == 0 && word(0)? == dp_types::sysmsg::DPSYS_CREATEPLAYERORGROUP {
         word(8)
@@ -532,7 +532,7 @@ fn test_host_game_hears_of_joiner_at_its_create_player_already_named() {
 }
 
 /// The system message type of a message queued for the game, if it is one.
-fn system_message_type(qm: &iroh_transport::QueuedMessage) -> Option<u32> {
+fn system_message_type(qm: &datalink_transport::QueuedMessage) -> Option<u32> {
     if qm.from != 0 {
         return None;
     }
@@ -540,7 +540,7 @@ fn system_message_type(qm: &iroh_transport::QueuedMessage) -> Option<u32> {
 }
 
 /// The player a queued DPSYS_DESTROYPLAYERORGROUP is about, if it is one.
-fn destroyed_player(qm: &iroh_transport::QueuedMessage) -> Option<u32> {
+fn destroyed_player(qm: &datalink_transport::QueuedMessage) -> Option<u32> {
     if system_message_type(qm)? != dp_types::sysmsg::DPSYS_DESTROYPLAYERORGROUP {
         return None;
     }
@@ -661,7 +661,7 @@ fn test_messages_from_a_closed_session_do_not_reach_the_next_game_the_host_hosts
 
 #[test]
 fn test_default_options_are_peer_protocol_version_1_and_15s_dial_timeout() {
-    let options = iroh_transport::TransportOptions::default();
+    let options = datalink_transport::TransportOptions::default();
     assert_eq!(options.peer_protocol_version, 1, "default Peer protocol version");
     assert_eq!(options.dial_timeout, Duration::from_secs(15), "default dial timeout");
 }
@@ -687,7 +687,7 @@ fn test_default_transport_accepts_alpn_datalink_1_and_refuses_dplay_iroh_1() {
         Some(t) => t,
         None => return,
     };
-    let addr = iroh_transport::Ticket::parse(transport.our_ticket())
+    let addr = datalink_transport::Ticket::parse(transport.our_ticket())
         .expect("our ticket parses")
         .into_addr();
 
@@ -716,7 +716,7 @@ fn test_different_peer_protocol_versions_refuse_each_other() {
         Some(t) => t,
         None => return,
     };
-    let other_build = match create_transport_with_options(iroh_transport::TransportOptions {
+    let other_build = match create_transport_with_options(datalink_transport::TransportOptions {
         peer_protocol_version: 2,
         ..Default::default()
     }) {
@@ -740,7 +740,7 @@ fn test_different_peer_protocol_versions_refuse_each_other() {
         .join_session_by_ticket(ours.our_ticket())
         .expect_err("join across Peer protocol versions should be refused");
     assert!(
-        matches!(err, iroh_transport::TransportError::PeerProtocolMismatch),
+        matches!(err, datalink_transport::TransportError::PeerProtocolMismatch),
         "dialler should get PeerProtocolMismatch, got {:?}",
         err
     );
@@ -750,7 +750,7 @@ fn test_different_peer_protocol_versions_refuse_each_other() {
         .connect_to_peer(other_build.our_ticket())
         .expect_err("dial across Peer protocol versions should be refused");
     assert!(
-        matches!(err, iroh_transport::TransportError::PeerProtocolMismatch),
+        matches!(err, datalink_transport::TransportError::PeerProtocolMismatch),
         "dialler should get PeerProtocolMismatch, got {:?}",
         err
     );
@@ -765,7 +765,7 @@ fn test_different_peer_protocol_versions_refuse_each_other() {
 #[test]
 fn test_dial_to_silent_ticket_fails_with_cant_reach_at_dial_timeout() {
     let dial_timeout = Duration::from_secs(2);
-    let dialler = match create_transport_with_options(iroh_transport::TransportOptions {
+    let dialler = match create_transport_with_options(datalink_transport::TransportOptions {
         dial_timeout,
         ..Default::default()
     }) {
@@ -777,7 +777,7 @@ fn test_dial_to_silent_ticket_fails_with_cant_reach_at_dial_timeout() {
     // bound (so nothing is refused) but never answers.
     let silent_socket = std::net::UdpSocket::bind("127.0.0.1:0").expect("bind silent socket");
     let silent_addr = silent_socket.local_addr().expect("silent socket address");
-    let dead_ticket = iroh_transport::Ticket::new(
+    let dead_ticket = datalink_transport::Ticket::new(
         iroh::EndpointAddr::new(iroh::SecretKey::generate().public()).with_ip_addr(silent_addr),
     )
     .serialize();
@@ -789,7 +789,7 @@ fn test_dial_to_silent_ticket_fails_with_cant_reach_at_dial_timeout() {
     let elapsed = started.elapsed();
 
     assert!(
-        matches!(err, iroh_transport::TransportError::CantReach),
+        matches!(err, datalink_transport::TransportError::CantReach),
         "dialler should get CantReach, got {:?}",
         err
     );
@@ -805,7 +805,7 @@ fn test_dial_to_silent_ticket_fails_with_cant_reach_at_dial_timeout() {
 /// dropped Transport fails with CantReach, no later than the dial timeout.
 #[test]
 fn test_dial_to_ticket_of_dropped_transport_fails_with_cant_reach() {
-    let dialler = match create_transport_with_options(iroh_transport::TransportOptions {
+    let dialler = match create_transport_with_options(datalink_transport::TransportOptions {
         dial_timeout: Duration::from_secs(2),
         ..Default::default()
     }) {
@@ -824,7 +824,7 @@ fn test_dial_to_ticket_of_dropped_transport_fails_with_cant_reach() {
     let elapsed = started.elapsed();
 
     assert!(
-        matches!(err, iroh_transport::TransportError::CantReach),
+        matches!(err, datalink_transport::TransportError::CantReach),
         "dialler should get CantReach, got {:?}",
         err
     );
@@ -841,7 +841,7 @@ fn test_dial_to_ticket_of_dropped_transport_fails_with_cant_reach() {
 /// (b"SMAC" + version as u16 LE).
 #[test]
 fn test_non_default_peer_protocol_version_is_used_in_alpn_and_stream_preamble() {
-    let transport = match create_transport_with_options(iroh_transport::TransportOptions {
+    let transport = match create_transport_with_options(datalink_transport::TransportOptions {
         peer_protocol_version: 7,
         ..Default::default()
     }) {
@@ -854,7 +854,7 @@ fn test_non_default_peer_protocol_version_is_used_in_alpn_and_stream_preamble() 
         Some(ep) => ep,
         None => return,
     };
-    let listener_ticket = iroh_transport::Ticket::new(listener.addr()).serialize();
+    let listener_ticket = datalink_transport::Ticket::new(listener.addr()).serialize();
 
     // Accept one connection and read the preamble of its first ordered stream.
     let preamble = rt.spawn(async move {
@@ -882,7 +882,7 @@ fn test_non_default_peer_protocol_version_is_used_in_alpn_and_stream_preamble() 
 /// builds: they connect, and messages on the ordered stream get through.
 #[test]
 fn test_same_non_default_peer_protocol_version_connects_and_delivers() {
-    let options = iroh_transport::TransportOptions {
+    let options = datalink_transport::TransportOptions {
         peer_protocol_version: 7,
         ..Default::default()
     };

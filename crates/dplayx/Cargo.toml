@@ -11,7 +11,7 @@ name = "dplayx"
 
 [dependencies]
 dp-types = { workspace = true }
-ipc-protocol = { workspace = true }
+datalink-ipc = { workspace = true }
 parking_lot = { workspace = true }
 once_cell = { workspace = true }
 tracing = { workspace = true }
@@ -19,7 +19,7 @@ tracing-subscriber = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
-smac-fixes = { path = "../smac-fixes" }
+datalink-fixes = { path = "../datalink-fixes" }
 
 [build-dependencies]
 embed-resource = "3"

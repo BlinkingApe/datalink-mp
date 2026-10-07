@@ -9,8 +9,8 @@ name = "datalink-mp"
 path = "src/main.rs"
 
 [dependencies]
-ipc-protocol = { path = "../ipc-protocol" }
-iroh-transport = { path = "../iroh-transport" }
+datalink-ipc = { path = "../datalink-ipc" }
+datalink-transport = { path = "../datalink-transport" }
 dp-types = { path = "../dp-types" }
 tokio = { workspace = true, features = ["net", "io-util", "fs", "process", "rt-multi-thread"] }
 tracing = { workspace = true }

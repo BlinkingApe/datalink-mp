@@ -1,17 +1,17 @@
 [package]
-name = "mock-dp-client"
+name = "datalink-mock-client"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Mock DirectPlay client for testing"
 
 [[bin]]
-name = "mock-dp-client"
+name = "datalink-mock-client"
 path = "src/main.rs"
 
 [dependencies]
 dp-types = { workspace = true }
-iroh-transport = { workspace = true }
+datalink-transport = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
