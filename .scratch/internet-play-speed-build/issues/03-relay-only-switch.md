@@ -4,12 +4,12 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] With the switch on, a connection to a friend ends up Relayed
+- [x] With the switch on, a connection to a friend ends up Relayed
 - [x] With it off, nothing changes
 - [x] It logs when on
-- [ ] A test or recorded manual check shows the path is Relayed
+- [x] A test or recorded manual check shows the path is Relayed
 
 ## Comments
 
@@ -19,4 +19,4 @@ The env parsing is unit-tested (`relay_only_switch_reads_env_value`). A Relayed 
 
 Manual check (needs internet): start two Helpers with `DATALINK_RELAY_ONLY=1 DATALINK_CAPTURE=<dir>`, connect them, and confirm the capture path and stats lines show a relay route for the selected path and never a direct IP one. Without the variable the same pair goes direct on one network.
 
-Reopened after review: the Relayed path has not been observed. Run the manual check above and record the result here before resolving.
+Manual check done 2026-10-07 (two Helpers with `DATALINK_RELAY_ONLY=1 DATALINK_CAPTURE`, captures in `~/Games/AC-WTP_431`: `capture-1791356538-1222191-HOST.jsonl`, `capture-1791356636-8110-JOINER.jsonl`). Each capture has 402 `stats` lines; every one has `route":"relayed"`, `open_paths":1`, `addr":"https://euc1-1.relay.n0.iroh.link./"`, and none has a direct IP route. RTT about 45-54 ms via the relay. The Relayed path is observed; resolved.
