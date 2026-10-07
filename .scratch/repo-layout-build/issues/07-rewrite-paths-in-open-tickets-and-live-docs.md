@@ -43,3 +43,5 @@ Spec: [../../repo-layout/spec.md](../../repo-layout/spec.md), and the decision t
 - `scripts/test-proof-scripts.sh`: all 16 pass.
 
 **Noted, not changed:** the live maps and tickets still say `CONTEXT.md` in places, such as the "Domain:" lines in the internet-play-speed, game-session-sync and post-0.1.0-polish maps. That file became `GLOSSARY.md` before the layout spec, which doesn't cover the rename, and the link check skips bare file names. A follow-up could repoint the "Domain:" lines.
+
+2026-10-07 (orchestrator). The follow-up above is done: `CONTEXT.md` became `GLOSSARY.md` in the live efforts' maps and tickets (b50cb52 renamed the file after the spec was written). Archived efforts and the repo-layout decision record keep `CONTEXT.md`.

@@ -8,7 +8,7 @@ A decided plan for the speed work in [ADR-0004](../../docs/adr/0004-internet-pla
 
 ## Notes
 
-- Domain: `CONTEXT.md` (Helper, DLL, Direct connection, Relayed connection, Peer protocol version, **Turn sync**), [ADR-0004](../../docs/adr/0004-internet-play-speed-in-0-2-0.md) and [ADR-0002](../../docs/adr/0002-releases-versioning-pipeline-trust.md) (a Peer protocol change means a minor release). `docs/contributors/architecture.md` covers the transport's one ordered stream per friend and the game's own JACKAL reliability layer.
+- Domain: `GLOSSARY.md` (Helper, DLL, Direct connection, Relayed connection, Peer protocol version, **Turn sync**), [ADR-0004](../../docs/adr/0004-internet-play-speed-in-0-2-0.md) and [ADR-0002](../../docs/adr/0002-releases-versioning-pipeline-trust.md) (a Peer protocol change means a minor release). `docs/contributors/architecture.md` covers the transport's one ordered stream per friend and the game's own JACKAL reliability layer.
 - Tracker: local markdown, this directory.
 - Skills for grilling tickets: `grilling` + `domain-modeling`.
 - **Override: one piece of doing.** The map may build a dev-only traffic capture (off by default, behind an environment variable) and play one captured game, because steps 2 and 3 can't be judged without real payloads. This isn't the shipped step 1 feature, and nothing else in this map is built.
@@ -21,7 +21,7 @@ A decided plan for the speed work in [ADR-0004](../../docs/adr/0004-internet-pla
 - **Capture on one side only.** In a two-player game, one Helper sees every message in both directions. The Linux machine runs a local build with the capture, and the Windows machine stays on stock `v0.1.0` (the Peer protocol is unchanged, so they still play together).
 - **The capture times both ends of each inbound message:** when it arrives from the friend, and when the DLL hands it to the game. That separates network latency, Helper queueing and the game's own pacing. The analysis also looks for repeated identical payloads, a sign of JACKAL retransmits.
 - **The numeric target is set after the baseline,** not before.
-- **Term: Turn sync**, added to `CONTEXT.md`. How the Helper detects one (an idle gap, or reading message types) is for the analysis to find.
+- **Term: Turn sync**, added to `GLOSSARY.md`. How the Helper detects one (an idle gap, or reading message types) is for the analysis to find.
 
 ## Decisions so far
 

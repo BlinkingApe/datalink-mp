@@ -28,7 +28,7 @@ Decide which one ships, and for the automatic one, what the Joiner's page shows 
 
 **2026-10-06 (maintainer, recorded by agent):**
 
-- **Hostable** means a Join Game from this Joiner would find the session and could join it right now: from Host Game until the game starts, the session closes, or it fills. A started game is not hostable. Added to `CONTEXT.md`.
+- **Hostable** means a Join Game from this Joiner would find the session and could join it right now: from Host Game until the game starts, the session closes, or it fills. A started game is not hostable. Added to `GLOSSARY.md`.
 - **The signal is automatic.** The Joiner's Helper asks the Host's Helper every 2 seconds or so with the existing session query (`SessionQuery` / `SessionList`). It asks while it is connected and its own game isn't in a Game session. No new message and no Peer protocol version bump, so it also works against a Host still on `0.1.0`. A Host push (`SessionAnnounce`) was turned down: "no longer hostable" would need a new message, and with it a version bump that splits `0.1.0` players from the next release.
 - **The Host's page doesn't change.**
 - **The Joiner's page also changes its tab title** (e.g. "● Friend is hosting"), so a Joiner sitting in the game sees it in the taskbar. No browser notification. SMAC's Join Game can't be told anything, since it runs one search and then shows its "game not found".

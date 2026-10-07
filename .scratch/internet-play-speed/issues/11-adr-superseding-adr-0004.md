@@ -19,13 +19,13 @@ Blocked by: 06, 07, 09, 10
   - step 4's page activity, at low priority, since players don't look at the Helper mid-game
   - and the fact that no minor release is needed unless compression returns
 - **What's dropped and what's conditional:** delta encoding, our own relay, `dwLatency`, and compression after a Relayed capture.
-- **ADR-0004's status line,** and the `CONTEXT.md` terms this introduces, if any.
+- **ADR-0004's status line,** and the `GLOSSARY.md` terms this introduces, if any.
 
 ## Answer
 
 2026-10-06. Decided with the maintainer: all six proposals accepted.
 
-Written as [ADR-0005](../../../docs/adr/0005-internet-play-speed-helpers-answer-acks.md). ADR-0004 is now "Superseded by ADR-0005". `CONTEXT.md` gains **Real ack**.
+Written as [ADR-0005](../../../docs/adr/0005-internet-play-speed-helpers-answer-acks.md). ADR-0004 is now "Superseded by ADR-0005". `GLOSSARY.md` gains **Real ack**.
 
 - **Constraint:** the friend's game gets exactly the bytes sent, in order. The Helper may ack and drop redundant resends, and keeps every message until the real ack. It stops answering for the rest of the Game session on a lost connection. The DLL's timing change is a named exception.
 - **Early acks:** two-player only, with the reason and the safe three-player rule recorded.

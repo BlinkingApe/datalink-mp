@@ -8,7 +8,7 @@ A scoped, decided plan for the first post-0.1.0 polish round: which UI/UX ideas 
 
 ## Notes
 
-- Domain: `CONTEXT.md` (Helper, Game session, Ticket) and the helper-web-ui spec's "Session model" (the `ready`/`joining`/`joined`/`hosting` state table).
+- Domain: `GLOSSARY.md` (Helper, Game session, Ticket) and the helper-web-ui spec's "Session model" (the `ready`/`joining`/`joined`/`hosting` state table).
 - Tracker: local markdown, this directory.
 - Pulled out of helper-web-ui: tickets 20, 22 and 24 originated there (`../archive/helper-web-ui/issues/`) and carry over here unchanged, already fully specified — nothing left to decide, just relocated out of the v1 spec since they're not blockers. Ticket 21 is also pulled out, but stays unticketed fog (see Not yet specified) rather than becoming a decision ticket yet. Ticket 23 (the second-Helper-persists defect) was considered for this move and kept out: it's a regression against already-implemented behavior, not a deferred idea, so it stays in helper-web-ui as a near-term defect.
 - Skills for grilling tickets: `grilling` + `domain-modeling`.
@@ -26,7 +26,7 @@ A scoped, decided plan for the first post-0.1.0 polish round: which UI/UX ideas 
 
 <!-- one line per closed ticket -->
 
-- [Tell Joiners when the Host is hostable](issues/04-signal-joiners-when-host-is-hostable.md): automatic. The Joiner's Helper polls the Host's Helper with the existing session query, so there's no Peer protocol version bump. The Joiner's page and tab title change; the Host's page doesn't. "Hostable" is defined in `CONTEXT.md`.
+- [Tell Joiners when the Host is hostable](issues/04-signal-joiners-when-host-is-hostable.md): automatic. The Joiner's Helper polls the Host's Helper with the existing session query, so there's no Peer protocol version bump. The Joiner's page and tab title change; the Host's page doesn't. "Hostable" is defined in `GLOSSARY.md`.
 
 ## Not yet specified
 

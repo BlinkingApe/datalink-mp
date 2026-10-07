@@ -8,7 +8,7 @@ A decision, per originating defect (release-pipeline 06, 08, 09 and 10), on whet
 
 ## Notes
 
-- Domain: Rust workspace; see `CONTEXT.md` (Helper, DLL, **Game session**, Ticket, IPC version, Peer protocol version) and the helper-web-ui spec's "Session model" and "Shared status and banners" sections — the currently accepted behavior this map may revise. `docs/adr/0001-web-ui-frontend.md` covers Stop's intent.
+- Domain: Rust workspace; see `GLOSSARY.md` (Helper, DLL, **Game session**, Ticket, IPC version, Peer protocol version) and the helper-web-ui spec's "Session model" and "Shared status and banners" sections — the currently accepted behavior this map may revise. `docs/adr/0001-web-ui-frontend.md` covers Stop's intent.
 - Tracker: local markdown, this directory.
 - Pulled out of release-pipeline: tickets 06, 08, 09 and 10 originated there (`../archive/release-pipeline/issues/`), where each has the original repro detail and dated history; release-pipeline ticket 04 (the gate) now blocks on this map's resolution instead of on those tickets directly. Ticket 07 (Joiner's in-game name blank) was considered and left out: a data field not making it across doesn't obviously implicate session lifecycle.
 - Standing preference (revised 2026-10-05): Stop mid-game already warns the player. Proceeding past that warning is not our problem, even when it crashes the other player's game. The warning must say so (see ticket 04). It was first set as "may cost the Game session, but must not crash the other game"; the maintainer revised it after `-rc.6`.
@@ -20,7 +20,7 @@ A decision, per originating defect (release-pipeline 06, 08, 09 and 10), on whet
 - **Severity cuts across the warned/unwarned split.** Even for Stop (warned), a crash in the other player's game is in scope to at least understand; only "the session doesn't survive, no restart needed" is a candidate for "not our problem."
 - **"Not our problem" still owes a wording fix.** Any defect closed as an accepted consequence of Stop's warning graduates a ticket to make that warning say concretely what can happen (crash or unresumable session), not just close silently.
 - **Ticket 06 is split from the 08/09/10 investigation.** It already has a landed fix and a known cause; what's left is a real-game confirmation, a different kind of work from root-causing 08/09/10.
-- **Term: Game session.** The DirectPlay-level session the game itself is in (created by Host Game, joined by Join Game, ended by CloseSession or a crash), tracked today in the IPC layer the DLL talks through — distinct from the Helper's own connection state (`ready`/`joining`/`joined`/`hosting`, driven by the Transport and its peers). Added to `CONTEXT.md`.
+- **Term: Game session.** The DirectPlay-level session the game itself is in (created by Host Game, joined by Join Game, ended by CloseSession or a crash), tracked today in the IPC layer the DLL talks through — distinct from the Helper's own connection state (`ready`/`joining`/`joined`/`hosting`, driven by the Transport and its peers). Added to `GLOSSARY.md`.
 
 ## Decisions so far
 

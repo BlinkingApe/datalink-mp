@@ -27,7 +27,7 @@ Blocked by: 06
 
 ## Answer
 
-2026-10-06. The Helper's ack is now called an **Early ack** (in `CONTEXT.md`), and the friend's game's own ack is the **real ack**.
+2026-10-06. The Helper's ack is now called an **Early ack** (in `GLOSSARY.md`), and the friend's game's own ack is the **real ack**.
 
 **Two-player games only.** The Helper makes early acks only while the Game session holds our player and exactly one remote player. With three or more players it behaves exactly as `0.1.0`.
 - **This replaces rule 3 of [What makes a Turn sync slow…](06-what-makes-turn-sync-slow.md)**, which isn't safe. If the host broadcasts M1 and then M2 to friends X and Y, X can receive M2 and send something to Y before M1 reaches Y. The recipients never changed, so rule 3 would hold nothing.
