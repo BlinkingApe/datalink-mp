@@ -207,6 +207,10 @@ Vanilla multiplayer colors units, flags and labels by seat, not faction;
 datalink-mp fixes that so every faction wears its classic colors. See
 [docs/players/faction-colors.md](docs/players/faction-colors.md).
 
+## Contributing
+
+To change the code or the docs, start at [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Credits
 
 Based on smac-iroh by Henry de Valence.
