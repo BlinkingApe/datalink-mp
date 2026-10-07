@@ -4,10 +4,10 @@
 
 **Blocked by:** 01, 02, 03, 04, 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
 - [x] Version bumped as a patch under ADR-0002 and release notes written
-- [ ] The release gate passes
+- [x] The release gate passes
 - [x] Release notes tell testers to send the log, and a capture only when asked
 
 ## Comments

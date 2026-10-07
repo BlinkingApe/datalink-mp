@@ -4,15 +4,15 @@
 
 **Blocked by:** 10
 
-**Status:** ready-for-human
+**Status:** resolved
 
 Spec: [../../repo-layout/spec.md](../../repo-layout/spec.md), and the decision tickets it cites.
 
 ## Acceptance criteria
 
 - [x] Layout branch merged to `main` (revert commit, not rewritten history, is the restore path afterwards)
-- [ ] With Claude Code closed, the checkout becomes `~/Documents/code/datalink-mp/datalink-mp` and the matching `~/.claude/projects/` key directory is moved; the one absolute path in any surviving capture note is updated
-- [ ] `git status` is clean, `git worktree list` shows the single new path, build and test pass, and a new Claude Code session in the new folder shows the old history
+- [x] With Claude Code closed, the checkout becomes `~/Documents/code/datalink-mp/datalink-mp` and the matching `~/.claude/projects/` key directory is moved; the one absolute path in any surviving capture note is updated
+- [x] `git status` is clean, `git worktree list` shows the single new path, build and test pass, and a new Claude Code session in the new folder shows the old history
 
 ## Comments
 
@@ -34,3 +34,5 @@ claude                # /resume should list this session's history
 ```
 
 No capture note needs updating. The one absolute path to the old folder was in `docs/capture_test_launch.txt`, deleted in 05; the capture checklist and `traffic-capture.md` use repo-relative paths. Older orphaned project keys are left alone, as the spec says.
+
+2026-10-07. The maintainer renamed the checkout and moved the project key. Verified from the new folder: one worktree at `.../datalink-mp/datalink-mp [main]`, `cargo build --locked -p datalink-mp` and `cargo test --workspace` pass, no old `smac-iroh` project key remains.
