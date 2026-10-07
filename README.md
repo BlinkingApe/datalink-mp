@@ -33,6 +33,7 @@ This README claims only what has been tested.
 
 **All systems, first:** You need Sid Meier's Alpha Centauri with
 [Thinker](https://github.com/induktio/thinker) or
+[WillToPower](https://github.com/tnevolin/thinker-doer-clion) or
 [PRACX](https://github.com/DrazharLn/pracx). Everyone playing needs the same
 release of datalink-mp.
 
