@@ -11,11 +11,6 @@
 .scratch/archive/*
 docs/archive/*
 
-# The repo-layout effort's own spec, ledger, decision and build tickets name
-# paths from before and after the move.
-.scratch/repo-layout/*
-.scratch/repo-layout-build/*
-
 # Capture folders are gitignored, so they never appear in the index.
 *   (^|/)captures/?$
 

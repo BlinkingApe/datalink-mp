@@ -1,6 +1,6 @@
 # Research: Repository layout conventions for newcomers
 
-Supports `.scratch/repo-layout/` ticket 02 (layout conventions). It asks what well-regarded open-source projects do so a newcomer can find their way, and which of those practices fit this repo.
+Supports `.scratch/archive/repo-layout/` ticket 02 (layout conventions). It asks what well-regarded open-source projects do so a newcomer can find their way, and which of those practices fit this repo.
 
 Sources: this repo at commit `7d26254`. The other repos were read through the GitHub API at their default branches on 2026-10-06: ripgrep, tokio, iroh, rust-analyzer and cargo. Docs are cited by URL. "Fits this repo?" notes are judgement, and are labelled as such.
 

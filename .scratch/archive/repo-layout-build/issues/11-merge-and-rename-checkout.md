@@ -4,7 +4,7 @@
 
 **Blocked by:** 10
 
-**Status:** resolved
+**Status:** done
 
 Spec: [../../repo-layout/spec.md](../../repo-layout/spec.md), and the decision tickets it cites.
 

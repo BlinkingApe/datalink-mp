@@ -19,11 +19,6 @@ docs/adr/*
 .scratch/archive/*
 docs/archive/*
 
-# The repo-layout effort's own spec, ledger, decision and build tickets name the
-# old paths because they describe the move.
-.scratch/repo-layout/*
-.scratch/repo-layout-build/*
-
 # The proof scripts name the old names to look for them.
 scripts/check-old-names.sh
 scripts/old-names-allowlist.txt
