@@ -32,9 +32,9 @@ alone don't fail.
   <path>      check only these files or folders; one that names no tracked
               file is an error (exit 2)
 
-The allowlist is scripts/links-allowlist.txt (LINKS_ALLOWLIST overrides it), in
-the format of scripts/old-names-allowlist.txt; an entry's regex (Python syntax)
-is searched for in the link target.
+The allowlist is scripts/links-allowlist.txt (LINKS_ALLOWLIST overrides it); its
+header explains the format. An entry's regex (Python syntax) is searched for in
+the link target.
 """
 import fnmatch
 import os
@@ -80,7 +80,7 @@ TAG = re.compile(r"^archive/(prototype|research)-")
 
 
 def read_allowlist(path):
-    """(deny, glob, regex) entries; the format is the same as old-names-allowlist.txt."""
+    """(deny, glob, regex) entries; the format is in links-allowlist.txt's header."""
     entries = []
     with open(path, encoding="utf-8") as f:
         for line in f:

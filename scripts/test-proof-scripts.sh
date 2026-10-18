@@ -1,5 +1,5 @@
 #!/bin/bash
-# Tests for the layout proof scripts (check-old-names.sh, check-links.py).
+# Tests for the link checker (check-links.py).
 #
 # Usage:
 #   scripts/test-proof-scripts.sh
@@ -9,14 +9,13 @@
 set -uo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
-GREP="$SCRIPTS/check-old-names.sh"
 LINKS="$SCRIPTS/check-links.py"
 FAILED=0
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # fixture <path=content>...: a fresh git repo with these files staged, and an
-# empty allowlist for both scripts. Prints its directory.
+# empty allowlist. Prints its directory.
 fixture() {
   local dir pair path
   dir="$(mktemp -d "$TMP/repo.XXXXXX")"
@@ -30,7 +29,7 @@ fixture() {
   echo "$dir"
 }
 
-# allow <dir> <line>...: the allowlist both scripts use in this fixture.
+# allow <dir> <line>...: the allowlist the link checker uses in this fixture.
 allow() {
   local dir="$1"; shift
   printf '%s\n' "$@" > "$dir/.allow"
@@ -40,7 +39,7 @@ allow() {
 run() {
   local dir="$1"; shift
   [[ -e "$dir/.allow" ]] || : > "$dir/.allow"
-  OUT="$(cd "$dir" && OLD_NAMES_ALLOWLIST="$dir/.allow" LINKS_ALLOWLIST="$dir/.allow" "$@" 2>&1)"
+  OUT="$(cd "$dir" && LINKS_ALLOWLIST="$dir/.allow" "$@" 2>&1)"
   CODE=$?
 }
 
@@ -60,99 +59,6 @@ check() {
     FAILED=1
   fi
 }
-
-# --- check-old-names.sh ---
-
-D="$(fixture 'src/lib.rs=use iroh_transport::Ticket;' 'README.md=nothing old here')"
-run "$D" "$GREP"
-check "grep fails on an old name outside the allowlist" \
-  "$(code 1)" "$(has 'src/lib.rs:1:')"
-
-D="$(fixture 'README.md=nothing old here' 'src/lib.rs=use datalink_transport::Ticket;')"
-run "$D" "$GREP"
-check "grep passes when only new names remain" "$(code 0)"
-
-D="$(fixture "old.md=ipc-protocol
-ipc_protocol
-iroh-transport
-iroh_transport
-smac-fixes
-smac_fixes
-mock-dp-client
-mock_dp_client
-cp datalink-mp-README.txt dist/
-see tools/0001-wtp.html
-cargo run --manifest-path ./tools/mock/Cargo.toml
-RUST_LOG=iroh_transport=debug")"
-run "$D" "$GREP"
-SEEN=()
-for n in {1..12}; do SEEN+=("$(has "old.md:$n:")"); done
-check "grep catches every old name, hyphen and underscore, README and tools/" \
-  "$(code 1)" "${SEEN[@]}"
-
-D="$(fixture "new.md=datalink-transport datalink_transport datalink-ipc datalink-fixes
-datalink-mock-client packaging/README.txt devtools/ rust-tools/x my_tools/y
-the iroh transport layer; iroh::transport")"
-run "$D" "$GREP"
-check "grep ignores new names and words that merely contain an old one" "$(code 0)"
-
-D="$(fixture 'docs/adr/0001-x.md=we use ipc-protocol' '.scratch/archive/a/b.md=smac_fixes' \
-  'docs/live.md=smac-fixes is live')"
-allow "$D" '# comment' '' 'docs/adr/*' '.scratch/archive/**   # archived history'
-run "$D" "$GREP"
-check "grep skips files matched by an allowlist glob, and only those" \
-  "$(code 1)" "$(has 'docs/live.md:1:')" "$(lacks 'docs/adr/')" "$(lacks '.scratch/archive/')"
-
-D="$(fixture 'ci.yml=cp packaging/README.txt "$d/datalink-mp-README.txt"
-cp datalink-mp-README.txt "$d/"')"
-allow "$D" 'ci.yml   packaging/README\.txt.*datalink-mp-README\.txt   # shipped name'
-run "$D" "$GREP"
-check "grep allows a hit only when its line matches the entry's regex" \
-  "$(code 1)" "$(lacks 'ci.yml:1:')" "$(has 'ci.yml:2:')"
-
-D="$(fixture 'docs/adr/0001.md=we chose iroh_transport::Ticket
-the mesh test in `crates/iroh-transport`')"
-allow "$D" 'docs/adr/*' '!docs/adr/*  crates/iroh-transport'
-run "$D" "$GREP"
-check "grep reports a hit matching a ! entry even when another entry allows it" \
-  "$(code 1)" "$(lacks '0001.md:1:')" "$(has '0001.md:2:')"
-
-D="$(fixture 'docs/adr/0001.md=ipc-protocol' 'docs/live.md=smac-fixes')"
-allow "$D" 'docs/adr/*'
-run "$D" "$GREP" --all
-check "grep --all also lists allowlisted hits" \
-  "$(has 'allowed docs/adr/0001.md:1:')" "$(has 'docs/live.md:1:')"
-run "$D" "$GREP" docs/adr/
-check "grep with a pathspec searches only those paths" "$(code 0)"
-run "$D" "$GREP" docs/adr/ --all
-check "grep accepts --all after a pathspec" \
-  "$(code 0)" "$(has 'allowed docs/adr/0001.md:1:')" "$(lacks 'docs/live.md')"
-for flag in -h --help; do
-  run "$D" "$GREP" docs/ "$flag"
-  check "grep $flag prints usage and exits 0" \
-    "$(code 0)" "$(has 'Usage:')" "$(has 'scripts/check-old-names.sh [--all]')" "$(lacks 'hit(s)')"
-done
-
-D="$(fixture 'README.md=nothing old here' 'docs/x.md=smac-fixes')"
-chmod 000 "$D/docs/x.md"
-run "$D" "$GREP"
-chmod 644 "$D/docs/x.md"
-check "grep fails when git grep itself fails, rather than reporting no hits" \
-  "$(code 2)" "$(lacks 'hit(s)')"
-run "$D" "$GREP" ../
-check "grep fails on a pathspec outside the repository" \
-  "$(code 2)" "$(lacks 'hit(s)')"
-
-D="$(fixture 'docs/y.md=smac-fixes')"
-printf 'docs/*' > "$D/.allow"
-run "$D" "$GREP"
-check "grep reads an allowlist's last entry when the file lacks a final newline" \
-  "$(code 0)" "$(lacks 'docs/y.md:1:')"
-
-D="$(fixture 'docs/y.md=nothing old here')"
-run "$D" "$GREP" docs/ no-such-dir/
-check "grep fails on a pathspec that matches no tracked file" \
-  "$(code 2)" "$(has 'no-such-dir/')" "$(lacks 'hit(s)')"
 
 # --- check-links.py ---
 
