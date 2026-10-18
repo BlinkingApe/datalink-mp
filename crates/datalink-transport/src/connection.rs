@@ -76,7 +76,7 @@ fn classify_dial_error(e: &ConnectError) -> TransportError {
 pub const DEFAULT_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Magic prefix opening every ordered message stream: b"SMAC" + version (u16 LE).
-const STREAM_MAGIC: &[u8; 4] = b"SMAC";
+pub(crate) const STREAM_MAGIC: &[u8; 4] = b"SMAC";
 
 /// Upper bound on a single framed message (defensive against corrupt frames).
 const MAX_FRAME_LEN: u32 = 1 << 20; // 1 MiB
@@ -118,11 +118,10 @@ impl PeerConnection {
             player_ids: parking_lot::Mutex::new(Vec::new()),
             outbox,
         });
-        tokio::spawn(ordered_writer_task(
-            connection,
+        tokio::spawn(crate::frame_sink::run_ordered_writer(
+            crate::frame_sink::IrohFrameSink::new(connection, peer_protocol_version),
             outbox_rx,
             endpoint_short(&endpoint_id),
-            peer_protocol_version,
         ));
         peer
     }
@@ -143,84 +142,6 @@ impl PeerConnection {
 fn endpoint_short(endpoint_id: &EndpointId) -> String {
     let b = endpoint_id.as_bytes();
     format!("{:08x}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-}
-
-/// Writer task: owns the single ordered outbound stream to one peer.
-///
-/// Opens the stream lazily on the first message (preamble: magic + version),
-/// then writes 4-byte-LE length-prefixed frames in queue order. On a write
-/// error it reopens the stream ONCE and retries the failed message; if that
-/// also fails the connection is closed so the accept-loop cleanup fires
-/// ConnectionLost and callers see NotConnected on later sends. Errors are
-/// logged loudly — control-plane messages must never disappear silently.
-async fn ordered_writer_task(
-    connection: Connection,
-    mut outbox_rx: mpsc::UnboundedReceiver<(Vec<u8>, Option<u64>)>,
-    peer_label: String,
-    peer_protocol_version: u16,
-) {
-    let mut stream: Option<SendStream> = None;
-
-    async fn open_stream(
-        connection: &Connection,
-        peer_protocol_version: u16,
-    ) -> TransportResult<SendStream> {
-        let mut s = connection.open_uni().await?;
-        let mut preamble = [0u8; 6];
-        preamble[..4].copy_from_slice(STREAM_MAGIC);
-        preamble[4..].copy_from_slice(&peer_protocol_version.to_le_bytes());
-        s.write_all(&preamble).await?;
-        Ok(s)
-    }
-
-    async fn write_frame(s: &mut SendStream, data: &[u8]) -> TransportResult<()> {
-        s.write_all(&(data.len() as u32).to_le_bytes()).await?;
-        s.write_all(data).await?;
-        Ok(())
-    }
-
-    while let Some((data, capture_id)) = outbox_rx.recv().await {
-        // Ensure we have a stream
-        if stream.is_none() {
-            match open_stream(&connection, peer_protocol_version).await {
-                Ok(s) => stream = Some(s),
-                Err(e) => {
-                    error!(peer = %peer_label, error = %e, "failed to open ordered stream; dropping connection");
-                    connection.close(1u32.into(), b"stream open failed");
-                    return;
-                }
-            }
-        }
-
-        let s = stream.as_mut().expect("stream set above");
-        if let Err(e) = write_frame(s, &data).await {
-            warn!(peer = %peer_label, error = %e, "ordered stream write failed; reopening once");
-            match open_stream(&connection, peer_protocol_version).await {
-                Ok(mut s2) => {
-                    if let Err(e2) = write_frame(&mut s2, &data).await {
-                        error!(peer = %peer_label, error = %e2, "ordered stream retry failed; dropping connection");
-                        connection.close(1u32.into(), b"stream write failed");
-                        return;
-                    }
-                    stream = Some(s2);
-                }
-                Err(e2) => {
-                    error!(peer = %peer_label, error = %e2, "ordered stream reopen failed; dropping connection");
-                    connection.close(1u32.into(), b"stream reopen failed");
-                    return;
-                }
-            }
-        }
-        if let Some(id) = capture_id {
-            crate::capture::written(id);
-        }
-    }
-
-    // Outbox closed (peer removed) — finish the stream gracefully.
-    if let Some(mut s) = stream {
-        let _ = s.finish();
-    }
-    debug!(peer = %peer_label, "ordered writer task exiting");
 }
 
 /// Messages received from the network
