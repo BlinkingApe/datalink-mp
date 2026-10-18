@@ -23,11 +23,15 @@ See the spec, [The friend pipeline](../spec.md#the-friend-pipeline).
 
 **Blocked by:** 04
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] In-process pipeline tests: outcomes are "send" or "deliver", and capture ids pass through
-- [ ] Replaying the recorded Turn sync fixtures through the pipeline gives the same reports as through the detector directly
-- [ ] Two Transports in one test binary keep separate Turn sync state for the same friend
-- [ ] The Turn sync log lines and the capture lines are unchanged
-- [ ] No lock is held across an await or while taking another module's lock; Send stays a synchronous enqueue (ADR-0001 §2)
-- [ ] `cargo test` passes, including the end-to-end tests with real endpoints
+- [x] In-process pipeline tests: outcomes are "send" or "deliver", and capture ids pass through
+- [x] Replaying the recorded Turn sync fixtures through the pipeline gives the same reports as through the detector directly
+- [x] Two Transports in one test binary keep separate Turn sync state for the same friend
+- [x] The Turn sync log lines and the capture lines are unchanged
+- [x] No lock is held across an await or while taking another module's lock; Send stays a synchronous enqueue (ADR-0001 §2)
+- [x] `cargo test` passes, including the end-to-end tests with real endpoints
+
+## Comments
+
+Built `crates/datalink-transport/src/friend_pipeline.rs`: `FriendPipeline`, held on each `PeerConnection` entry (created in `spawn`, dropped with the entry). `outbound` and `inbound` write the capture line, then feed the friend's Turn sync detector, and return `Send`/`Deliver` plus the capture id and any Turn sync event. `game_session_began` and `connection_lost` exist as empty hooks (cleanup calls `connection_lost`; nothing calls `game_session_began` yet, ticket 07 or the inbox ticket will). Time and RTT are injected. Removed the process-wide Turn sync map and its register/unregister glue from `turn_sync.rs`; log lines unchanged. The pipeline takes no other module's lock; the capture file stays process-wide. Tests cover outcomes, fixture replay equal to the direct detector, and two pipelines for one friend not sharing state.

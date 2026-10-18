@@ -4,8 +4,8 @@
 //! The detector ([`TurnSyncDetector`]) is pure: it is fed each game message with
 //! the time it was seen, and says when a sync starts and ends. The page's
 //! activity text is meant to use the same detector, so the two can't disagree.
-//! The rest of the file is the glue that feeds it from the Helper's message path
-//! and logs the figures (raw, no payloads).
+//! The friend pipeline feeds it from the Helper's message path; this file also
+//! logs the figures (raw, no payloads).
 //!
 //! The rules come from `.scratch/internet-play-speed/analysis/direct-game-capture.md`:
 //!
@@ -26,10 +26,7 @@
 
 use crate::capture;
 use crate::jackal::Jackal;
-use iroh::endpoint::Connection;
-use parking_lot::Mutex;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::OnceLock;
+use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
 use tracing::info;
 
@@ -292,64 +289,13 @@ impl TurnSyncDetector {
 }
 
 // ---------------------------------------------------------------------------
-// Glue: one detector per friend, fed from the message path, logging each sync.
-
-struct Peer {
-    connection: Connection,
-    detector: TurnSyncDetector,
-}
-
-static PEERS: OnceLock<Mutex<HashMap<[u8; 32], Peer>>> = OnceLock::new();
-
-fn peers() -> &'static Mutex<HashMap<[u8; 32], Peer>> {
-    PEERS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Start watching a friend's connection. Replaces any earlier one.
-pub fn register(peer: [u8; 32], connection: Connection) {
-    peers().lock().insert(peer, Peer { connection, detector: TurnSyncDetector::new() });
-}
-
-/// Stop watching a friend's connection, unless a newer one has replaced it.
-pub fn unregister(peer: &[u8; 32], connection: &Connection) {
-    let mut peers = peers().lock();
-    if peers.get(peer).is_some_and(|p| p.connection.stable_id() == connection.stable_id()) {
-        peers.remove(peer);
-    }
-}
-
-/// A game message was queued for `peer`.
-pub fn outbound(peer: &[u8; 32], data: &[u8]) {
-    observe(peer, Direction::Out, data);
-}
-
-/// A game message arrived from `peer`.
-pub fn inbound(peer: &[u8; 32], data: &[u8]) {
-    observe(peer, Direction::In, data);
-}
-
-fn observe(peer: &[u8; 32], dir: Direction, data: &[u8]) {
-    let mut peers = peers().lock();
-    let Some(p) = peers.get_mut(peer) else { return };
-    let connection = &p.connection;
-    let mut sample = || selected_rtt(connection);
-    let event = p.detector.observe(Instant::now(), dir, data, &mut sample);
-    drop(peers);
-    if let Some(Event::Finished(report)) = event {
-        log_report(peer, &report);
-    }
-}
-
-/// The RTT of the connection's selected path.
-fn selected_rtt(connection: &Connection) -> Option<Duration> {
-    connection.paths().iter().find(|p| p.is_selected()).map(|p| p.stats().rtt)
-}
+// Logging: one line for each finished sync, called by the friend pipeline.
 
 fn ms(d: Duration) -> u64 {
     d.as_millis() as u64
 }
 
-fn log_report(peer: &[u8; 32], r: &Report) {
+pub(crate) fn log_report(peer: &[u8; 32], r: &Report) {
     let what = match r.kind {
         SyncKind::GameStart => "game start",
         SyncKind::Turn => "turn sync",

@@ -99,6 +99,8 @@ pub struct PeerConnection {
     /// tasks per message would leave ordering to the scheduler.
     /// Each frame carries its capture id, if the traffic capture recorded it.
     outbox: mpsc::UnboundedSender<(Vec<u8>, Option<u64>)>,
+    /// This friend's pipeline for game messages; lives and dies with this entry.
+    pipeline: crate::friend_pipeline::FriendPipeline,
 }
 
 impl PeerConnection {
@@ -117,6 +119,20 @@ impl PeerConnection {
             ticket,
             player_ids: parking_lot::Mutex::new(Vec::new()),
             outbox,
+            pipeline: crate::friend_pipeline::FriendPipeline::new(
+                *endpoint_id.as_bytes(),
+                std::time::Instant::now,
+                {
+                    let connection = connection.clone();
+                    move || {
+                        connection
+                            .paths()
+                            .iter()
+                            .find(|p| p.is_selected())
+                            .map(|p| p.stats().rtt)
+                    }
+                },
+            ),
         });
         tokio::spawn(crate::frame_sink::run_ordered_writer(
             crate::frame_sink::IrohFrameSink::new(connection, peer_protocol_version),
@@ -128,10 +144,13 @@ impl PeerConnection {
 
     /// Enqueue an already-encoded message for ordered delivery to this peer.
     fn enqueue(&self, msg: &Message, encoded: Vec<u8>) -> TransportResult<()> {
-        let capture_id = crate::capture::outbound(self.endpoint_id.as_bytes(), msg);
-        if let Message::GameMessage { data, .. } = msg {
-            crate::turn_sync::outbound(self.endpoint_id.as_bytes(), data);
-        }
+        let capture_id = match msg {
+            Message::GameMessage { from, to, flags, data } => {
+                let guaranteed = flags & dp_types::DPSEND_GUARANTEED != 0;
+                self.pipeline.outbound(*from, *to, guaranteed, data).capture_id
+            }
+            _ => crate::capture::outbound(self.endpoint_id.as_bytes(), msg),
+        };
         self.outbox
             .send((encoded, capture_id))
             .map_err(|_| TransportError::NotConnected)
@@ -521,7 +540,6 @@ impl ConnectionManager {
 
         crate::capture::spawn_path_watcher(connection.clone(), endpoint_id_bytes);
         crate::path::spawn_path_logger(connection.clone(), endpoint_short(&endpoint_id));
-        crate::turn_sync::register(endpoint_id_bytes, connection.clone());
 
         tokio::spawn(async move {
             loop {
@@ -589,8 +607,9 @@ impl ConnectionManager {
             }
 
             // Connection closed - cleanup
-            crate::turn_sync::unregister(&endpoint_id_bytes, &connection);
-            peers.write().remove(&endpoint_id_bytes);
+            if let Some(peer) = peers.write().remove(&endpoint_id_bytes) {
+                peer.pipeline.connection_lost();
+            }
             player_routes.write().retain(|_, v| v != &endpoint_id_bytes);
             let _ = message_tx.send(ReceivedMessage::ConnectionLost(endpoint_id));
         });
@@ -836,8 +855,11 @@ async fn handle_peer_message(
         } => {
             let guaranteed = flags & dp_types::DPSEND_GUARANTEED != 0;
             debug!(from, to, size = data.len(), guaranteed, "received GameMessage, queuing to channel");
-            let capture_id = crate::capture::inbound(&sender_endpoint_id, from, to, guaranteed, &data);
-            crate::turn_sync::inbound(&sender_endpoint_id, &data);
+            let entry = cm.peers.read().get(&sender_endpoint_id).cloned();
+            let capture_id = match entry {
+                Some(peer) => peer.pipeline.inbound(from, to, guaranteed, &data).capture_id,
+                None => crate::capture::inbound(&sender_endpoint_id, from, to, guaranteed, &data),
+            };
 
             // Deliver to the local DLL/game.
             //

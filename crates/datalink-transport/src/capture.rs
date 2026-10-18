@@ -336,6 +336,12 @@ pub fn enabled() -> bool {
     capture().is_some()
 }
 
+/// A game message about to be queued to `peer`. Returns the id for [`written`]
+/// if a capture is running.
+pub fn outbound_game(peer: &[u8; 32], from: DPID, to: DPID, guaranteed: bool, data: &[u8]) -> Option<u64> {
+    Some(capture()?.game_message("out", Some(peer), from, to, guaranteed, data))
+}
+
 /// A message about to be queued to `peer`. Returns the id for [`written`] if
 /// it's a game message and a capture is running.
 pub fn outbound(peer: &[u8; 32], msg: &Message) -> Option<u64> {
