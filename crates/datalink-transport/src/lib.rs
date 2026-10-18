@@ -5,6 +5,7 @@
 
 pub mod capture;
 pub mod frame_sink;
+pub mod inbox;
 pub mod jackal;
 pub mod path;
 pub mod protocol;
@@ -17,6 +18,7 @@ pub mod turn_sync;
 pub use protocol::*;
 pub use session::*;
 pub use connection::*;
+pub use inbox::{GameInbox, QueuedMessage, SystemEvent};
 pub use runtime::*;
 pub use ticket::*;
 

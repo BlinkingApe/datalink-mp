@@ -8,12 +8,13 @@
 //! with the new player's ticket. All existing players then connect to the new player
 //! directly, forming a full mesh.
 
-use crate::protocol::{decode_message, encode_message, Message, PlayerInfo, SessionInfo};
+use crate::inbox::{GameInbox, SystemEvent};
+use crate::protocol::{decode_message, encode_message, Message, PlayerInfo};
 use crate::runtime::{NetworkMode, TransportOptions};
 use crate::session::SessionManager;
 use crate::{TransportError, TransportResult};
 use dp_types::structs::{serialize_dpmsg_setplayerorgroupdata, serialize_dpmsg_setplayerorgroupname, serialize_dpmsg_setsessiondesc};
-use dp_types::{SessionDesc, DPID, GUID};
+use dp_types::{PlayerName, DPID, GUID};
 
 /// DPPLAYERTYPE_PLAYER constant (player, not group)
 const DPPLAYERTYPE_PLAYER: u32 = 1;
@@ -144,40 +145,6 @@ fn endpoint_short(endpoint_id: &EndpointId) -> String {
     format!("{:08x}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-/// Messages received from the network
-#[derive(Debug, Clone)]
-pub enum ReceivedMessage {
-    /// Session discovered
-    SessionDiscovered(SessionInfo),
-    /// Session list received
-    SessionList(Vec<SessionInfo>),
-    /// Player joined our session
-    PlayerJoined(PlayerInfo),
-    /// Player left
-    PlayerLeft(DPID),
-    /// Game message
-    GameMessage {
-        from: DPID,
-        to: DPID,
-        data: Vec<u8>,
-        guaranteed: bool,
-        /// Its id in the traffic capture, if one is running
-        capture_id: Option<u64>,
-    },
-    /// Join response received
-    JoinResponse {
-        accepted: bool,
-        player_id: Option<DPID>,
-        reason: Option<String>,
-        session_desc: Option<SessionDesc>,
-        players: Vec<PlayerInfo>,
-    },
-    /// Session closed
-    SessionClosed,
-    /// DirectPlay system message to deliver to game (already serialized)
-    SystemMessage(Vec<u8>),
-}
-
 /// Connection manager for mesh networking
 pub struct ConnectionManager {
     /// Iroh endpoint
@@ -188,8 +155,8 @@ pub struct ConnectionManager {
     player_routes: Arc<RwLock<HashMap<DPID, [u8; 32]>>>,
     /// Session manager
     session_manager: Arc<SessionManager>,
-    /// Received messages queue
-    message_tx: mpsc::UnboundedSender<ReceivedMessage>,
+    /// The game inbox
+    inbox: GameInbox,
     /// Our endpoint ID
     endpoint_id: EndpointId,
     /// Our ticket
@@ -207,7 +174,7 @@ impl Clone for ConnectionManager {
             peers: self.peers.clone(),
             player_routes: self.player_routes.clone(),
             session_manager: self.session_manager.clone(),
-            message_tx: self.message_tx.clone(),
+            inbox: self.inbox.clone(),
             endpoint_id: self.endpoint_id,
             our_ticket: self.our_ticket.clone(),
             network_mode: self.network_mode,
@@ -222,7 +189,7 @@ impl ConnectionManager {
     pub fn new(
         endpoint: Endpoint,
         session_manager: Arc<SessionManager>,
-        message_tx: mpsc::UnboundedSender<ReceivedMessage>,
+        inbox: GameInbox,
         our_ticket: String,
         network_mode: NetworkMode,
         options: TransportOptions,
@@ -233,7 +200,7 @@ impl ConnectionManager {
             peers: Arc::new(RwLock::new(HashMap::new())),
             player_routes: Arc::new(RwLock::new(HashMap::new())),
             session_manager,
-            message_tx,
+            inbox,
             endpoint_id,
             our_ticket,
             network_mode,
@@ -512,7 +479,7 @@ impl ConnectionManager {
     fn spawn_connection_handler(&self, connection: Connection, endpoint_id: EndpointId) {
         let endpoint_id_bytes: [u8; 32] = *endpoint_id;
         let session_manager = self.session_manager.clone();
-        let message_tx = self.message_tx.clone();
+        let inbox = self.inbox.clone();
         let peers = self.peers.clone();
         let player_routes = self.player_routes.clone();
         let cm = self.clone();
@@ -535,7 +502,7 @@ impl ConnectionManager {
                         match result {
                             Ok(recv) => {
                                 let session_manager = session_manager.clone();
-                                let message_tx = message_tx.clone();
+                                let inbox = inbox.clone();
                                 let player_routes = player_routes.clone();
                                 let cm = cm.clone();
 
@@ -543,7 +510,7 @@ impl ConnectionManager {
                                     if let Err(e) = read_ordered_stream(
                                         recv,
                                         &session_manager,
-                                        &message_tx,
+                                        &inbox,
                                         &player_routes,
                                         endpoint_id_bytes,
                                         &cm,
@@ -602,9 +569,7 @@ impl ConnectionManager {
         crate::capture::connection_lost(&endpoint_id_bytes, was_host);
 
         if was_host {
-            let _ = self.message_tx.send(ReceivedMessage::SystemMessage(
-                dp_types::serialize_dpmsg_sessionlost(),
-            ));
+            self.inbox.add_system(SystemEvent::SessionLost);
             return;
         }
 
@@ -720,7 +685,7 @@ impl ConnectionManager {
 async fn read_ordered_stream(
     mut recv: RecvStream,
     session_manager: &SessionManager,
-    message_tx: &mpsc::UnboundedSender<ReceivedMessage>,
+    inbox: &GameInbox,
     player_routes: &Arc<RwLock<HashMap<DPID, [u8; 32]>>>,
     sender_endpoint_id: [u8; 32],
     cm: &ConnectionManager,
@@ -781,7 +746,7 @@ async fn read_ordered_stream(
         handle_peer_message(
             msg,
             session_manager,
-            message_tx,
+            inbox,
             player_routes,
             sender_endpoint_id,
             cm,
@@ -796,7 +761,7 @@ async fn read_ordered_stream(
 async fn handle_peer_message(
     msg: Message,
     session_manager: &SessionManager,
-    message_tx: &mpsc::UnboundedSender<ReceivedMessage>,
+    inbox: &GameInbox,
     player_routes: &Arc<RwLock<HashMap<DPID, [u8; 32]>>>,
     sender_endpoint_id: [u8; 32],
     cm: &ConnectionManager,
@@ -814,7 +779,6 @@ async fn handle_peer_message(
         Message::SessionAnnounce { session } => {
             debug!("Received session announcement: {}", session.session_name);
             session_manager.add_discovered_session(session.clone());
-            let _ = message_tx.send(ReceivedMessage::SessionDiscovered(session));
         }
 
         Message::SessionList { sessions } => {
@@ -822,7 +786,6 @@ async fn handle_peer_message(
             for session in &sessions {
                 session_manager.add_discovered_session(session.clone());
             }
-            let _ = message_tx.send(ReceivedMessage::SessionList(sessions));
         }
 
         Message::PlayerJoined { player } => {
@@ -847,7 +810,10 @@ async fn handle_peer_message(
                 });
             }
 
-            let _ = message_tx.send(ReceivedMessage::PlayerJoined(player));
+            inbox.add_system(SystemEvent::PlayerJoined {
+                current_players: session_manager.get_players().len() as u32,
+                info: player,
+            });
         }
 
         Message::PlayerLeft { player_id, .. } => {
@@ -864,8 +830,12 @@ async fn handle_peer_message(
             }
             debug!("Player left: {}", player_id);
             player_routes.write().remove(&player_id);
+            let (name, flags) = session_manager
+                .get_player(player_id)
+                .map(|p| (p.name.clone(), p.flags))
+                .unwrap_or_else(|| (PlayerName::default(), 0));
             session_manager.remove_player(player_id);
-            let _ = message_tx.send(ReceivedMessage::PlayerLeft(player_id));
+            inbox.add_system(SystemEvent::PlayerLeft { player_id, name, flags });
         }
 
         Message::GameMessage {
@@ -888,13 +858,7 @@ async fn handle_peer_message(
             //   * relaying would double-deliver to peers the origin already reached;
             //   * echoing to the sender would duplicate the copy JACKAL already gives
             //     the sender via its internal loopback queue (game @0x64a210).
-            let _ = message_tx.send(ReceivedMessage::GameMessage {
-                from,
-                to,
-                data,
-                guaranteed,
-                capture_id,
-            });
+            inbox.add_game_message(from, to, data, guaranteed, capture_id);
         }
 
         Message::SessionClosed { .. } => {
@@ -904,7 +868,7 @@ async fn handle_peer_message(
                 debug!("Ignoring SessionClosed from a peer that isn't our session's host");
                 return;
             }
-            let _ = message_tx.send(ReceivedMessage::SessionClosed);
+            inbox.add_system(SystemEvent::SessionLost);
         }
 
         Message::PlayerDataUpdate {
@@ -920,7 +884,7 @@ async fn handle_peer_message(
 
             // Generate DPMSG_SETPLAYERORGROUPDATA for the local game
             let sys_msg = serialize_dpmsg_setplayerorgroupdata(player_id, DPPLAYERTYPE_PLAYER, &data);
-            let _ = message_tx.send(ReceivedMessage::SystemMessage(sys_msg));
+            inbox.add_system(SystemEvent::Message(sys_msg));
         }
 
         Message::Ping { timestamp } => {
@@ -932,7 +896,10 @@ async fn handle_peer_message(
             // game hear of it, named, as real DirectPlay would tell it.
             if let Some(joiner) = session_manager.rename_remote_player(player_id, name.clone()) {
                 info!(player_id, long = %name.long_name, "Joiner created its player, announcing it to the game");
-                let _ = message_tx.send(ReceivedMessage::PlayerJoined(joiner));
+                inbox.add_system(SystemEvent::PlayerJoined {
+                    current_players: session_manager.get_players().len() as u32,
+                    info: joiner,
+                });
                 return;
             }
 
@@ -944,7 +911,7 @@ async fn handle_peer_message(
                 &name.short_name,
                 &name.long_name,
             );
-            let _ = message_tx.send(ReceivedMessage::SystemMessage(sys_msg));
+            inbox.add_system(SystemEvent::Message(sys_msg));
         }
 
         Message::SessionDescUpdate { session: desc } => {
@@ -952,7 +919,7 @@ async fn handle_peer_message(
 
             // Generate DPMSG_SETSESSIONDESC for the local game
             let sys_msg = serialize_dpmsg_setsessiondesc(&desc);
-            let _ = message_tx.send(ReceivedMessage::SystemMessage(sys_msg));
+            inbox.add_system(SystemEvent::Message(sys_msg));
 
             // Update session state
             session_manager.update_session_desc(|existing| {
