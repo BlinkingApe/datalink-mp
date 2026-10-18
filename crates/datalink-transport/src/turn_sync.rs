@@ -25,6 +25,7 @@
 //!   timer) are counted as messages and bytes but change nothing else.
 
 use crate::capture;
+use crate::jackal::Jackal;
 use iroh::endpoint::Connection;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -154,17 +155,16 @@ impl TurnSyncDetector {
         data: &[u8],
         rtt: &mut dyn FnMut() -> Option<Duration>,
     ) -> Option<Event> {
-        let kind = data.get(0..2).map(|b| u16::from_le_bytes([b[0], b[1]]));
-        let seq = data.get(4..8).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-        let (Some(kind), Some(seq)) = (kind, seq) else {
+        let Some(header) = Jackal::decode(data) else {
             self.account(now, dir, data.len());
             return None;
         };
-        let is_data = kind & 0x4 != 0;
-        let is_ack = !is_data && kind & 0x2 != 0;
+        let seq = header.seq;
+        let is_data = header.carries_reliable_data();
+        let is_ack = header.carries_ack();
 
         let fresh = if is_data { self.first_copy(dir, seq) } else { false };
-        let game_type = if is_data { data.get(8..10).map(|b| u16::from_le_bytes([b[0], b[1]])) } else { None };
+        let game_type = header.game_type;
 
         // Time since the last message counts as idle if nothing was waiting.
         self.account(now, dir, data.len());

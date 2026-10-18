@@ -4,6 +4,8 @@
 //! to Iroh P2P connections.
 
 pub mod capture;
+pub mod frame_sink;
+pub mod jackal;
 pub mod path;
 pub mod protocol;
 pub mod session;
