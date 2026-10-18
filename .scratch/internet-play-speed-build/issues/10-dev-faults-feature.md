@@ -9,3 +9,7 @@
 - [ ] Release builds don't contain the feature (checked)
 - [ ] `drop:N` and `reset:N` behave as described in a Transport test
 - [ ] They log when they fire
+
+## Comments
+
+- 2026-10-18: The dev-faults adapter is a third adapter at the frame-sink seam from [transport-message-path](../../transport-message-path/spec.md), wrapping the iroh one.

@@ -12,3 +12,7 @@ In short: it acts only on kind `0x0004` messages to the one friend, made at enqu
 - [ ] In-process two-Transport tests (as in `tests/mesh_networking.rs`): an early ack appears before the friend has the message, the real ack is swallowed, a resend is dropped, the 17th early ack is withheld, no early acks with three players
 - [ ] Setup kinds `0x12`/`0x14` are left alone
 - [ ] The game receives exactly the bytes sent, in order
+
+## Comments
+
+- 2026-10-18: Build this inside the friend pipeline and the game inbox from [transport-message-path](../../transport-message-path/spec.md), which lands first. That spec's "Effect on the Early ack tickets" table replaces the hook list above.

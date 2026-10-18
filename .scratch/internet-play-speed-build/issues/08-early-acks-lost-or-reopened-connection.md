@@ -9,3 +9,7 @@
 - [ ] Tests: no early acks after a loss, for the rest of the Game session
 - [ ] Test: a reset stream replays in order and delivers each message once
 - [ ] Existing lost-connection behaviour is unchanged
+
+## Comments
+
+- 2026-10-18: The reset-stream test uses the in-memory frame sink from [transport-message-path](../../transport-message-path/spec.md), so this ticket no longer needs ticket 10's fault injection. Replay is the writer asking the friend pipeline for in-flight frames on reopen.
