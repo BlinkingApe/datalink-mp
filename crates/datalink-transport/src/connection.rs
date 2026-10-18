@@ -348,6 +348,15 @@ impl ConnectionManager {
         }
     }
 
+    /// Tell every connected friend's pipeline a Game session began. The
+    /// peer entries are cloned out first so none is called under the peers lock.
+    pub fn game_session_began(&self) {
+        let peers: Vec<_> = self.peers.read().values().cloned().collect();
+        for peer in peers {
+            peer.pipeline.game_session_began();
+        }
+    }
+
     /// Disconnect all peers
     pub fn disconnect_all(&self) {
         let mut peers = self.peers.write();
@@ -572,9 +581,13 @@ impl ConnectionManager {
             }
 
             // Connection closed - cleanup
-            if let Some(peer) = peers.write().remove(&endpoint_id_bytes) {
+            // The pipeline hears "connection lost" before the entry goes, and
+            // with no lock held.
+            let peer = peers.read().get(&endpoint_id_bytes).cloned();
+            if let Some(peer) = peer {
                 peer.pipeline.connection_lost();
             }
+            peers.write().remove(&endpoint_id_bytes);
             player_routes.write().retain(|_, v| v != &endpoint_id_bytes);
             cm.act_on_lost_connection(endpoint_id_bytes);
         });

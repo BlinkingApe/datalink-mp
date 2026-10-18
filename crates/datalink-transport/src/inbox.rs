@@ -80,39 +80,33 @@ impl GameInbox {
     /// Add the system message for `event`. Returns false if it was a second
     /// "player joined" for the same player in this Game session, and so not added.
     pub fn add_system(&self, event: SystemEvent) -> bool {
-        let (data, to) = match event {
+        let data = match event {
             SystemEvent::PlayerJoined { info, current_players } => {
                 if !self.inner.lock().joined.insert(info.player_id) {
                     debug!(player_id = info.player_id, "Skipping duplicate CREATEPLAYERORGROUP");
                     return false;
                 }
-                (
-                    dp_types::serialize_dpmsg_createplayerorgroup(
-                        info.player_id,
-                        dp_types::DPPLAYERTYPE_PLAYER,
-                        current_players,
-                        &info.name,
-                        &info.data,
-                        info.flags,
-                    ),
-                    dpid::DPID_ALLPLAYERS,
+                dp_types::serialize_dpmsg_createplayerorgroup(
+                    info.player_id,
+                    dp_types::DPPLAYERTYPE_PLAYER,
+                    current_players,
+                    &info.name,
+                    &info.data,
+                    info.flags,
                 )
             }
-            SystemEvent::PlayerLeft { player_id, name, flags } => (
-                dp_types::serialize_dpmsg_destroyplayerorgroup(
-                    player_id,
-                    dp_types::DPPLAYERTYPE_PLAYER,
-                    &name,
-                    flags,
-                ),
-                dpid::DPID_ALLPLAYERS,
+            SystemEvent::PlayerLeft { player_id, name, flags } => dp_types::serialize_dpmsg_destroyplayerorgroup(
+                player_id,
+                dp_types::DPPLAYERTYPE_PLAYER,
+                &name,
+                flags,
             ),
-            SystemEvent::SessionLost => (dp_types::serialize_dpmsg_sessionlost(), dpid::DPID_ALLPLAYERS),
-            SystemEvent::Message(data) => (data, dpid::DPID_ALLPLAYERS),
+            SystemEvent::SessionLost => dp_types::serialize_dpmsg_sessionlost(),
+            SystemEvent::Message(data) => data,
         };
         self.inner.lock().queue.push_back(QueuedMessage {
             from: dpid::DPID_SYSMSG,
-            to,
+            to: dpid::DPID_ALLPLAYERS,
             data,
             guaranteed: true,
             capture_id: None,
