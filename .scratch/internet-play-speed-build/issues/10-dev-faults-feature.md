@@ -1,6 +1,6 @@
 # 10: dev-faults cargo feature
 
-**What to build:** A dev-only cargo feature `dev-faults`, absent from release builds, lets a tester inject faults during a game: `DATALINK_FAULT=drop:N` closes the friend's connection after N early acks, and `reset:N` resets the stream. They are for the fault-injection validation, run during the game start's state sync.
+**What to build:** A dev-only cargo feature `dev-faults`, absent from release builds, lets a tester inject faults during a game: `DATALINK_FAULT=drop:N` closes the friend's connection after N early acks, and `reset:N` resets the stream. They are for the fault-injection validation, run during the game start's state sync. The feature is a third adapter at the frame-sink seam (`FrameSink` in `crates/datalink-transport/src/frame_sink.rs`), wrapping `IrohFrameSink` beside the test-only `MemoryFrameSink`.
 
 **Blocked by:** 07, 08
 
@@ -12,4 +12,4 @@
 
 ## Comments
 
-- 2026-10-18: The dev-faults adapter is a third adapter at the frame-sink seam from [transport-message-path](../../transport-message-path/spec.md), wrapping the iroh one.
+- 2026-10-18: The dev-faults adapter is a third adapter at the frame-sink seam from [transport-message-path](../../archive/transport-message-path/spec.md), wrapping the iroh one.

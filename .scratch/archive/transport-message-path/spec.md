@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 
-Date: 2026-10-18. Comes from the architecture review of the same date (candidates A, B and C). Builds toward [ADR-0005](../../docs/adr/0005-internet-play-speed-helpers-answer-acks.md) and the Early ack tickets in [internet-play-speed-build](../internet-play-speed-build/issues/).
+Date: 2026-10-18. Comes from the architecture review of the same date (candidates A, B and C). Builds toward [ADR-0005](../../../docs/adr/0005-internet-play-speed-helpers-answer-acks.md) and the Early ack tickets in [internet-play-speed-build](../../internet-play-speed-build/issues/).
 
 ## Problem Statement
 
