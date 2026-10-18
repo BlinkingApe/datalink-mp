@@ -18,15 +18,19 @@ See the spec, [The game inbox](../spec.md#the-game-inbox).
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] In-process inbox tests:
-  - [ ] items come out in the order added, across friend messages, loopback and system events
-  - [ ] a duplicate "player joined" is not added
-  - [ ] Game session began empties it and allows the same player to join again
-  - [ ] count matches take
-  - [ ] each system message matches today's bytes
-- [ ] The Transport no longer has a channel stage or its own dedup set
-- [ ] The game receives exactly the bytes sent, in order: the end-to-end delivery, closed-session and Joiner-leaving tests pass unchanged
-- [ ] Transport tests that only checked inbox ordering or dedup move to the inbox's tests, rather than being kept twice
-- [ ] `cargo test` passes, including the Helper's UI tests
+- [x] In-process inbox tests:
+  - [x] items come out in the order added, across friend messages, loopback and system events
+  - [x] a duplicate "player joined" is not added
+  - [x] Game session began empties it and allows the same player to join again
+  - [x] count matches take
+  - [x] each system message matches today's bytes
+- [x] The Transport no longer has a channel stage or its own dedup set
+- [x] The game receives exactly the bytes sent, in order: the end-to-end delivery, closed-session and Joiner-leaving tests pass unchanged
+- [x] Transport tests that only checked inbox ordering or dedup move to the inbox's tests, rather than being kept twice
+- [x] `cargo test` passes, including the Helper's UI tests
+
+## Comments
+
+Built `crates/datalink-transport/src/inbox.rs`: `GameInbox` (one ordered queue, dedup set, `session_began`, `take`, `count`, `SystemEvent` builders) replacing the Transport channel, queue and CREATEPLAYERORGROUP set. The connection manager and Transport add to it directly. `ReceivedMessage` is gone, and the discovery/session-list sends with it. Roster facts (player count, leaver name/flags) are looked up by callers. Inbox unit tests cover order, dedup, session-began, count/take and system-message bytes.

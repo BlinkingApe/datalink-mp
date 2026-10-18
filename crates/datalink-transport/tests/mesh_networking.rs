@@ -659,6 +659,54 @@ fn test_messages_from_a_closed_session_do_not_reach_the_next_game_the_host_hosts
     assert!(host.session_manager().is_host(), "the host is hosting again");
 }
 
+/// A friend's connection is lost, then the host's game begins a new Game
+/// session before it polls its inbox. The host's Helper must still re-dial the
+/// friend: the loss is acted on when it happens, not when the game next polls.
+#[test]
+fn test_friend_lost_just_before_a_new_game_session_is_still_redialled() {
+    let Some((host, joiner, _joiner_id)) = hosted_game_with_a_named_joiner() else {
+        return;
+    };
+    let friend = joiner.endpoint_id();
+
+    joiner.drop_connection_to(host.endpoint_id());
+    // The host's Helper has seen the loss; its game has not polled.
+    assert!(
+        poll_until(Duration::from_secs(5), || host.connected_peers().is_empty().then_some(())).is_some(),
+        "the host should notice the friend's connection ended"
+    );
+
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Hosted Again".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+
+    assert!(
+        poll_until(Duration::from_secs(10), || {
+            host.connected_peers().contains(&friend).then_some(())
+        })
+        .is_some(),
+        "the host should have re-dialled the friend"
+    );
+}
+
+/// A Joiner whose host's connection is lost is told the session was lost.
+#[test]
+fn test_joiner_whose_host_connection_is_lost_is_told_session_lost() {
+    let Some((host, joiner, _joiner_id)) = hosted_game_with_a_named_joiner() else {
+        return;
+    };
+    joiner.drop_connection_to(host.endpoint_id());
+    let lost = poll_until(Duration::from_secs(5), || {
+        std::iter::from_fn(|| joiner.receive())
+            .find(|qm| system_message_type(qm) == Some(dp_types::sysmsg::DPSYS_SESSIONLOST))
+    });
+    assert!(lost.is_some(), "the joiner's game should be told its session was lost");
+}
+
 #[test]
 fn test_default_options_are_peer_protocol_version_1_and_15s_dial_timeout() {
     let options = datalink_transport::TransportOptions::default();
