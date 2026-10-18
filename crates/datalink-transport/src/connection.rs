@@ -253,8 +253,6 @@ pub enum ReceivedMessage {
     },
     /// Session closed
     SessionClosed,
-    /// Connection lost to a peer
-    ConnectionLost(EndpointId),
     /// DirectPlay system message to deliver to game (already serialized)
     SystemMessage(Vec<u8>),
 }
@@ -671,8 +669,50 @@ impl ConnectionManager {
             crate::turn_sync::unregister(&endpoint_id_bytes, &connection);
             peers.write().remove(&endpoint_id_bytes);
             player_routes.write().retain(|_, v| v != &endpoint_id_bytes);
-            let _ = message_tx.send(ReceivedMessage::ConnectionLost(endpoint_id));
+            cm.act_on_lost_connection(endpoint_id_bytes);
         });
+    }
+
+    /// Act on a friend's lost connection, at once, on the runtime: write the
+    /// capture's `lost` line, then either tell the game its session is lost
+    /// (the friend was the host) or start the reconnect driver.
+    fn act_on_lost_connection(&self, endpoint_id_bytes: [u8; 32]) {
+        let was_host = self.session_manager.is_node_host(&endpoint_id_bytes);
+        crate::capture::connection_lost(&endpoint_id_bytes, was_host);
+
+        if was_host {
+            let _ = self.message_tx.send(ReceivedMessage::SystemMessage(
+                dp_types::serialize_dpmsg_sessionlost(),
+            ));
+            return;
+        }
+
+        // Non-host peer lost. Heal the full mesh by re-dialing the peer via its
+        // ticket (bounded best-effort). Nothing else re-establishes a peer
+        // connection after a transient transport loss, and under full mesh a
+        // dropped edge silently stops that pair from exchanging
+        // broadcasts/ACKs. connect_by_ticket is idempotent, so a race with a
+        // heal from the other side is harmless. If the peer is genuinely gone
+        // the retries simply fail out; session state is untouched here.
+        if let Some(ticket) = self.session_manager.get_player_ticket_by_node(&endpoint_id_bytes) {
+            let cm = self.clone();
+            tokio::spawn(async move {
+                for attempt in 1..=5u32 {
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+                    match cm.connect_by_ticket(&ticket).await {
+                        Ok(_) => {
+                            info!(attempt, "reconnected to peer after transport loss");
+                            crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
+                            break;
+                        }
+                        Err(e) => {
+                            debug!(attempt, error = %e, "reconnect attempt failed");
+                            crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
+                        }
+                    }
+                }
+            });
+        }
     }
 
     /// Establish mesh connection to a new player

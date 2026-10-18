@@ -873,61 +873,6 @@ impl Transport {
                     capture_id: None,
                 })
             }
-            ReceivedMessage::ConnectionLost(endpoint_id) => {
-                let endpoint_id_bytes: [u8; 32] = *endpoint_id;
-                crate::capture::connection_lost(
-                    &endpoint_id_bytes,
-                    self.session_manager.is_node_host(&endpoint_id_bytes),
-                );
-
-                // Check if the disconnected peer was the host
-                if self.session_manager.is_node_host(&endpoint_id_bytes) {
-                    // Host disconnected - session is lost
-                    let sys_msg = create_session_lost_msg();
-                    Some(QueuedMessage {
-                        from: dpid::DPID_SYSMSG,
-                        to: dpid::DPID_ALLPLAYERS,
-                        data: sys_msg,
-                        guaranteed: true,
-                        capture_id: None,
-                    })
-                } else {
-                    // Non-host peer lost. Heal the full mesh by re-dialing the peer
-                    // via its ticket (bounded best-effort). This is the reconnect
-                    // driver the design requires: nothing else re-establishes a peer
-                    // connection after a transient transport loss, and under full
-                    // mesh a dropped edge silently stops that pair from exchanging
-                    // broadcasts/ACKs. connect_by_ticket is idempotent, so a race
-                    // with a heal from the other side is harmless. If the peer is
-                    // genuinely gone the retries simply fail out; session state is
-                    // untouched here.
-                    if let Some(ticket) =
-                        self.session_manager.get_player_ticket_by_node(&endpoint_id_bytes)
-                    {
-                        let cm = self.connection_manager.clone();
-                        self.runtime.spawn(async move {
-                            for attempt in 1..=5u32 {
-                                tokio::time::sleep(std::time::Duration::from_millis(
-                                    500 * attempt as u64,
-                                ))
-                                .await;
-                                match cm.connect_by_ticket(&ticket).await {
-                                    Ok(_) => {
-                                        info!(attempt, "reconnected to peer after transport loss");
-                                        crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
-                                        break;
-                                    }
-                                    Err(e) => {
-                                        debug!(attempt, error = %e, "reconnect attempt failed");
-                                        crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    None
-                }
-            }
             ReceivedMessage::SystemMessage(data) => {
                 // Pre-serialized DirectPlay system message - deliver directly to game
                 Some(QueuedMessage {
@@ -1053,6 +998,13 @@ impl Transport {
     /// session discovery is listed too.
     pub fn connected_peers(&self) -> Vec<EndpointId> {
         self.connection_manager.get_connected_peers()
+    }
+
+    /// Close the connection to one Helper while keeping the endpoint up, as a
+    /// dropped network path would. For tests of connection loss.
+    #[doc(hidden)]
+    pub fn drop_connection_to(&self, endpoint_id: EndpointId) {
+        self.connection_manager.disconnect(&endpoint_id);
     }
 
     /// How each connected Helper's connection goes, Direct or Relayed, once its

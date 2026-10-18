@@ -12,11 +12,17 @@ The inbox stays two-stage in this ticket; [03](03-one-game-inbox.md) replaces it
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Draining the inbox no longer runs any connection-loss policy
-- [ ] A Joiner whose host's connection is lost still gets session lost, as today
-- [ ] Regression test with real endpoints (as in the Transport's mesh tests): a friend's connection is lost, the host's game starts a new Game session before polling, and the host still reconnects to the friend
-- [ ] The capture's `lost` and `reconnect` lines are written as before (format 1 unchanged)
-- [ ] Existing Joiner-leaving and closed-session tests pass unchanged
-- [ ] A one-line note for the next release notes: the reconnect starts when the loss is seen
+- [x] Draining the inbox no longer runs any connection-loss policy
+- [x] A Joiner whose host's connection is lost still gets session lost, as today
+- [x] Regression test with real endpoints (as in the Transport's mesh tests): a friend's connection is lost, the host's game starts a new Game session before polling, and the host still reconnects to the friend
+- [x] The capture's `lost` and `reconnect` lines are written as before (format 1 unchanged)
+- [x] Existing Joiner-leaving and closed-session tests pass unchanged
+- [x] A one-line note for the next release notes: the reconnect starts when the loss is seen
+
+## Comments
+
+Built: the connection manager's cleanup (`ConnectionManager::act_on_lost_connection`, on the runtime) now writes the `lost` line, queues session lost when the friend was the host, and otherwise starts the unchanged five-attempt reconnect driver. `ReceivedMessage::ConnectionLost` and its drain-time handling in `Transport` are gone. Regression tests in `tests/mesh_networking.rs` (friend lost before a new Game session is still re-dialled; Joiner still gets session lost). Added a `#[doc(hidden)] Transport::drop_connection_to` for them.
+
+Release note line: The reconnect to a friend now starts as soon as the loss is seen, and no longer gets lost if you click Host Game or Join Game just after the drop.
