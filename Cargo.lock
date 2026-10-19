@@ -692,7 +692,7 @@ dependencies = [
 
 [[package]]
 name = "datalink-fixes"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "tracing",
  "windows",
@@ -700,7 +700,7 @@ dependencies = [
 
 [[package]]
 name = "datalink-ipc"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "dp-types",
  "postcard",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "datalink-mock-client"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "datalink-transport",
  "dp-types",
@@ -722,7 +722,7 @@ dependencies = [
 
 [[package]]
 name = "datalink-mp"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "axum",
@@ -750,7 +750,7 @@ dependencies = [
 
 [[package]]
 name = "datalink-transport"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -890,7 +890,7 @@ dependencies = [
 
 [[package]]
 name = "dp-types"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -898,7 +898,7 @@ dependencies = [
 
 [[package]]
 name = "dplayx"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "datalink-fixes",
  "datalink-ipc",
