@@ -9,7 +9,7 @@
 //! directly, forming a full mesh.
 
 use crate::friend_pipeline::FriendPipeline;
-use crate::friend_registry::{FriendRegistry, Link, LinkId};
+use crate::friend_registry::{FriendRegistry, Link, LinkEnded, LinkId, LocalFacts, RosterFacts};
 use crate::inbox::{GameInbox, SystemEvent};
 use crate::protocol::{decode_message, encode_message, Message, PlayerInfo};
 use crate::runtime::{NetworkMode, TransportOptions};
@@ -234,7 +234,7 @@ impl ConnectionManager {
         };
 
         let link = self.build_link(&connection, endpoint_addr.id);
-        let link_id = self.friends.link_opened(*endpoint_addr.id, Some(ticket.to_string()), link);
+        let link_id = self.friends.link_opened(*endpoint_addr.id, Some(ticket.to_string()), link, &self.local_facts());
 
         // Outgoing connections need a receiver loop just like incoming ones:
         // without it we could send to the peer but never receive from them.
@@ -380,50 +380,53 @@ impl ConnectionManager {
                 }
             }
 
-            // Connection closed: the registry forgets the friend (its link's
-            // pipeline hears "connection lost"), then the loss is acted on.
-            cm.friends.link_ended(endpoint_id_bytes, link_id);
-            cm.act_on_lost_connection(endpoint_id_bytes);
+            // Connection closed. The registry decides what the loss means,
+            // from the roster's facts, at once: the game polling later must
+            // not delay a re-dial.
+            let roster = RosterFacts {
+                was_host: cm.session_manager.is_node_host(&endpoint_id_bytes),
+                ticket: cm.session_manager.get_player_ticket_by_node(&endpoint_id_bytes),
+            };
+            match cm.friends.link_ended(endpoint_id_bytes, link_id, roster) {
+                LinkEnded::Nothing => {}
+                LinkEnded::Redial { ticket } => cm.spawn_redial(endpoint_id_bytes, ticket),
+            }
         });
     }
 
-    /// Act on a friend's lost connection, at once, on the runtime: write the
-    /// capture's `lost` line, then either tell the game its session is lost
-    /// (the friend was the host) or start the reconnect driver.
-    fn act_on_lost_connection(&self, endpoint_id_bytes: [u8; 32]) {
-        let was_host = self.session_manager.is_node_host(&endpoint_id_bytes);
-        crate::capture::connection_lost(&endpoint_id_bytes, was_host);
-
-        if was_host {
-            self.inbox.add_system(SystemEvent::SessionLost);
-            return;
-        }
-
-        // Non-host peer lost. Heal the full mesh by re-dialing the peer via its
-        // ticket (bounded best-effort). Nothing else re-establishes a peer
-        // connection after a transient transport loss, and under full mesh a
-        // dropped edge silently stops that pair from exchanging
-        // broadcasts/ACKs. connect_by_ticket is idempotent, so a race with a
-        // heal from the other side is harmless. If the peer is genuinely gone
-        // the retries simply fail out; session state is untouched here.
-        if let Some(ticket) = self.session_manager.get_player_ticket_by_node(&endpoint_id_bytes) {
-            let cm = self.clone();
-            tokio::spawn(async move {
-                for attempt in 1..=5u32 {
-                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
-                    match cm.connect_by_ticket(&ticket).await {
-                        Ok(_) => {
-                            info!(attempt, "reconnected to peer after transport loss");
-                            crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
-                            break;
-                        }
-                        Err(e) => {
-                            debug!(attempt, error = %e, "reconnect attempt failed");
-                            crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
-                        }
+    /// Re-dial a lost friend by its ticket (bounded best-effort): five
+    /// attempts, backing off. Nothing else re-establishes a friend's
+    /// connection after a transient transport loss, and under full mesh a
+    /// dropped edge silently stops that pair from exchanging
+    /// broadcasts/ACKs. connect_by_ticket is idempotent, so a race with a
+    /// heal from the other side is harmless. When a dial succeeds, the
+    /// registry re-attaches the new link to the friend's kept record.
+    fn spawn_redial(&self, endpoint_id_bytes: [u8; 32], ticket: String) {
+        let cm = self.clone();
+        tokio::spawn(async move {
+            for attempt in 1..=5u32 {
+                tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+                match cm.connect_by_ticket(&ticket).await {
+                    Ok(_) => {
+                        info!(attempt, "reconnected to peer after transport loss");
+                        crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
+                        return;
+                    }
+                    Err(e) => {
+                        debug!(attempt, error = %e, "reconnect attempt failed");
+                        crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
                     }
                 }
-            });
+            }
+            cm.friends.redial_gave_up(endpoint_id_bytes);
+        });
+    }
+
+    /// Who we are, for the Hello a re-attached link carries first.
+    fn local_facts(&self) -> LocalFacts {
+        LocalFacts {
+            player: self.session_manager.local_player_id(),
+            ticket: self.our_ticket.clone(),
         }
     }
 
@@ -449,23 +452,13 @@ impl ConnectionManager {
 
         info!("Establishing mesh connection to player {}", player_info.player_id);
 
+        // Route first: the link then opens onto the friend's record, and the
+        // registry queues our Hello on it before anything else.
+        self.friends.player_joined(player_info.player_id, player_info.node_id);
+
         // Connect using their ticket
         match self.connect_by_ticket(&player_info.ticket).await {
-            Ok(endpoint_id) => {
-                // Send Hello to identify ourselves
-                let our_player_id = self.session_manager.local_player_id().unwrap_or(0);
-                let hello = Message::Hello {
-                    player_id: our_player_id,
-                    ticket: self.our_ticket.clone(),
-                };
-
-                if let Err(e) = self.friends.send_control(*endpoint_id, &hello) {
-                    warn!("Failed to send Hello: {}", e);
-                }
-
-                // Add routing
-                self.friends.player_joined(player_info.player_id, player_info.node_id);
-
+            Ok(_) => {
                 info!("Mesh connection established to player {}", player_info.player_id);
             }
             Err(e) => {
@@ -483,7 +476,7 @@ impl ConnectionManager {
         // The ticket comes with the friend's Hello. The registry keeps this
         // link only if the friend has none.
         let link = self.build_link(&connection, endpoint_id);
-        let link_id = self.friends.link_opened(*endpoint_id, None, link);
+        let link_id = self.friends.link_opened(*endpoint_id, None, link, &self.local_facts());
 
         // Use shared helper to spawn the connection handler
         self.spawn_connection_handler(connection, endpoint_id, link_id);

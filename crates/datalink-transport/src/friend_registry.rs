@@ -20,7 +20,7 @@
 use crate::friend_pipeline::{
     FriendPipeline, InboundOutcome, InboundResult, OutboundOutcome, OutboundResult,
 };
-use crate::inbox::GameInbox;
+use crate::inbox::{GameInbox, SystemEvent};
 use crate::protocol::{encode_message, Message};
 use crate::{TransportError, TransportResult};
 use dp_types::{dpid, DPID};
@@ -78,14 +78,43 @@ pub struct SendFacts {
     pub local_player: Option<DPID>,
 }
 
+/// Who this Helper is, for the Hello a re-attached link carries first.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalFacts {
+    /// Our own player, once the game created it.
+    pub player: Option<DPID>,
+    /// Our ticket.
+    pub ticket: String,
+}
+
+/// What the session roster says about a friend whose link ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RosterFacts {
+    /// Whether the friend hosts our Game session.
+    pub was_host: bool,
+    /// The friend's ticket, if one of its players is in the roster.
+    pub ticket: Option<String>,
+}
+
+/// The registry's answer when a link ends: what the caller must do next.
+#[must_use]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkEnded {
+    /// Nothing more to do.
+    Nothing,
+    /// The friend is lost but kept: re-dial it with this ticket, and tell the
+    /// registry if the re-dial gives up.
+    Redial { ticket: String },
+}
+
 /// Facts about a friend scoped to the Game session that must outlive a link.
 /// Cleared when a Game session begins. Empty for now.
 #[derive(Debug, Default)]
 struct GameSessionFacts {}
 
 struct Record<H> {
-    /// From our dial or the friend's Hello. Nothing reads it yet: it is kept
-    /// for re-dialling the friend.
+    /// From our dial, the friend's Hello, or the roster at a loss. Nothing
+    /// reads it yet: the re-dial uses the roster's ticket, as before.
     #[allow(dead_code)]
     ticket: Option<String>,
     /// The friend's players: the routes.
@@ -137,30 +166,115 @@ impl<H: Clone> FriendRegistry<H> {
     /// For now, as before the registry: a link we dialled replaces the
     /// friend's link, and a link the friend made is kept only if the friend
     /// has none. A link that isn't kept is dropped, which ends its writer.
-    pub fn link_opened(&self, friend: FriendId, ticket: Option<String>, link: Link<H>) -> LinkId {
-        let mut s = self.state.lock();
-        s.next_link += 1;
-        let id = LinkId(s.next_link);
-        let record = s.friends.entry(friend).or_default();
-        let dialled = ticket.is_some();
-        if dialled {
-            record.ticket = ticket;
-        }
-        if dialled || record.link.is_none() {
-            record.link = Some(Arc::new(Link { id, ..link }));
+    ///
+    /// A link that opens onto a record with no link re-attaches it: a friend
+    /// being re-dialled, or one whose players were routed before the dial.
+    /// Its players route there again, and when we have a player, our Hello
+    /// (from `us`) is the link's first frame.
+    pub fn link_opened(
+        &self,
+        friend: FriendId,
+        ticket: Option<String>,
+        link: Link<H>,
+        us: &LocalFacts,
+    ) -> LinkId {
+        // Encoded before the lock is taken; queued only if the link
+        // re-attaches a record.
+        let hello = us.player.map(|player_id| Message::Hello {
+            player_id,
+            ticket: us.ticket.clone(),
+        });
+        let encoded_hello = hello.as_ref().and_then(|h| encode_message(h).ok());
+        let mut said_hello = false;
+        let id = {
+            let mut s = self.state.lock();
+            s.next_link += 1;
+            let id = LinkId(s.next_link);
+            let reattaching = s.friends.get(&friend).is_some_and(|r| r.link.is_none());
+            let record = s.friends.entry(friend).or_default();
+            let dialled = ticket.is_some();
+            if dialled {
+                record.ticket = ticket;
+            }
+            if dialled || record.link.is_none() {
+                if reattaching {
+                    // Queued while no one else can see the link, so it is the
+                    // first frame on it. The friend's Helper routes our player
+                    // here before anything else arrives.
+                    if let Some(frame) = encoded_hello {
+                        said_hello = link.outbox.send((frame, None)).is_ok();
+                    }
+                }
+                record.link = Some(Arc::new(Link { id, ..link }));
+            }
+            id
+        };
+        if let (true, Some(hello)) = (said_hello, &hello) {
+            crate::capture::outbound_control(&friend, hello);
         }
         id
     }
 
-    /// A link to `friend` ended. For now, as before the registry: whichever
-    /// of the friend's links it was, the friend is forgotten, routes and all,
-    /// and its link's pipeline hears "connection lost". The caller then acts
-    /// on the loss.
-    pub fn link_ended(&self, friend: FriendId, ended: LinkId) {
-        let removed = self.state.lock().friends.remove(&friend);
-        if let Some(link) = removed.and_then(|r| r.link) {
-            debug!(endpoint = %short(&friend), current = link.id == ended, "link ended");
+    /// A link to `friend` ended. `roster` is what the session roster says
+    /// about the friend. When it was the friend's current link, the friend is
+    /// lost: the link's pipeline hears "connection lost", the capture's `lost`
+    /// line is written, and
+    /// - the host is forgotten, and the game told its session is lost
+    /// - a friend with players and a roster ticket is kept with no link, so
+    ///   directed sends to its players fail while it is re-dialled, and the
+    ///   answer is "re-dial with this ticket"
+    /// - anyone else (a friend only connected for session discovery) is
+    ///   forgotten
+    ///
+    /// Any other link of the friend ending changes nothing. A link of a
+    /// friend already forgotten (every friend is, at shutdown) is still a
+    /// loss: the `lost` line is written and, for the host, the game told.
+    pub fn link_ended(&self, friend: FriendId, ended: LinkId, roster: RosterFacts) -> LinkEnded {
+        let (lost, answer) = {
+            let mut s = self.state.lock();
+            match s.friends.get_mut(&friend) {
+                None => (None, LinkEnded::Nothing),
+                Some(record) if record.link.as_ref().map(|l| l.id) != Some(ended) => {
+                    debug!(endpoint = %short(&friend), "a link that is not the friend's current one ended");
+                    return LinkEnded::Nothing;
+                }
+                Some(record) => {
+                    let lost = record.link.take();
+                    let answer = match &roster.ticket {
+                        Some(ticket) if !roster.was_host && !record.players.is_empty() => {
+                            record.ticket = Some(ticket.clone());
+                            LinkEnded::Redial {
+                                ticket: ticket.clone(),
+                            }
+                        }
+                        _ => {
+                            s.friends.remove(&friend);
+                            LinkEnded::Nothing
+                        }
+                    };
+                    (lost, answer)
+                }
+            }
+        };
+        debug!(endpoint = %short(&friend), was_host = roster.was_host, ?answer, "friend lost");
+        if let Some(link) = lost {
             link.pipeline.connection_lost();
+        }
+        crate::capture::connection_lost(&friend, roster.was_host);
+        if roster.was_host {
+            self.inbox.add_system(SystemEvent::SessionLost);
+        }
+        answer
+    }
+
+    /// Every re-dial of `friend` failed: forget it, routes and all, unless a
+    /// link to it opened meanwhile. Game-session-sync ticket 05 may later
+    /// make this tell the game the friend's players left.
+    pub fn redial_gave_up(&self, friend: FriendId) {
+        let mut s = self.state.lock();
+        if s.friends.get(&friend).is_some_and(|r| r.link.is_none()) {
+            s.friends.remove(&friend);
+            debug!(endpoint = %short(&friend), "re-dial gave up, friend forgotten");
         }
     }
 
@@ -214,11 +328,10 @@ impl<H: Clone> FriendRegistry<H> {
         }
     }
 
-    /// Forget `friend`, routes and all. Returns its link's connection handle,
-    /// for the caller to close; the loss is handled when the link ends.
+    /// The connection handle of `friend`'s link, for the caller to close. The
+    /// friend is kept: its loss is handled when the link ends, as any other.
     pub fn disconnect(&self, friend: FriendId) -> Option<H> {
-        let removed = self.state.lock().friends.remove(&friend)?;
-        removed.link.map(|l| l.handle.clone())
+        self.link_handle(friend)
     }
 
     /// Forget every friend. Returns their links' connection handles, for the
@@ -542,8 +655,8 @@ mod tests {
         let reg = FriendRegistry::new(inbox.clone());
         let (a, arx) = stand_in(ALICE);
         let (b, brx) = stand_in(BOB);
-        reg.link_opened(ALICE, None, a);
-        reg.link_opened(BOB, None, b);
+        reg.link_opened(ALICE, None, a, &us());
+        reg.link_opened(BOB, None, b, &us());
         reg.player_joined(ALICE_PLAYER, ALICE);
         reg.player_joined(BOB_PLAYER, BOB);
         (reg, inbox, arx, brx)
@@ -698,7 +811,7 @@ mod tests {
         let inbox = GameInbox::new();
         let reg = FriendRegistry::new(inbox);
         let (a, mut arx) = stand_in(ALICE);
-        reg.link_opened(ALICE, None, a);
+        reg.link_opened(ALICE, None, a, &us());
         reg.hello(ALICE, ALICE_PLAYER, "alice's ticket".into());
         reg.send_game(LOCAL, ALICE_PLAYER, true, vec![1], &joiner())
             .unwrap();
@@ -715,5 +828,181 @@ mod tests {
             "{result:?}"
         );
         assert!(drain(&mut brx).is_empty());
+    }
+
+    /// Who the tests' Helper is: its player and its ticket.
+    fn us() -> LocalFacts {
+        LocalFacts {
+            player: Some(LOCAL),
+            ticket: "our ticket".into(),
+        }
+    }
+
+    /// Open a stand-in link to `friend`, as accepted, and route `player` there.
+    fn linked(
+        reg: &FriendRegistry<()>,
+        friend: FriendId,
+        player: DPID,
+    ) -> (LinkId, UnboundedReceiver<Frame>) {
+        let (link, rx) = stand_in(friend);
+        let id = reg.link_opened(friend, None, link, &us());
+        reg.player_joined(player, friend);
+        (id, rx)
+    }
+
+    fn the_host(ticket: &str) -> RosterFacts {
+        RosterFacts {
+            was_host: true,
+            ticket: Some(ticket.into()),
+        }
+    }
+
+    fn sends_to(reg: &FriendRegistry<()>, player: DPID) -> TransportResult<()> {
+        reg.send_game(LOCAL, player, true, vec![1], &joiner())
+    }
+
+    #[test]
+    fn losing_the_hosts_link_puts_session_lost_in_the_inbox_and_forgets_the_host() {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let (alice, _arx) = linked(&reg, ALICE, ALICE_PLAYER);
+
+        let answer = reg.link_ended(ALICE, alice, the_host("alice's ticket"));
+
+        assert_eq!(answer, LinkEnded::Nothing);
+        let lost = inbox.take().expect("the game should be told");
+        assert_eq!(lost.data, dp_types::serialize_dpmsg_sessionlost());
+        assert!(inbox.take().is_none());
+        // Forgotten: a new link to the host is not given the host's player.
+        let (link, mut arx) = stand_in(ALICE);
+        reg.link_opened(ALICE, None, link, &us());
+        let result = sends_to(&reg, ALICE_PLAYER);
+        assert!(matches!(result, Err(TransportError::PlayerNotFound)), "{result:?}");
+        assert!(drain(&mut arx).is_empty());
+    }
+
+    fn a_joiner(ticket: &str) -> RosterFacts {
+        RosterFacts {
+            was_host: false,
+            ticket: Some(ticket.into()),
+        }
+    }
+
+    #[test]
+    fn losing_a_friend_with_players_answers_redial_and_directed_sends_to_them_fail() {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let (_alice, _arx) = linked(&reg, ALICE, ALICE_PLAYER);
+        let (bob, _brx) = linked(&reg, BOB, BOB_PLAYER);
+
+        let answer = reg.link_ended(BOB, bob, a_joiner("bob's ticket"));
+
+        assert_eq!(
+            answer,
+            LinkEnded::Redial {
+                ticket: "bob's ticket".into()
+            }
+        );
+        let result = sends_to(&reg, BOB_PLAYER);
+        assert!(matches!(result, Err(TransportError::PlayerNotFound)), "{result:?}");
+        assert_eq!(inbox.count(), 0);
+    }
+
+    fn hello_from_us() -> String {
+        format!(
+            "{:?}",
+            Message::Hello {
+                player_id: LOCAL,
+                ticket: "our ticket".into()
+            }
+        )
+    }
+
+    /// A registry with Bob lost and being re-dialled.
+    fn bob_being_redialled() -> (FriendRegistry<()>, GameInbox) {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let (bob, _brx) = linked(&reg, BOB, BOB_PLAYER);
+        let _ = reg.link_ended(BOB, bob, a_joiner("bob's ticket"));
+        (reg, inbox)
+    }
+
+    #[test]
+    fn a_new_link_for_a_friend_being_redialled_carries_hello_first_then_directed_sends() {
+        let (reg, _inbox) = bob_being_redialled();
+
+        let (link, mut brx) = stand_in(BOB);
+        reg.link_opened(BOB, Some("bob's ticket".into()), link, &us());
+        sends_to(&reg, BOB_PLAYER).unwrap();
+
+        assert_eq!(
+            drain(&mut brx),
+            vec![hello_from_us(), game(LOCAL, BOB_PLAYER, &[1])]
+        );
+    }
+
+    #[test]
+    fn losing_a_discovery_only_friend_answers_nothing_and_forgets_it() {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let (link, _brx) = stand_in(BOB);
+        let bob = reg.link_opened(BOB, Some("bob's ticket".into()), link, &us());
+
+        let not_in_roster = RosterFacts {
+            was_host: false,
+            ticket: None,
+        };
+        assert_eq!(reg.link_ended(BOB, bob, not_in_roster), LinkEnded::Nothing);
+
+        assert_eq!(inbox.count(), 0);
+        // Forgotten: a new link to it is a first link, with no Hello.
+        let (link, mut brx) = stand_in(BOB);
+        reg.link_opened(BOB, None, link, &us());
+        assert!(drain(&mut brx).is_empty());
+    }
+
+    #[test]
+    fn after_the_redial_gave_up_directed_sends_to_the_friends_players_fail() {
+        let (reg, _inbox) = bob_being_redialled();
+
+        reg.redial_gave_up(BOB);
+
+        // Forgotten: a link opening later is a first link, with no Hello and
+        // no routes.
+        let (link, mut brx) = stand_in(BOB);
+        reg.link_opened(BOB, None, link, &us());
+        let result = sends_to(&reg, BOB_PLAYER);
+        assert!(matches!(result, Err(TransportError::PlayerNotFound)), "{result:?}");
+        assert!(drain(&mut brx).is_empty());
+    }
+
+    #[test]
+    fn a_disconnected_friends_loss_is_handled_when_its_link_ends() {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let (bob, _brx) = linked(&reg, BOB, BOB_PLAYER);
+
+        assert_eq!(reg.disconnect(BOB), Some(()));
+
+        assert_eq!(
+            reg.link_ended(BOB, bob, a_joiner("bob's ticket")),
+            LinkEnded::Redial {
+                ticket: "bob's ticket".into()
+            }
+        );
+    }
+
+    #[test]
+    fn an_incoming_link_for_a_friend_being_redialled_is_reattached_the_same_way() {
+        let (reg, _inbox) = bob_being_redialled();
+
+        let (link, mut brx) = stand_in(BOB);
+        reg.link_opened(BOB, None, link, &us());
+        sends_to(&reg, BOB_PLAYER).unwrap();
+
+        assert_eq!(
+            drain(&mut brx),
+            vec![hello_from_us(), game(LOCAL, BOB_PLAYER, &[1])]
+        );
     }
 }
