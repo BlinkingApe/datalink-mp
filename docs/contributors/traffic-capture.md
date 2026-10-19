@@ -184,8 +184,9 @@ Independent of the capture, the Helper logs at info a `turn sync finished` or `g
 ## Where it lives
 
 `crates/datalink-transport/src/capture.rs`. The message path calls it at four
-points: queueing to a friend (`ConnectionManager`), writing the frame (the
-ordered writer task), reading a frame (`handle_peer_message`) and the DLL's
-drain (`Transport::receive`). `Transport` also calls it for the game's
+points: queueing to a friend (the friend registry, and the friend pipeline
+for game messages), writing the frame (the ordered writer task), reading a
+frame (the friend registry and `handle_peer_message`) and the DLL's drain
+(`Transport::receive`). `Transport` also calls it for the game's
 session settings, failed sends, lost connections and re-dials. Each call
 returns at once when no capture is running.

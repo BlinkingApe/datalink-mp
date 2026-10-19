@@ -342,23 +342,12 @@ pub fn outbound_game(peer: &[u8; 32], from: DPID, to: DPID, guaranteed: bool, da
     Some(capture()?.game_message("out", Some(peer), from, to, guaranteed, data))
 }
 
-/// A message about to be queued to `peer`. Returns the id for [`written`] if
-/// it's a game message and a capture is running.
-pub fn outbound(peer: &[u8; 32], msg: &Message) -> Option<u64> {
-    let c = capture()?;
-    match msg {
-        Message::GameMessage { from, to, flags, data } => Some(c.game_message(
-            "out",
-            Some(peer),
-            *from,
-            *to,
-            flags & dp_types::DPSEND_GUARANTEED != 0,
-            data,
-        )),
-        _ => {
-            c.control("out", peer, msg);
-            None
-        }
+/// A Peer protocol message other than a game message about to be queued to
+/// `peer`. Outbound game messages are recorded by [`outbound_game`], from the
+/// friend's pipeline.
+pub fn outbound_control(peer: &[u8; 32], msg: &Message) {
+    if let Some(c) = capture() {
+        c.control("out", peer, msg);
     }
 }
 

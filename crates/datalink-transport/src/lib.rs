@@ -6,6 +6,7 @@
 pub mod capture;
 pub mod frame_sink;
 pub mod friend_pipeline;
+pub mod friend_registry;
 pub mod inbox;
 pub mod jackal;
 pub mod path;

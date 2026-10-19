@@ -1,8 +1,9 @@
 //! The **friend pipeline**: everything the Transport does with the game
 //! messages that cross one friend's connection.
 //!
-//! One pipeline is held on the connection manager's entry for each connected
-//! friend, so it is created and dropped with that entry. It sees each outbound
+//! One pipeline is held on each link in the friend registry (one link per
+//! connection to a friend), so it is created and dropped with that link. The
+//! registry calls it and carries out its outcomes. It sees each outbound
 //! game message as it is queued, each inbound one as it is read, and the
 //! lifecycle events (a Game session began, the connection was lost). Behind it
 //! sit the friend's Turn sync detector and the capture lines for game messages,

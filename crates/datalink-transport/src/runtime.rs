@@ -10,9 +10,10 @@
 //! - `enum_sessions()` queries all connected peers for their sessions
 
 use crate::connection::{
-    peer_protocol_alpn, ConnectionManager, DEFAULT_DIAL_TIMEOUT,
+    peer_protocol_alpn, ConnectionManager, Friends, DEFAULT_DIAL_TIMEOUT,
     STREAM_PROTO_VERSION,
 };
+use crate::friend_registry::{FriendRegistry, SendFacts};
 use crate::inbox::{GameInbox, QueuedMessage, SystemEvent};
 use crate::protocol::{Message, PlayerInfo, SessionInfo};
 use crate::session::SessionManager;
@@ -57,6 +58,8 @@ pub struct Transport {
     endpoint: Arc<Endpoint>,
     /// Connection manager
     connection_manager: Arc<ConnectionManager>,
+    /// Every friend, and everything sent to or received from them
+    friends: Arc<Friends>,
     /// Session manager
     session_manager: Arc<SessionManager>,
     /// Our ticket string (for sharing)
@@ -104,20 +107,22 @@ impl Transport {
             .map_err(|e| TransportError::Io(e))?;
 
         let inbox = GameInbox::new();
+        let friends = Arc::new(FriendRegistry::new(inbox.clone()));
         let (endpoint, connection_manager, session_manager, our_ticket) =
-            runtime.block_on(async { Self::init_async(options, inbox.clone()).await })?;
+            runtime.block_on(async { Self::init_async(options, inbox.clone(), friends.clone()).await })?;
 
         Ok(Self {
             runtime,
             endpoint: Arc::new(endpoint),
             connection_manager: Arc::new(connection_manager),
+            friends,
             session_manager,
             our_ticket,
             inbox,
         })
     }
 
-    async fn init_async(options: TransportOptions, inbox: GameInbox) -> TransportResult<(
+    async fn init_async(options: TransportOptions, inbox: GameInbox, friends: Arc<Friends>) -> TransportResult<(
         Endpoint,
         ConnectionManager,
         Arc<SessionManager>,
@@ -163,7 +168,7 @@ impl Transport {
         session_manager.set_identity(*endpoint.id(), our_ticket.clone());
 
         let connection_manager =
-            ConnectionManager::new(endpoint.clone(), session_manager.clone(), inbox, our_ticket.clone(), NetworkMode::default(), options);
+            ConnectionManager::new(endpoint.clone(), friends, session_manager.clone(), inbox, our_ticket.clone(), NetworkMode::default(), options);
 
         // Spawn connection acceptor
         let endpoint_clone = endpoint.clone();
@@ -240,8 +245,7 @@ impl Transport {
 
         let player_id = self.runtime.block_on(async {
             // Connect to host via ticket
-            let peer = self.connection_manager.connect_by_ticket(host_ticket).await?;
-            let host_endpoint_id = peer.endpoint_id;
+            let host_endpoint_id = self.connection_manager.connect_by_ticket(host_ticket).await?;
 
             // Request to join (include our ticket so host can share it with others)
             let join_request = Message::JoinRequest {
@@ -338,7 +342,7 @@ impl Transport {
                 app_guid: GUID::zeroed(), // Match any app
             };
 
-            let response = self.connection_manager.send_and_receive(&peer.endpoint_id, &query).await?;
+            let response = self.connection_manager.send_and_receive(&peer, &query).await?;
 
             match response {
                 Message::SessionList { sessions } if !sessions.is_empty() => {
@@ -371,7 +375,7 @@ impl Transport {
         };
 
         if let Some(msg) = msg {
-            if let Err(e) = self.connection_manager.broadcast(&msg) {
+            if let Err(e) = self.friends.send_control_to_all(&msg) {
                 warn!("{} broadcast failed: {}", msg.type_name(), e);
             }
         }
@@ -431,11 +435,11 @@ impl Transport {
 
                 // Synchronous enqueue: name-then-data order onto each peer's
                 // ordered stream is guaranteed by construction.
-                if let Err(e) = self.connection_manager.broadcast(&name_msg) {
+                if let Err(e) = self.friends.send_control_to_all(&name_msg) {
                     warn!("PlayerNameUpdate broadcast failed: {}", e);
                 }
                 if let Some(data_msg) = data_msg {
-                    if let Err(e) = self.connection_manager.broadcast(&data_msg) {
+                    if let Err(e) = self.friends.send_control_to_all(&data_msg) {
                         warn!("PlayerDataUpdate broadcast failed: {}", e);
                     }
                 }
@@ -484,7 +488,7 @@ impl Transport {
             player: player_info,
         };
 
-        if let Err(e) = self.connection_manager.broadcast(&msg) {
+        if let Err(e) = self.friends.send_control_to_all(&msg) {
             warn!("broadcast failed: {}", e);
         }
 
@@ -510,7 +514,7 @@ impl Transport {
                 reason: crate::protocol::LeaveReason::Disconnect,
             };
 
-            if let Err(e) = self.connection_manager.broadcast(&msg) {
+            if let Err(e) = self.friends.send_control_to_all(&msg) {
                 warn!("broadcast failed: {}", e);
             }
 
@@ -542,7 +546,7 @@ impl Transport {
         if self.session_manager.update_player_name(player_id, name.clone()) {
             // Broadcast the name change
             let msg = Message::PlayerNameUpdate { player_id, name };
-            if let Err(e) = self.connection_manager.broadcast(&msg) {
+            if let Err(e) = self.friends.send_control_to_all(&msg) {
                 warn!("broadcast failed: {}", e);
             }
             true
@@ -566,7 +570,7 @@ impl Transport {
 
         // Broadcast the update
         let msg = Message::SessionDescUpdate { session: desc };
-        if let Err(e) = self.connection_manager.broadcast(&msg) {
+        if let Err(e) = self.friends.send_control_to_all(&msg) {
             warn!("broadcast failed: {}", e);
         }
 
@@ -594,82 +598,19 @@ impl Transport {
         };
         debug!(target, "sending GameMessage");
 
-        let flags = if guaranteed {
-            dp_types::DPSEND_GUARANTEED
-        } else {
-            0
+        // Synchronous enqueue onto per-friend ordered streams: successive Send
+        // calls from the game reach each friend in exactly this order.
+        // NOTE: No loopback to sender for DPID_ALLPLAYERS - Wine excludes the
+        // sender (excludeId=from in DP_QueueMessage).
+        let facts = SendFacts {
+            is_host: self.session_manager.is_host(),
+            host: self.session_manager.get_host_node_id(),
+            local_player: self.session_manager.local_player_id(),
         };
-
-        // Clone data for local loopback before it's moved into msg.
-        // Loopback is needed for:
-        // - DPID_SERVERPLAYER when we ARE the host: host receives its own server message
-        // NOTE: DPID_ALLPLAYERS does NOT loopback to sender per Wine's behavior
-        // (Wine uses excludeId=from in DP_QueueMessage to exclude sender)
-        let needs_loopback = to == dpid::DPID_SERVERPLAYER && self.session_manager.is_host();
-        let loopback_data = if needs_loopback {
-            Some(data.clone())
-        } else {
-            None
-        };
-
-        let msg = Message::GameMessage {
-            from,
-            to,
-            flags,
-            data,
-        };
-
-        let cm = &self.connection_manager;
-        let session_manager = &self.session_manager;
-
-        // Synchronous enqueue onto per-peer ordered streams: successive Send
-        // calls from the game reach each peer in exactly this order.
-        let result = if to == dpid::DPID_ALLPLAYERS {
-            // Broadcast to all remote peers
-            // NOTE: No loopback to sender - Wine excludes sender from DPID_ALLPLAYERS
-            cm.broadcast(&msg)
-        } else if to == dpid::DPID_SERVERPLAYER {
-            // Send to host/server only
-            if session_manager.is_host() {
-                // LOCAL LOOPBACK: Host sending to server (itself).
-                // Game uses fire-and-receive pattern, expects to get message back.
-                if let Some(data) = loopback_data {
-                    let capture_id = crate::capture::loopback(from, to, guaranteed, &data);
-                    self.inbox.add_loopback(from, to, data, guaranteed, capture_id);
-                    debug!("queued local loopback for host->SERVERPLAYER");
-                }
-                Ok(())
-            } else {
-                // Send to the host
-                if let Some(host_node_id) = session_manager.get_host_node_id() {
-                    if let Some(endpoint_id) = iroh::EndpointId::try_from(host_node_id.as_slice()).ok() {
-                        cm.send_to_peer(&endpoint_id, &msg)
-                    } else {
-                        Err(TransportError::NotConnected)
-                    }
-                } else {
-                    Err(TransportError::NotConnected)
-                }
-            }
-        } else {
-            // Direct send to specific player
-            if let Some(peer) = cm.get_peer_by_player(to) {
-                cm.send_to_peer(&peer.endpoint_id, &msg)
-            } else {
-                Err(TransportError::PlayerNotFound)
-            }
-        };
-
-        match &result {
-            Ok(()) => debug!("send completed successfully"),
-            Err(e) => {
-                debug!(error = %e, "send failed");
-                if let Message::GameMessage { data, .. } = &msg {
-                    crate::capture::send_failed(from, to, guaranteed, data, &e.to_string());
-                }
-            }
+        let result = self.friends.send_game(from, to, guaranteed, data, &facts);
+        if result.is_ok() {
+            debug!("send completed successfully");
         }
-
         result
     }
 
@@ -781,7 +722,7 @@ impl Transport {
                 flags: 0, // Not local, so no DPSET_LOCAL flag
             };
 
-            if let Err(e) = self.connection_manager.broadcast(&msg) {
+            if let Err(e) = self.friends.send_control_to_all(&msg) {
                 warn!("broadcast failed: {}", e);
             }
         }
