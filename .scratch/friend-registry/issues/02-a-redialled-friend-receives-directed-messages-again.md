@@ -24,17 +24,33 @@ See the spec: [Links, loss and re-dial](../spec.md#links-loss-and-re-dial).
 
 **Blocked by:** 01
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] In-process:
+- [x] In-process:
   - losing the host's link puts SESSIONLOST in the inbox and forgets the host
   - losing a friend with players answers "re-dial with this ticket", and directed sends to its players fail
   - losing a discovery-only friend answers nothing and forgets them
-- [ ] In-process:
+- [x] In-process:
   - a new link for a friend being re-dialled carries Hello as its first frame
   - after that, directed sends to the friend's players arrive on the new outbox
   - after "re-dial gave up", they fail
-- [ ] Transport wiring test, extending "friend lost just before a new Game session is still re-dialled": after the re-dial, the host's game sends to the Joiner's player directly and the Joiner's game receives it
-- [ ] Transport wiring test with three Helpers (a host and two Joiners in one Game session): the Joiner-to-Joiner connection is dropped and re-dialled, then each Joiner's game sends to the other's player directly and it arrives
-- [ ] The existing tests pass unchanged: ordered delivery, closed-session messages, a Joiner leaving, a Joiner whose host's connection is lost, and the re-dial test
-- [ ] Capture lines are unchanged: `lost`, `reconnect`, `send_failed`
+- [x] Transport wiring test, extending "friend lost just before a new Game session is still re-dialled": after the re-dial, the host's game sends to the Joiner's player directly and the Joiner's game receives it
+- [x] Transport wiring test with three Helpers (a host and two Joiners in one Game session): the Joiner-to-Joiner connection is dropped and re-dialled, then each Joiner's game sends to the other's player directly and it arrives
+- [x] The existing tests pass unchanged: ordered delivery, closed-session messages, a Joiner leaving, a Joiner whose host's connection is lost, and the re-dial test
+- [x] Capture lines are unchanged: `lost`, `reconnect`, `send_failed`
+
+## Comments
+
+**2026-10-19:** Built on branch `friend-registry-02`, commit `db9d9da`.
+
+- The registry owns the loss policy:
+  - `link_ended(friend, link, RosterFacts)` returns `LinkEnded::{Nothing, Redial { ticket }}`. The caller passes the roster's facts: `was_host`, and the ticket from `get_player_ticket_by_node`.
+  - The registry now writes the `lost` line and the SESSIONLOST.
+  - `act_on_lost_connection` is gone. The reader's cleanup acts on the answer with `spawn_redial`: the same five attempts, backoff and `reconnect` lines, then `redial_gave_up` if every attempt fails.
+- Re-attach: `link_opened` now takes `LocalFacts` (our player and ticket). A link opening onto a record with no link gets our Hello as its first frame, queued before the link becomes visible.
+  - `establish_mesh_connection` now routes before it dials and no longer sends its own Hello. That drops the old `Hello { player_id: 0 }` sent when there was no local player.
+- `disconnect` keeps the record, so the loss is handled when the link ends. `disconnect_all` still forgets everyone. A link of a friend with no record still writes the `lost` line, and SESSIONLOST for the host, but is never re-dialled.
+- A link that is not the friend's current one ending now changes nothing. Ticket 03 builds its spares on this.
+- In-process tests in `friend_registry.rs` cover loss (host, re-dialled, discovery-only, disconnected), re-attach (dialled and incoming) and giving up.
+  - The two Transport wiring tests are new tests in `tests/mesh_networking.rs`, next to the existing re-dial test. That test is left unchanged.
+  - Both new tests fail on ticket 01's code.
