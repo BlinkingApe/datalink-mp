@@ -15,10 +15,20 @@ See the spec: [Links, loss and re-dial](../spec.md#links-loss-and-re-dial).
 
 **Blocked by:** 02
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] In-process: a second link doesn't replace the current one, and frames keep going to the first
-- [ ] In-process: a spare ending changes nothing; directed sends still route, and the registry gives no re-dial answer
-- [ ] In-process: the current link ending with a spare open moves frames to the spare, with no loss answer and nothing added to the inbox
-- [ ] Each link's pipeline hears "connection lost" at most once, when that link stops being current
-- [ ] `cargo test` passes, including the wiring tests from 02
+- [x] In-process: a second link doesn't replace the current one, and frames keep going to the first
+- [x] In-process: a spare ending changes nothing; directed sends still route, and the registry gives no re-dial answer
+- [x] In-process: the current link ending with a spare open moves frames to the spare, with no loss answer and nothing added to the inbox
+- [x] Each link's pipeline hears "connection lost" at most once, when that link stops being current
+- [x] `cargo test` passes, including the wiring tests from 02
+
+## Comments
+
+**2026-10-19:** Built on branch `friend-registry-03`, commit `5a30db7`.
+
+- Each friend record keeps its spares, oldest first, beside the current link. A later link, dialled or accepted, becomes a spare. The 01 rule where a dialled link replaced the current one is gone.
+- A spare ending is removed. The current link ending with a spare open promotes the oldest spare, and the old pipeline hears "connection lost". There is no `lost` line, SESSIONLOST or re-dial. With no spare, the loss is handled as ticket 02 built it.
+- "Connection lost at most once" holds by construction. It is called only on the link taken out of the current slot, and a link never goes back to being a spare. The pipeline hook is still empty, so no test can observe it.
+- Disconnecting a friend now hands back every link's handle, spares included, so the connection manager closes them all. `drop_connection_to` in the wiring tests therefore still forces a real loss and re-dial. `disconnect_all` includes spares too.
+- In-process tests in `friend_registry.rs` cover a second link, a spare ending, hand-over (a Joiner and the host), and disconnect. No new wiring test was added. The mesh-networking suite passed 8 runs in a row.
