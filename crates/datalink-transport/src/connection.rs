@@ -9,7 +9,7 @@
 //! directly, forming a full mesh.
 
 use crate::friend_pipeline::FriendPipeline;
-use crate::friend_registry::{FriendRegistry, Link, LinkEnded, LinkId, LocalFacts, RosterFacts};
+use crate::friend_registry::{endpoint_short, FriendRegistry, Link, LinkEnded, LinkId, LocalFacts, RosterFacts};
 use crate::inbox::{GameInbox, SystemEvent};
 use crate::protocol::{decode_message, encode_message, Message, PlayerInfo};
 use crate::runtime::{NetworkMode, TransportOptions};
@@ -85,12 +85,6 @@ const MAX_FRAME_LEN: u32 = 1 << 20; // 1 MiB
 /// The friend registry as the connection manager holds it: each link's
 /// handle is its iroh connection.
 pub type Friends = FriendRegistry<Connection>;
-
-/// Short hex form of an endpoint id for log lines.
-fn endpoint_short(endpoint_id: &EndpointId) -> String {
-    let b = endpoint_id.as_bytes();
-    format!("{:08x}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-}
 
 /// Connection manager for mesh networking: the iroh work behind the friend
 /// registry. It dials and accepts connections, builds a link for each, runs
@@ -196,7 +190,7 @@ impl ConnectionManager {
         tokio::spawn(crate::frame_sink::run_ordered_writer(
             crate::frame_sink::IrohFrameSink::new(connection.clone(), self.options.peer_protocol_version),
             outbox_rx,
-            endpoint_short(&endpoint_id),
+            endpoint_short(endpoint_id.as_bytes()),
         ));
         let pipeline = FriendPipeline::new(*endpoint_id.as_bytes(), std::time::Instant::now, {
             let connection = connection.clone();
@@ -258,11 +252,6 @@ impl ConnectionManager {
         }
     }
 
-    /// Tell every connected friend's pipeline a Game session began.
-    pub fn game_session_began(&self) {
-        self.friends.game_session_began();
-    }
-
     /// Disconnect all peers
     pub fn disconnect_all(&self) {
         for connection in self.friends.disconnect_all() {
@@ -315,7 +304,7 @@ impl ConnectionManager {
         let cm = self.clone();
 
         crate::capture::spawn_path_watcher(connection.clone(), endpoint_id_bytes);
-        crate::path::spawn_path_logger(connection.clone(), endpoint_short(&endpoint_id));
+        crate::path::spawn_path_logger(connection.clone(), endpoint_short(endpoint_id.as_bytes()));
 
         tokio::spawn(async move {
             loop {
@@ -576,7 +565,7 @@ async fn handle_peer_message(
         Message::Hello { player_id, ticket } => {
             debug!("Received Hello from player {}", player_id);
             // Update routing
-            cm.friends.hello(sender_endpoint_id, player_id, ticket);
+            cm.friends.route_player_and_record_ticket(sender_endpoint_id, player_id, ticket);
         }
 
         Message::SessionAnnounce { session } => {

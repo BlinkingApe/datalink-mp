@@ -158,6 +158,35 @@ struct State<H> {
     next_link: u64,
 }
 
+impl<H> State<H> {
+    /// `friend`'s current link, if it has one.
+    fn current_link(&self, friend: &FriendId) -> Option<Arc<Link<H>>> {
+        self.friends.get(friend)?.link.clone()
+    }
+
+    /// Every friend with a link, and its current link.
+    fn current_links(&self) -> impl Iterator<Item = (FriendId, Arc<Link<H>>)> + '_ {
+        self.friends
+            .iter()
+            .filter_map(|(id, r)| Some((*id, r.link.clone()?)))
+    }
+
+    /// Stop routing `player` to any friend.
+    fn unroute(&mut self, player: DPID) {
+        for record in self.friends.values_mut() {
+            record.players.retain(|p| *p != player);
+        }
+    }
+
+    /// Route `player` to `friend` alone, recording the friend if it is new.
+    fn route(&mut self, player: DPID, friend: FriendId) -> &mut Record<H> {
+        self.unroute(player);
+        let record = self.friends.entry(friend).or_default();
+        record.players.push(player);
+        record
+    }
+}
+
 /// See the module docs.
 pub struct FriendRegistry<H> {
     state: Mutex<State<H>>,
@@ -195,41 +224,39 @@ impl<H: Clone> FriendRegistry<H> {
         link: Link<H>,
         us: &LocalFacts,
     ) -> LinkId {
-        // Encoded before the lock is taken; queued only if the link
-        // re-attaches a record.
-        let hello = us.player.map(|player_id| Message::Hello {
-            player_id,
-            ticket: us.ticket.clone(),
-        });
-        let encoded_hello = hello.as_ref().and_then(|h| encode_message(h).ok());
-        let mut said_hello = false;
-        let id = {
-            let mut s = self.state.lock();
-            s.next_link += 1;
-            let id = LinkId(s.next_link);
-            let reattaching = s.friends.get(&friend).is_some_and(|r| r.link.is_none());
-            let record = s.friends.entry(friend).or_default();
-            if ticket.is_some() {
-                record.ticket = ticket;
+        let reattaching = self
+            .state
+            .lock()
+            .friends
+            .get(&friend)
+            .is_some_and(|r| r.link.is_none());
+        if let (true, Some(player_id)) = (reattaching, us.player) {
+            // Queued before the link is in the record, where no one else can
+            // send on it, so it is the first frame. The friend's Helper routes
+            // our player here before anything else arrives. Should the record
+            // change before the link is stored, the Hello may turn out not to
+            // be needed; that is harmless, as the friend's Helper handles a
+            // repeated Hello as it did the first.
+            let hello = Message::Hello {
+                player_id,
+                ticket: us.ticket.clone(),
+            };
+            if let Ok(encoded) = encode_message(&hello) {
+                let _ = queue_control(friend, &link, &hello, encoded);
             }
-            let link = Arc::new(Link { id, ..link });
-            if record.link.is_some() {
-                record.spares.push(link);
-            } else {
-                if reattaching {
-                    // Queued while no one else can see the link, so it is the
-                    // first frame on it. The friend's Helper routes our player
-                    // here before anything else arrives.
-                    if let Some(frame) = encoded_hello {
-                        said_hello = link.outbox.send((frame, None)).is_ok();
-                    }
-                }
-                record.link = Some(link);
-            }
-            id
-        };
-        if let (true, Some(hello)) = (said_hello, &hello) {
-            crate::capture::outbound_control(&friend, hello);
+        }
+        let mut s = self.state.lock();
+        s.next_link += 1;
+        let id = LinkId(s.next_link);
+        let record = s.friends.entry(friend).or_default();
+        if ticket.is_some() {
+            record.ticket = ticket;
+        }
+        let link = Arc::new(Link { id, ..link });
+        if record.link.is_some() {
+            record.spares.push(link);
+        } else {
+            record.link = Some(link);
         }
         id
     }
@@ -261,14 +288,14 @@ impl<H: Clone> FriendRegistry<H> {
                 None => (None, LinkEnded::Nothing),
                 Some(record) if record.link.as_ref().map(|l| l.id) != Some(ended) => {
                     record.spares.retain(|l| l.id != ended);
-                    debug!(endpoint = %short(&friend), "a link that is not the friend's current one ended");
+                    debug!(endpoint = %endpoint_short(&friend), "a link that is not the friend's current one ended");
                     return LinkEnded::Nothing;
                 }
                 Some(record) if !record.spares.is_empty() => {
                     let next = record.spares.remove(0);
                     let old = record.link.replace(next);
                     drop(s);
-                    debug!(endpoint = %short(&friend), "current link ended, a spare took over");
+                    debug!(endpoint = %endpoint_short(&friend), "current link ended, a spare took over");
                     if let Some(old) = old {
                         old.pipeline.connection_lost();
                     }
@@ -292,7 +319,7 @@ impl<H: Clone> FriendRegistry<H> {
                 }
             }
         };
-        debug!(endpoint = %short(&friend), was_host = roster.was_host, ?answer, "friend lost");
+        debug!(endpoint = %endpoint_short(&friend), was_host = roster.was_host, ?answer, "friend lost");
         if let Some(link) = lost {
             link.pipeline.connection_lost();
         }
@@ -310,28 +337,23 @@ impl<H: Clone> FriendRegistry<H> {
         let mut s = self.state.lock();
         if s.friends.get(&friend).is_some_and(|r| r.link.is_none()) {
             s.friends.remove(&friend);
-            debug!(endpoint = %short(&friend), "re-dial gave up, friend forgotten");
+            debug!(endpoint = %endpoint_short(&friend), "re-dial gave up, friend forgotten");
         }
     }
 
     /// `player` is behind `friend` (a player joined, or the host accepted its
     /// join): route its messages there.
     pub fn player_joined(&self, player: DPID, friend: FriendId) {
-        let mut s = self.state.lock();
-        for record in s.friends.values_mut() {
-            record.players.retain(|p| *p != player);
-        }
-        s.friends.entry(friend).or_default().players.push(player);
+        self.state.lock().route(player, friend);
     }
 
     /// `friend` said Hello for its `player`: route the player there and keep
-    /// the friend's ticket.
-    pub fn hello(&self, friend: FriendId, player: DPID, ticket: String) {
-        self.player_joined(player, friend);
+    /// the friend's ticket, if it sent one.
+    pub fn route_player_and_record_ticket(&self, friend: FriendId, player: DPID, ticket: String) {
+        let mut s = self.state.lock();
+        let record = s.route(player, friend);
         if !ticket.is_empty() {
-            if let Some(record) = self.state.lock().friends.get_mut(&friend) {
-                record.ticket = Some(ticket);
-            }
+            record.ticket = Some(ticket);
         }
     }
 
@@ -339,10 +361,7 @@ impl<H: Clone> FriendRegistry<H> {
     /// even with no players left: a friend is forgotten only when it is lost,
     /// its re-dial gives up, or it is disconnected.
     pub fn player_left(&self, player: DPID) {
-        let mut s = self.state.lock();
-        for record in s.friends.values_mut() {
-            record.players.retain(|p| *p != player);
-        }
+        self.state.lock().unroute(player);
     }
 
     /// A Game session began: every link's pipeline hears it, and each
@@ -431,29 +450,20 @@ impl<H: Clone> FriendRegistry<H> {
         } else {
             0
         };
-        let msg = Message::GameMessage {
-            from,
-            to,
-            flags,
-            data,
-        };
-        let Message::GameMessage { data, .. } = &msg else {
-            unreachable!()
-        };
         let result = self.game_targets(to, facts).and_then(|targets| {
-            let encoded = encode_message(&msg)?;
-            let mut last_error = None;
-            for (friend, link) in targets {
-                if let Err(e) = queue_game(&link, from, to, guaranteed, data, encoded.clone()) {
-                    warn!(endpoint = %short(&friend), error = %e, "enqueue failed (peer dead)");
-                    last_error = Some(e);
-                }
-            }
-            last_error.map_or(Ok(()), Err)
+            let encoded = encode_message(&Message::GameMessage {
+                from,
+                to,
+                flags,
+                data: data.clone(),
+            })?;
+            queue_on_each(targets, |_, link| {
+                queue_game(link, from, to, guaranteed, &data, encoded.clone())
+            })
         });
         if let Err(e) = &result {
             debug!(error = %e, "send failed");
-            crate::capture::send_failed(from, to, guaranteed, data, &e.to_string());
+            crate::capture::send_failed(from, to, guaranteed, &data, &e.to_string());
         }
         result
     }
@@ -466,19 +476,15 @@ impl<H: Clone> FriendRegistry<H> {
     ) -> TransportResult<Vec<(FriendId, Arc<Link<H>>)>> {
         let s = self.state.lock();
         if to == dpid::DPID_ALLPLAYERS {
-            return Ok(s
-                .friends
-                .iter()
-                .filter_map(|(id, r)| Some((*id, r.link.clone()?)))
-                .collect());
+            return Ok(s.current_links().collect());
         }
         let target = if to == dpid::DPID_SERVERPLAYER {
             let host = facts.host.ok_or(TransportError::NotConnected)?;
-            let link = s.friends.get(&host).and_then(|r| r.link.clone());
+            let link = s.current_link(&host);
             (host, link.ok_or(TransportError::NotConnected)?)
         } else {
             let found = s.friends.iter().find(|(_, r)| r.players.contains(&to));
-            let found = found.and_then(|(id, r)| Some((*id, r.link.clone()?)));
+            let found = found.and_then(|(id, _)| Some((*id, s.current_link(id)?)));
             found.ok_or(TransportError::PlayerNotFound)?
         };
         Ok(vec![target])
@@ -496,12 +502,7 @@ impl<H: Clone> FriendRegistry<H> {
         guaranteed: bool,
         data: Vec<u8>,
     ) {
-        let link = self
-            .state
-            .lock()
-            .friends
-            .get(&friend)
-            .and_then(|r| r.link.clone());
+        let link = self.state.lock().current_link(&friend);
         let Some(link) = link else {
             let capture_id = crate::capture::inbound(&friend, from, to, guaranteed, &data);
             self.inbox
@@ -523,12 +524,7 @@ impl<H: Clone> FriendRegistry<H> {
     /// Send a control message (any Peer protocol message but a game message)
     /// to one friend. Fails if the friend has no link.
     pub fn send_control(&self, friend: FriendId, msg: &Message) -> TransportResult<()> {
-        let link = self
-            .state
-            .lock()
-            .friends
-            .get(&friend)
-            .and_then(|r| r.link.clone());
+        let link = self.state.lock().current_link(&friend);
         let link = link.ok_or(TransportError::NotConnected)?;
         queue_control(friend, &link, msg, encode_message(msg)?)
     }
@@ -551,29 +547,38 @@ impl<H: Clone> FriendRegistry<H> {
         msg: &Message,
     ) -> TransportResult<()> {
         let encoded = encode_message(msg)?;
-        let targets: Vec<(FriendId, Arc<Link<H>>)> = {
-            let s = self.state.lock();
-            s.friends
-                .iter()
-                .filter(|(id, _)| Some(**id) != except)
-                .filter_map(|(id, r)| Some((*id, r.link.clone()?)))
-                .collect()
-        };
+        let targets: Vec<(FriendId, Arc<Link<H>>)> = self
+            .state
+            .lock()
+            .current_links()
+            .filter(|(id, _)| Some(*id) != except)
+            .collect();
         let span = debug_span!(
             "broadcast",
             peer_count = targets.len(),
             msg_type = msg.type_name()
         );
         let _guard = span.enter();
-        let mut last_error = None;
-        for (friend, link) in targets {
-            if let Err(e) = queue_control(friend, &link, msg, encoded.clone()) {
-                warn!(endpoint = %short(&friend), error = %e, "enqueue failed (peer dead)");
-                last_error = Some(e);
-            }
-        }
-        last_error.map_or(Ok(()), Err)
+        queue_on_each(targets, |friend, link| {
+            queue_control(friend, link, msg, encoded.clone())
+        })
     }
+}
+
+/// Queue on each target friend's link. Every target is attempted; the result
+/// is the last error, if any.
+fn queue_on_each<H>(
+    targets: Vec<(FriendId, Arc<Link<H>>)>,
+    mut queue: impl FnMut(FriendId, &Link<H>) -> TransportResult<()>,
+) -> TransportResult<()> {
+    let mut last_error = None;
+    for (friend, link) in targets {
+        if let Err(e) = queue(friend, &link) {
+            warn!(endpoint = %endpoint_short(&friend), error = %e, "enqueue failed (friend's link closed)");
+            last_error = Some(e);
+        }
+    }
+    last_error.map_or(Ok(()), Err)
 }
 
 /// Call the link's pipeline for an outbound game message and carry out its
@@ -618,7 +623,7 @@ fn queue_control<H>(
 }
 
 /// Short hex form of an endpoint id for log lines.
-fn short(friend: &FriendId) -> String {
+pub(crate) fn endpoint_short(friend: &FriendId) -> String {
     format!(
         "{:08x}",
         u32::from_be_bytes([friend[0], friend[1], friend[2], friend[3]])
@@ -846,7 +851,7 @@ mod tests {
         let reg = FriendRegistry::new(inbox);
         let (a, mut arx) = stand_in(ALICE);
         reg.link_opened(ALICE, None, a, &us());
-        reg.hello(ALICE, ALICE_PLAYER, "alice's ticket".into());
+        reg.route_player_and_record_ticket(ALICE, ALICE_PLAYER, "alice's ticket".into());
         reg.send_game(LOCAL, ALICE_PLAYER, true, vec![1], &joiner())
             .unwrap();
         assert_eq!(drain(&mut arx), vec![game(LOCAL, ALICE_PLAYER, &[1])]);

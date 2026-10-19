@@ -231,7 +231,7 @@ impl Transport {
     /// to the new session can be waiting yet, so all of it is stale.
     fn discard_earlier_sessions_messages(&self) {
         self.inbox.session_began();
-        self.connection_manager.game_session_began();
+        self.friends.game_session_began();
     }
 
     /// Join a session using the host ticket
