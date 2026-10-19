@@ -22,8 +22,22 @@ See the spec: [Candidates 3–7, explored](../spec.md#candidates-37-explored) an
 
 **Blocked by:** 01, 02, 03
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Tickets 07, 08, 10 and 17 each carry a dated comment naming the registry and the points above
-- [ ] No ticket description still names the removed send functions or the routes map as where to build
-- [ ] The effort is archived and the link check passes
+- [x] Tickets 07, 08, 10 and 17 each carry a dated comment naming the registry and the points above
+- [x] No ticket description still names the removed send functions or the routes map as where to build
+- [x] The effort is archived and the link check passes
+
+## Comments
+
+**2026-10-19:** Docs only, on branch `friend-registry-04`.
+
+- Tickets 07, 08, 10 and 17 in [internet-play-speed-build](../../../internet-play-speed-build/issues/) each carry a dated comment that names the registry's real types and functions from `crates/datalink-transport/src/friend_registry.rs`: `FriendRegistry::send_game`, `queue_game`, `receive_game`, `link_ended`, `game_session_began`, `SendFacts`, `Record::players`, `Record::session` and `GameSessionFacts`.
+- Descriptions fixed:
+  - 07 no longer says `game_session_began` isn't called, or that the connection manager calls `connection_lost`. The registry acts on the outcomes, and the pipeline is per link.
+  - 08 names `FriendRegistry::link_ended` as the caller of `connection_lost`, and gains candidate 5's criterion as a checklist item.
+  - 10 puts only `reset:N` at the frame sink.
+  - 17 gains the release-note line about directed messages reaching a re-dialled friend, with a checklist item.
+- No open ticket named the removed send functions or the routes map. Only resolved ticket 05 does, and it is history.
+- Ticket 08's comment also raises a gap from ticket 03. `game_session_began` reaches only current links, so a spare promoted mid-session has a pipeline that never heard the session began. Ticket 08 decides whether that matters, for example by notifying spares too.
+- The effort is archived under `.scratch/archive/friend-registry/`.
