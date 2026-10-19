@@ -27,7 +27,7 @@ Ending the Helper's current connections without quitting it; the Helper comes ba
 _Avoid_: reset, disconnect, leave
 
 **Game session**:
-The DirectPlay-level multiplayer session the game itself is in: created by Host Game, joined by Join Game, ended by CloseSession or a crash. Tracked today in the IPC layer the DLL talks through. Distinct from the Helper's own connection state (`ready`/`joining`/`joined`/`hosting`, driven by the Transport and its peers) — the two can fall out of sync.
+The DirectPlay-level multiplayer session the game itself is in: created by Host Game, joined by Join Game, ended by CloseSession or a crash. Tracked in the Transport's session state. Distinct from the Helper's own connection state (`ready`/`joining`/`joined`/`hosting`, driven by the Transport and its peers) — the two can fall out of sync.
 _Avoid_: session (ambiguous with the Helper's connection state)
 
 **Hostable**:
@@ -35,6 +35,10 @@ The Host's game has a Game session that a Joiner's Join Game would find and coul
 _Avoid_: ready (that is a value of the Helper's connection state)
 
 ### Connections
+
+**Friend**:
+Another player's Helper that this Helper is connected to, or is re-dialling, in the current Game session or for session discovery.
+_Avoid_: peer (used in code for the same thing; fine there, not in docs), node
 
 **Direct connection**:
 A connection between two Helpers whose traffic goes straight between the two players' machines.

@@ -13,6 +13,7 @@
 //! Nothing here changes what the Helper sends or delivers. Lines go to a writer
 //! thread, so the message path only formats a line and hands it over.
 
+use crate::jackal::Jackal;
 use crate::protocol::Message;
 use dp_types::{SessionDesc, DPID};
 use iroh::endpoint::{Connection, PathEvent};
@@ -295,40 +296,6 @@ fn add_route(line: &mut Value, addr: &TransportAddr) {
     }
 }
 
-/// The JACKAL fields at the front of a game payload, as `terranx.exe` lays them
-/// out: an 8-byte JACKAL header, then the game's own message.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Jackal {
-    /// Wire offset 0: 4 = reliable data, 2 = ack.
-    pub kind: u16,
-    /// Wire offset 4: the sender's sequence number for a reliable send.
-    pub seq: u32,
-    /// Wire offset 8: the game's message type, for data only.
-    pub game_type: Option<u16>,
-    /// Wire offset 12: the sender's faction, for data only.
-    pub faction: Option<u32>,
-}
-
-impl Jackal {
-    /// Decode the header, or `None` for a payload shorter than it.
-    pub fn decode(data: &[u8]) -> Option<Self> {
-        let u16_at = |o: usize| data.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
-        let u32_at =
-            |o: usize| data.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
-        let kind = u16_at(0)?;
-        let seq = u32_at(4)?;
-        // An ack's bytes after the header are never written, so only data has a
-        // game message to read.
-        let is_data = kind & 0x4 != 0;
-        Some(Jackal {
-            kind,
-            seq,
-            game_type: if is_data { u16_at(8) } else { None },
-            faction: if is_data { u32_at(12) } else { None },
-        })
-    }
-}
-
 /// Open the capture if `DATALINK_CAPTURE` is set. Called when a Transport
 /// starts; later calls do nothing.
 pub fn init() {
@@ -369,23 +336,18 @@ pub fn enabled() -> bool {
     capture().is_some()
 }
 
-/// A message about to be queued to `peer`. Returns the id for [`written`] if
-/// it's a game message and a capture is running.
-pub fn outbound(peer: &[u8; 32], msg: &Message) -> Option<u64> {
-    let c = capture()?;
-    match msg {
-        Message::GameMessage { from, to, flags, data } => Some(c.game_message(
-            "out",
-            Some(peer),
-            *from,
-            *to,
-            flags & dp_types::DPSEND_GUARANTEED != 0,
-            data,
-        )),
-        _ => {
-            c.control("out", peer, msg);
-            None
-        }
+/// A game message about to be queued to `peer`. Returns the id for [`written`]
+/// if a capture is running.
+pub fn outbound_game(peer: &[u8; 32], from: DPID, to: DPID, guaranteed: bool, data: &[u8]) -> Option<u64> {
+    Some(capture()?.game_message("out", Some(peer), from, to, guaranteed, data))
+}
+
+/// A Peer protocol message other than a game message about to be queued to
+/// `peer`. Outbound game messages are recorded by [`outbound_game`], from the
+/// friend's pipeline.
+pub fn outbound_control(peer: &[u8; 32], msg: &Message) {
+    if let Some(c) = capture() {
+        c.control("out", peer, msg);
     }
 }
 
@@ -515,26 +477,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn decodes_a_data_message() {
-        // kind 4, seq 7, then type 0x2303 from faction 3.
-        let mut data = vec![4, 0, 0, 0, 7, 0, 0, 0, 0x03, 0x23, 0, 0, 3, 0, 0, 0];
-        data.extend_from_slice(&[0; 28]);
-        assert_eq!(
-            Jackal::decode(&data),
-            Some(Jackal { kind: 4, seq: 7, game_type: Some(0x2303), faction: Some(3) })
-        );
-    }
-
-    #[test]
-    fn an_ack_has_no_game_message() {
-        let data = [2, 0, 0, 0, 7, 0, 0, 0, 0xaa, 0xbb, 0xcc, 0xdd];
-        assert_eq!(
-            Jackal::decode(&data),
-            Some(Jackal { kind: 2, seq: 7, game_type: None, faction: None })
-        );
-    }
-
-    #[test]
     fn session_lines_say_whether_joining_is_closed() {
         let desc = SessionDesc {
             flags: dp_types::flags::DPSESSION_NEWPLAYERSDISABLED,
@@ -565,11 +507,6 @@ mod tests {
         assert_eq!(capture_dir(None), None);
         assert_eq!(capture_dir(Some(OsString::new())), None);
         assert_eq!(capture_dir(Some(OsString::from("caps"))), Some(PathBuf::from("caps")));
-    }
-
-    #[test]
-    fn a_short_payload_has_no_header() {
-        assert_eq!(Jackal::decode(&[4, 0, 0, 0, 7]), None);
     }
 
     #[test]

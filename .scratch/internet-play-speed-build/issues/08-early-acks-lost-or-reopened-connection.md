@@ -1,11 +1,21 @@
 # 08: Early acks on a lost or reopened connection
 
-**What to build:** Early acks stay safe when the connection misbehaves. On a lost connection, the friend's state is cleared and no early acks are made for the rest of that Game session; nothing is replayed across a reconnect. When a stream is reopened while the connection lives, the writer replays the in-flight frames first, in order, then the frame it was retrying, and the friend's JACKAL drops any seq it already has.
+**What to build:** Early acks stay safe when the connection misbehaves. On a lost connection (`FriendPipeline::connection_lost`, called by `FriendRegistry::link_ended` when that link stops being current), the link's pipeline state is cleared and no early acks are made for the rest of that Game session, a fact kept on the friend's record in the friend registry; nothing is replayed across a reconnect. When a stream is reopened while the connection lives, the ordered writer (`run_ordered_writer` in `frame_sink.rs`, which today reopens once and retries the failing frame) asks the link's friend pipeline for its in-flight frames and replays them first, in order, then the frame it was retrying, and the friend's JACKAL drops any seq it already has.
 
-**Blocked by:** 07
+**Blocked by:** 07 (not 10)
 
 **Status:** ready-for-agent
 
 - [ ] Tests: no early acks after a loss, for the rest of the Game session
-- [ ] Test: a reset stream replays in order and delivers each message once
+- [ ] Test: a reset stream replays in order and delivers each message once, using `MemoryFrameSink` (it fails chosen opens or writes by index), so no fault injection from ticket 10 is needed
+- [ ] The receiving side dispatches nothing from a reopened stream until the old stream's reader has finished, with a test at whatever seam this ticket settles on
 - [ ] Existing lost-connection behaviour is unchanged
+
+## Comments
+
+- 2026-10-18: The reset-stream test uses the in-memory frame sink from [transport-message-path](../../archive/transport-message-path/spec.md), so this ticket no longer needs ticket 10's fault injection. Replay is the writer asking the friend pipeline for in-flight frames on reopen. The writer's outbox currently carries `(bytes, capture_id)`, and the sink has no replay hook, so this ticket adds the pipeline query to the writer.
+- 2026-10-19: Build this inside the friend registry from [friend-registry](../../archive/friend-registry/spec.md), in `crates/datalink-transport/src/friend_registry.rs`.
+  - **"No Early acks for the rest of the Game session after a loss"** lives in the friend record's Game-session slot: `Record::session`, a `GameSessionFacts` struct, empty today. Add "lost a link this Game session" to it. `FriendRegistry::game_session_began` resets it. It survives a re-dial, because `link_ended` keeps the record of a friend it answers `LinkEnded::Redial` for, and the new link re-attaches to it in `link_opened`. The registry would pass the fact to the pipeline, for example with `SendFacts` or when it builds the new link's state. The record goes when the host is lost, when a discovery-only friend is lost, and on `redial_gave_up`.
+  - **Pipelines are per link** (`Link::pipeline`), and each hears "connection lost" once, when its link stops being current. That happens in `link_ended`, either on a hand-over to a spare (`record.link.replace`) or on a loss (`record.link.take`). A spare that ends, and links drained by `disconnect_all`, never hear it. Decide whether a hand-over to a spare counts as "lost a link this Game session". It isn't a lost friend: there is no `lost` line and no re-dial.
+  - **A promoted spare missed "Game session began".** `game_session_began` reaches only the current link's pipeline (`r.link`), not `r.spares`. A spare promoted mid-session therefore has a pipeline that never heard that the session began. Decide whether a promoted spare's pipeline needs it, for example by notifying spares too, or by having `link_ended` tell the promoted pipeline when it hands over.
+  - **New criterion, from the spec's candidate 5:** the receiving side dispatches nothing from a reopened stream until the old stream's reader has finished. Today `spawn_connection_handler` in `connection.rs` spawns a `read_ordered_stream` task for each accepted stream, and nothing orders a new one after the old one. Once replay exists, the old stream's tail and the replay can interleave. Test it at whatever seam this ticket settles on. Added to the checklist above.

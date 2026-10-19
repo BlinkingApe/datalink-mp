@@ -659,6 +659,159 @@ fn test_messages_from_a_closed_session_do_not_reach_the_next_game_the_host_hosts
     assert!(host.session_manager().is_host(), "the host is hosting again");
 }
 
+/// A friend's connection is lost, then the host's game begins a new Game
+/// session before it polls its inbox. The host's Helper must still re-dial the
+/// friend: the loss is acted on when it happens, not when the game next polls.
+#[test]
+fn test_friend_lost_just_before_a_new_game_session_is_still_redialled() {
+    let Some((host, joiner, _joiner_id)) = hosted_game_with_a_named_joiner() else {
+        return;
+    };
+    let friend = joiner.endpoint_id();
+
+    joiner.drop_connection_to(host.endpoint_id());
+    // The host's Helper has seen the loss; its game has not polled.
+    assert!(
+        poll_until(Duration::from_secs(5), || host.connected_peers().is_empty().then_some(())).is_some(),
+        "the host should notice the friend's connection ended"
+    );
+
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Hosted Again".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+
+    assert!(
+        poll_until(Duration::from_secs(10), || {
+            host.connected_peers().contains(&friend).then_some(())
+        })
+        .is_some(),
+        "the host should have re-dialled the friend"
+    );
+}
+
+/// Keep sending `marker` from `from`'s game to player `to` directly until
+/// `receiver`'s game has it, or `timeout` passes. A send fails while the
+/// friend is being re-dialled; that is retried.
+fn directed_message_arrives(
+    from: (&Transport, u32),
+    to: u32,
+    receiver: &Transport,
+    marker: &[u8],
+    timeout: Duration,
+) -> bool {
+    poll_until(timeout, || {
+        let _ = from.0.send(from.1, to, marker.to_vec(), true);
+        std::iter::from_fn(|| receiver.receive())
+            .find(|qm| qm.from == from.1 && qm.to == to && qm.data == marker)
+    })
+    .is_some()
+}
+
+/// The re-dial bug: once the host has re-dialled a lost friend, its game's
+/// directed messages reach that friend's player again.
+#[test]
+fn test_a_redialled_friend_receives_the_hosts_directed_messages_again() {
+    let Some((host, joiner, joiner_id)) = hosted_game_with_a_named_joiner() else {
+        return;
+    };
+    let friend = joiner.endpoint_id();
+
+    joiner.drop_connection_to(host.endpoint_id());
+    assert!(
+        poll_until(Duration::from_secs(5), || host.connected_peers().is_empty().then_some(())).is_some(),
+        "the host should notice the friend's connection ended"
+    );
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Hosted Again".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+    assert!(
+        poll_until(Duration::from_secs(10), || {
+            host.connected_peers().contains(&friend).then_some(())
+        })
+        .is_some(),
+        "the host should have re-dialled the friend"
+    );
+
+    const HOSTS_PLAYER: u32 = 0x1001;
+    assert!(
+        directed_message_arrives((&host, HOSTS_PLAYER), joiner_id, &joiner, b"after re-dial", Duration::from_secs(5)),
+        "the host's directed message should reach the re-dialled friend's player"
+    );
+}
+
+/// The case the re-dial bug bites: three players, and the connection between
+/// the two Joiners drops and heals. Each Joiner's game must still reach the
+/// other's player directly. The suite's first test with three Helpers.
+#[test]
+fn test_two_joiners_whose_connection_is_redialled_reach_each_others_players_again() {
+    let Some((host, alice, alice_id)) = hosted_game_with_a_named_joiner() else {
+        return;
+    };
+    let Some(bob) = create_transport() else {
+        return;
+    };
+    let bob_id = bob
+        .join_session_by_ticket(host.our_ticket())
+        .expect("the second joiner should join");
+    bob.create_player(
+        PlayerName {
+            short_name: String::new(),
+            long_name: "Second Joiner".to_string(),
+        },
+        0,
+        vec![0x02],
+    );
+    let wait = Duration::from_secs(10);
+    assert!(
+        directed_message_arrives((&alice, alice_id), bob_id, &bob, b"alice, before", wait),
+        "the joiners should reach each other before the drop"
+    );
+    assert!(
+        directed_message_arrives((&bob, bob_id), alice_id, &alice, b"bob, before", wait),
+        "the joiners should reach each other before the drop"
+    );
+
+    alice.drop_connection_to(bob.endpoint_id());
+    assert!(
+        poll_until(Duration::from_secs(5), || {
+            (!alice.connected_peers().contains(&bob.endpoint_id())).then_some(())
+        })
+        .is_some(),
+        "alice should see the connection to bob end"
+    );
+
+    assert!(
+        directed_message_arrives((&alice, alice_id), bob_id, &bob, b"alice, after", wait),
+        "after the re-dial, alice's game should reach bob's player directly"
+    );
+    assert!(
+        directed_message_arrives((&bob, bob_id), alice_id, &alice, b"bob, after", wait),
+        "after the re-dial, bob's game should reach alice's player directly"
+    );
+}
+
+/// A Joiner whose host's connection is lost is told the session was lost.
+#[test]
+fn test_joiner_whose_host_connection_is_lost_is_told_session_lost() {
+    let Some((host, joiner, _joiner_id)) = hosted_game_with_a_named_joiner() else {
+        return;
+    };
+    joiner.drop_connection_to(host.endpoint_id());
+    let lost = poll_until(Duration::from_secs(5), || {
+        std::iter::from_fn(|| joiner.receive())
+            .find(|qm| system_message_type(qm) == Some(dp_types::sysmsg::DPSYS_SESSIONLOST))
+    });
+    assert!(lost.is_some(), "the joiner's game should be told its session was lost");
+}
+
 #[test]
 fn test_default_options_are_peer_protocol_version_1_and_15s_dial_timeout() {
     let options = datalink_transport::TransportOptions::default();

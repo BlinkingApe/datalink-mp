@@ -8,12 +8,15 @@
 //! with the new player's ticket. All existing players then connect to the new player
 //! directly, forming a full mesh.
 
-use crate::protocol::{decode_message, encode_message, Message, PlayerInfo, SessionInfo};
+use crate::friend_pipeline::FriendPipeline;
+use crate::friend_registry::{endpoint_short, FriendRegistry, Link, LinkEnded, LinkId, LocalFacts, RosterFacts};
+use crate::inbox::{GameInbox, SystemEvent};
+use crate::protocol::{decode_message, encode_message, Message, PlayerInfo};
 use crate::runtime::{NetworkMode, TransportOptions};
 use crate::session::SessionManager;
 use crate::{TransportError, TransportResult};
 use dp_types::structs::{serialize_dpmsg_setplayerorgroupdata, serialize_dpmsg_setplayerorgroupname, serialize_dpmsg_setsessiondesc};
-use dp_types::{SessionDesc, DPID, GUID};
+use dp_types::{PlayerName, GUID};
 
 /// DPPLAYERTYPE_PLAYER constant (player, not group)
 const DPPLAYERTYPE_PLAYER: u32 = 1;
@@ -22,12 +25,10 @@ use iroh::endpoint::{
     TransportErrorCode,
 };
 use iroh::{Endpoint, EndpointAddr, EndpointId};
-use parking_lot::RwLock;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tracing::{debug, debug_span, error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Peer protocol version: the version of the Helper-to-Helper wire protocol.
 /// Bumped whenever the wire format changes so two Helpers from different builds
@@ -76,201 +77,28 @@ fn classify_dial_error(e: &ConnectError) -> TransportError {
 pub const DEFAULT_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Magic prefix opening every ordered message stream: b"SMAC" + version (u16 LE).
-const STREAM_MAGIC: &[u8; 4] = b"SMAC";
+pub(crate) const STREAM_MAGIC: &[u8; 4] = b"SMAC";
 
 /// Upper bound on a single framed message (defensive against corrupt frames).
 const MAX_FRAME_LEN: u32 = 1 << 20; // 1 MiB
 
-/// A peer connection
-#[derive(Debug)]
-pub struct PeerConnection {
-    /// The Iroh connection
-    pub connection: Connection,
-    /// Endpoint ID
-    pub endpoint_id: EndpointId,
-    /// Their ticket (for reconnection)
-    pub ticket: String,
-    /// Player IDs on this peer (uses Mutex for interior mutability since Arc::get_mut fails with multiple refs)
-    pub player_ids: parking_lot::Mutex<Vec<DPID>>,
-    /// Ordered outbound message queue. All sends to this peer are enqueued here
-    /// (synchronously, so enqueue order == caller order) and written to ONE
-    /// long-lived framed QUIC stream by the writer task. Per-peer FIFO delivery
-    /// depends on this single-queue/single-stream design: separate streams or
-    /// tasks per message would leave ordering to the scheduler.
-    /// Each frame carries its capture id, if the traffic capture recorded it.
-    outbox: mpsc::UnboundedSender<(Vec<u8>, Option<u64>)>,
-}
+/// The friend registry as the connection manager holds it: each link's
+/// handle is its iroh connection.
+pub type Friends = FriendRegistry<Connection>;
 
-impl PeerConnection {
-    /// Create a peer and spawn its ordered-stream writer task.
-    /// Must be called from within the tokio runtime context.
-    fn spawn(
-        connection: Connection,
-        endpoint_id: EndpointId,
-        ticket: String,
-        peer_protocol_version: u16,
-    ) -> Arc<Self> {
-        let (outbox, outbox_rx) = mpsc::unbounded_channel();
-        let peer = Arc::new(PeerConnection {
-            connection: connection.clone(),
-            endpoint_id,
-            ticket,
-            player_ids: parking_lot::Mutex::new(Vec::new()),
-            outbox,
-        });
-        tokio::spawn(ordered_writer_task(
-            connection,
-            outbox_rx,
-            endpoint_short(&endpoint_id),
-            peer_protocol_version,
-        ));
-        peer
-    }
-
-    /// Enqueue an already-encoded message for ordered delivery to this peer.
-    fn enqueue(&self, msg: &Message, encoded: Vec<u8>) -> TransportResult<()> {
-        let capture_id = crate::capture::outbound(self.endpoint_id.as_bytes(), msg);
-        if let Message::GameMessage { data, .. } = msg {
-            crate::turn_sync::outbound(self.endpoint_id.as_bytes(), data);
-        }
-        self.outbox
-            .send((encoded, capture_id))
-            .map_err(|_| TransportError::NotConnected)
-    }
-}
-
-/// Short hex form of an endpoint id for log lines.
-fn endpoint_short(endpoint_id: &EndpointId) -> String {
-    let b = endpoint_id.as_bytes();
-    format!("{:08x}", u32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-}
-
-/// Writer task: owns the single ordered outbound stream to one peer.
-///
-/// Opens the stream lazily on the first message (preamble: magic + version),
-/// then writes 4-byte-LE length-prefixed frames in queue order. On a write
-/// error it reopens the stream ONCE and retries the failed message; if that
-/// also fails the connection is closed so the accept-loop cleanup fires
-/// ConnectionLost and callers see NotConnected on later sends. Errors are
-/// logged loudly — control-plane messages must never disappear silently.
-async fn ordered_writer_task(
-    connection: Connection,
-    mut outbox_rx: mpsc::UnboundedReceiver<(Vec<u8>, Option<u64>)>,
-    peer_label: String,
-    peer_protocol_version: u16,
-) {
-    let mut stream: Option<SendStream> = None;
-
-    async fn open_stream(
-        connection: &Connection,
-        peer_protocol_version: u16,
-    ) -> TransportResult<SendStream> {
-        let mut s = connection.open_uni().await?;
-        let mut preamble = [0u8; 6];
-        preamble[..4].copy_from_slice(STREAM_MAGIC);
-        preamble[4..].copy_from_slice(&peer_protocol_version.to_le_bytes());
-        s.write_all(&preamble).await?;
-        Ok(s)
-    }
-
-    async fn write_frame(s: &mut SendStream, data: &[u8]) -> TransportResult<()> {
-        s.write_all(&(data.len() as u32).to_le_bytes()).await?;
-        s.write_all(data).await?;
-        Ok(())
-    }
-
-    while let Some((data, capture_id)) = outbox_rx.recv().await {
-        // Ensure we have a stream
-        if stream.is_none() {
-            match open_stream(&connection, peer_protocol_version).await {
-                Ok(s) => stream = Some(s),
-                Err(e) => {
-                    error!(peer = %peer_label, error = %e, "failed to open ordered stream; dropping connection");
-                    connection.close(1u32.into(), b"stream open failed");
-                    return;
-                }
-            }
-        }
-
-        let s = stream.as_mut().expect("stream set above");
-        if let Err(e) = write_frame(s, &data).await {
-            warn!(peer = %peer_label, error = %e, "ordered stream write failed; reopening once");
-            match open_stream(&connection, peer_protocol_version).await {
-                Ok(mut s2) => {
-                    if let Err(e2) = write_frame(&mut s2, &data).await {
-                        error!(peer = %peer_label, error = %e2, "ordered stream retry failed; dropping connection");
-                        connection.close(1u32.into(), b"stream write failed");
-                        return;
-                    }
-                    stream = Some(s2);
-                }
-                Err(e2) => {
-                    error!(peer = %peer_label, error = %e2, "ordered stream reopen failed; dropping connection");
-                    connection.close(1u32.into(), b"stream reopen failed");
-                    return;
-                }
-            }
-        }
-        if let Some(id) = capture_id {
-            crate::capture::written(id);
-        }
-    }
-
-    // Outbox closed (peer removed) — finish the stream gracefully.
-    if let Some(mut s) = stream {
-        let _ = s.finish();
-    }
-    debug!(peer = %peer_label, "ordered writer task exiting");
-}
-
-/// Messages received from the network
-#[derive(Debug, Clone)]
-pub enum ReceivedMessage {
-    /// Session discovered
-    SessionDiscovered(SessionInfo),
-    /// Session list received
-    SessionList(Vec<SessionInfo>),
-    /// Player joined our session
-    PlayerJoined(PlayerInfo),
-    /// Player left
-    PlayerLeft(DPID),
-    /// Game message
-    GameMessage {
-        from: DPID,
-        to: DPID,
-        data: Vec<u8>,
-        guaranteed: bool,
-        /// Its id in the traffic capture, if one is running
-        capture_id: Option<u64>,
-    },
-    /// Join response received
-    JoinResponse {
-        accepted: bool,
-        player_id: Option<DPID>,
-        reason: Option<String>,
-        session_desc: Option<SessionDesc>,
-        players: Vec<PlayerInfo>,
-    },
-    /// Session closed
-    SessionClosed,
-    /// Connection lost to a peer
-    ConnectionLost(EndpointId),
-    /// DirectPlay system message to deliver to game (already serialized)
-    SystemMessage(Vec<u8>),
-}
-
-/// Connection manager for mesh networking
+/// Connection manager for mesh networking: the iroh work behind the friend
+/// registry. It dials and accepts connections, builds a link for each, runs
+/// the readers and the ordered writers, and tells the registry about links
+/// opening and ending.
 pub struct ConnectionManager {
     /// Iroh endpoint
     endpoint: Endpoint,
-    /// Connected peers by EndpointId bytes
-    peers: Arc<RwLock<HashMap<[u8; 32], Arc<PeerConnection>>>>,
-    /// Map from DPID to EndpointId for message routing
-    player_routes: Arc<RwLock<HashMap<DPID, [u8; 32]>>>,
+    /// Every friend, and everything sent to or received from them
+    friends: Arc<Friends>,
     /// Session manager
     session_manager: Arc<SessionManager>,
-    /// Received messages queue
-    message_tx: mpsc::UnboundedSender<ReceivedMessage>,
+    /// The game inbox
+    inbox: GameInbox,
     /// Our endpoint ID
     endpoint_id: EndpointId,
     /// Our ticket
@@ -285,10 +113,9 @@ impl Clone for ConnectionManager {
     fn clone(&self) -> Self {
         Self {
             endpoint: self.endpoint.clone(),
-            peers: self.peers.clone(),
-            player_routes: self.player_routes.clone(),
+            friends: self.friends.clone(),
             session_manager: self.session_manager.clone(),
-            message_tx: self.message_tx.clone(),
+            inbox: self.inbox.clone(),
             endpoint_id: self.endpoint_id,
             our_ticket: self.our_ticket.clone(),
             network_mode: self.network_mode,
@@ -299,11 +126,13 @@ impl Clone for ConnectionManager {
 
 impl ConnectionManager {
     /// Create a new connection manager. The endpoint must advertise
-    /// `peer_protocol_alpn(options.peer_protocol_version)`.
+    /// `peer_protocol_alpn(options.peer_protocol_version)`. `friends` is the
+    /// Transport's friend registry, delivering into `inbox`.
     pub fn new(
         endpoint: Endpoint,
+        friends: Arc<Friends>,
         session_manager: Arc<SessionManager>,
-        message_tx: mpsc::UnboundedSender<ReceivedMessage>,
+        inbox: GameInbox,
         our_ticket: String,
         network_mode: NetworkMode,
         options: TransportOptions,
@@ -311,10 +140,9 @@ impl ConnectionManager {
         let endpoint_id = endpoint.id();
         Self {
             endpoint,
-            peers: Arc::new(RwLock::new(HashMap::new())),
-            player_routes: Arc::new(RwLock::new(HashMap::new())),
+            friends,
             session_manager,
-            message_tx,
+            inbox,
             endpoint_id,
             our_ticket,
             network_mode,
@@ -349,15 +177,35 @@ impl ConnectionManager {
             .map_err(TransportError::from)
     }
 
-    /// Connect to a peer by ticket
-    pub async fn connect_by_ticket(&self, ticket: &str) -> TransportResult<Arc<PeerConnection>> {
+    /// Build the link for a new connection: spawn its ordered writer and give
+    /// it a friend pipeline that reads the connection's RTT.
+    /// Must be called from within the tokio runtime context.
+    fn build_link(&self, connection: &Connection, endpoint_id: EndpointId) -> Link<Connection> {
+        // All sends to this connection are queued on the outbox (synchronously,
+        // so enqueue order == caller order) and written to ONE long-lived
+        // framed QUIC stream by the writer task. Per-friend FIFO delivery
+        // depends on this single-queue/single-stream design: separate streams
+        // or tasks per message would leave ordering to the scheduler.
+        let (outbox, outbox_rx) = mpsc::unbounded_channel();
+        tokio::spawn(crate::frame_sink::run_ordered_writer(
+            crate::frame_sink::IrohFrameSink::new(connection.clone(), self.options.peer_protocol_version),
+            outbox_rx,
+            endpoint_short(endpoint_id.as_bytes()),
+        ));
+        let pipeline = FriendPipeline::new(*endpoint_id.as_bytes(), std::time::Instant::now, {
+            let connection = connection.clone();
+            move || connection.paths().iter().find(|p| p.is_selected()).map(|p| p.stats().rtt)
+        });
+        Link::new(outbox, pipeline, connection.clone())
+    }
+
+    /// Connect to a peer by ticket, unless it is already connected.
+    pub async fn connect_by_ticket(&self, ticket: &str) -> TransportResult<EndpointId> {
         let endpoint_addr = Self::parse_ticket(ticket)?;
 
-        let key: [u8; 32] = *endpoint_addr.id;
-
         // Check if already connected
-        if let Some(peer) = self.peers.read().get(&key) {
-            return Ok(peer.clone());
+        if self.friends.is_connected(*endpoint_addr.id) {
+            return Ok(endpoint_addr.id);
         }
 
         info!("Connecting to peer via ticket: {}", endpoint_addr.id);
@@ -379,201 +227,60 @@ impl ConnectionManager {
             }
         };
 
-        let peer = PeerConnection::spawn(
-            connection.clone(),
-            endpoint_addr.id,
-            ticket.to_string(),
-            self.options.peer_protocol_version,
-        );
-
-        self.peers.write().insert(key, peer.clone());
+        let link = self.build_link(&connection, endpoint_addr.id);
+        let link_id = self.friends.link_opened(*endpoint_addr.id, Some(ticket.to_string()), link, &self.local_facts());
 
         // Outgoing connections need a receiver loop just like incoming ones:
         // without it we could send to the peer but never receive from them.
-        self.spawn_connection_handler(connection, endpoint_addr.id);
+        self.spawn_connection_handler(connection, endpoint_addr.id, link_id);
 
-        Ok(peer)
+        Ok(endpoint_addr.id)
     }
 
     /// Connect to a peer by EndpointId (if we already have a connection)
-    pub async fn connect(&self, endpoint_id: EndpointId) -> TransportResult<Arc<PeerConnection>> {
-        let key: [u8; 32] = *endpoint_id;
-
-        // Check if already connected
-        if let Some(peer) = self.peers.read().get(&key) {
-            return Ok(peer.clone());
+    pub async fn connect(&self, endpoint_id: EndpointId) -> TransportResult<()> {
+        if self.friends.is_connected(*endpoint_id) {
+            return Ok(());
         }
-
         Err(TransportError::NotConnected)
     }
 
-    /// Add player route (DPID -> NodeId mapping)
-    pub fn add_player_route(&self, player_id: DPID, node_id: [u8; 32]) {
-        self.player_routes.write().insert(player_id, node_id);
-
-        // Also update the peer's player list using interior mutability
-        if let Some(peer) = self.peers.read().get(&node_id) {
-            let mut player_ids = peer.player_ids.lock();
-            if !player_ids.contains(&player_id) {
-                player_ids.push(player_id);
-            }
-        }
-    }
-
-    /// Remove player route
-    pub fn remove_player_route(&self, player_id: DPID) {
-        self.player_routes.write().remove(&player_id);
-    }
-
-    /// Get peer by player ID
-    pub fn get_peer_by_player(&self, player_id: DPID) -> Option<Arc<PeerConnection>> {
-        let node_id = *self.player_routes.read().get(&player_id)?;
-        self.peers.read().get(&node_id).cloned()
-    }
-
-    /// Disconnect from a peer
+    /// Disconnect from a peer: close every connection to it.
     pub fn disconnect(&self, endpoint_id: &EndpointId) {
-        let key: [u8; 32] = **endpoint_id;
-        if let Some(peer) = self.peers.write().remove(&key) {
-            // Remove all player routes for this peer
-            let mut routes = self.player_routes.write();
-            routes.retain(|_, v| v != &key);
-
-            peer.connection.close(0u32.into(), b"disconnect");
+        for connection in self.friends.disconnect(**endpoint_id) {
+            connection.close(0u32.into(), b"disconnect");
         }
     }
 
     /// Disconnect all peers
     pub fn disconnect_all(&self) {
-        let mut peers = self.peers.write();
-        for (_, peer) in peers.drain() {
-            peer.connection.close(0u32.into(), b"session closed");
+        for connection in self.friends.disconnect_all() {
+            connection.close(0u32.into(), b"session closed");
         }
-        self.player_routes.write().clear();
-    }
-
-    /// Get connected peer count
-    pub fn peer_count(&self) -> usize {
-        self.peers.read().len()
     }
 
     /// Get all connected peer endpoint IDs
     pub fn get_connected_peers(&self) -> Vec<EndpointId> {
-        self.peers.read()
-            .values()
-            .map(|p| p.endpoint_id)
-            .collect()
+        self.friends.connected_friends().into_iter().map(|(_, c)| c.remote_id()).collect()
     }
 
     /// The class of each connected peer's selected path; a peer without a
     /// selected path yet is left out.
     pub fn peer_paths(&self) -> Vec<(EndpointId, crate::path::PathClass)> {
-        self.peers
-            .read()
-            .values()
-            .filter_map(|p| Some((p.endpoint_id, crate::path::selected_path(&p.connection)?)))
+        self.friends
+            .connected_friends()
+            .into_iter()
+            .filter_map(|(_, c)| Some((c.remote_id(), crate::path::selected_path(&c)?)))
             .collect()
-    }
-
-    /// Send a message to a specific peer by EndpointId.
-    ///
-    /// Synchronous: encodes and enqueues to the peer's ordered stream. Enqueue
-    /// order across all send/broadcast calls IS the wire order for that peer,
-    /// so callers get deterministic per-peer FIFO by calling these in order.
-    pub fn send_to_peer(&self, endpoint_id: &EndpointId, msg: &Message) -> TransportResult<()> {
-        let key: [u8; 32] = **endpoint_id;
-        let peer = self
-            .peers
-            .read()
-            .get(&key)
-            .cloned()
-            .ok_or(TransportError::NotConnected)?;
-
-        peer.enqueue(msg, encode_message(msg)?)
-    }
-
-    /// Send a message to a specific player (synchronous enqueue, see send_to_peer)
-    pub fn send_to_player(&self, player_id: DPID, msg: &Message) -> TransportResult<()> {
-        let node_id = *self.player_routes.read().get(&player_id)
-            .ok_or(TransportError::PlayerNotFound)?;
-
-        let peer = self.peers.read().get(&node_id)
-            .cloned()
-            .ok_or(TransportError::NotConnected)?;
-
-        peer.enqueue(msg, encode_message(msg)?)
-    }
-
-    /// Send a message to all peers (synchronous enqueue, see send_to_peer).
-    ///
-    /// Returns an error if ANY enqueue fails, preserving the last error.
-    /// All peers are attempted regardless of individual failures.
-    pub fn broadcast(&self, msg: &Message) -> TransportResult<()> {
-        self.broadcast_filtered(None, msg)
-    }
-
-    /// Send a message to all peers except the specified one.
-    ///
-    /// Used when relaying: the excluded peer is the original sender.
-    pub fn broadcast_except(&self, exclude: &EndpointId, msg: &Message) -> TransportResult<()> {
-        self.broadcast_filtered(Some(**exclude), msg)
-    }
-
-    fn broadcast_filtered(&self, exclude: Option<[u8; 32]>, msg: &Message) -> TransportResult<()> {
-        let data = encode_message(msg)?;
-        let peers: Vec<_> = self.peers.read()
-            .iter()
-            .filter(|(id, _)| Some(**id) != exclude)
-            .map(|(_, p)| p.clone())
-            .collect();
-        let peer_count = peers.len();
-        let msg_type = msg.type_name();
-
-        let span = debug_span!("broadcast", peer_count, msg_type);
-        let _guard = span.enter();
-
-        if peer_count == 0 {
-            debug!("no peers to send to");
-            return Ok(());
-        }
-
-        let mut last_error: Option<TransportError> = None;
-        let mut success_count = 0;
-
-        for peer in peers {
-            match peer.enqueue(msg, data.clone()) {
-                Ok(()) => {
-                    debug!(endpoint = %endpoint_short(&peer.endpoint_id), "enqueued");
-                    success_count += 1;
-                }
-                Err(e) => {
-                    warn!(endpoint = %endpoint_short(&peer.endpoint_id), error = %e, "enqueue failed (peer dead)");
-                    last_error = Some(e);
-                }
-            }
-        }
-
-        debug!(success_count, peer_count, "broadcast enqueued");
-
-        match last_error {
-            Some(e) => Err(e),
-            None => Ok(()),
-        }
     }
 
     /// Send and wait for response (bidirectional)
     pub async fn send_and_receive(&self, endpoint_id: &EndpointId, msg: &Message) -> TransportResult<Message> {
-        let key: [u8; 32] = **endpoint_id;
-        let peer = self
-            .peers
-            .read()
-            .get(&key)
-            .cloned()
-            .ok_or(TransportError::NotConnected)?;
+        let connection = self.friends.link_handle(**endpoint_id).ok_or(TransportError::NotConnected)?;
 
         let data = encode_message(msg)?;
 
-        let (mut send, mut recv) = peer.connection.open_bi().await?;
+        let (mut send, mut recv) = connection.open_bi().await?;
         send.write_all(&data).await?;
         send.finish()?;
 
@@ -590,17 +297,14 @@ impl ConnectionManager {
     /// This MUST be called for BOTH incoming AND outgoing connections to ensure
     /// bidirectional message flow. Without this, outgoing connections can send
     /// but never receive messages.
-    fn spawn_connection_handler(&self, connection: Connection, endpoint_id: EndpointId) {
+    fn spawn_connection_handler(&self, connection: Connection, endpoint_id: EndpointId, link_id: LinkId) {
         let endpoint_id_bytes: [u8; 32] = *endpoint_id;
         let session_manager = self.session_manager.clone();
-        let message_tx = self.message_tx.clone();
-        let peers = self.peers.clone();
-        let player_routes = self.player_routes.clone();
+        let inbox = self.inbox.clone();
         let cm = self.clone();
 
         crate::capture::spawn_path_watcher(connection.clone(), endpoint_id_bytes);
-        crate::path::spawn_path_logger(connection.clone(), endpoint_short(&endpoint_id));
-        crate::turn_sync::register(endpoint_id_bytes, connection.clone());
+        crate::path::spawn_path_logger(connection.clone(), endpoint_short(endpoint_id.as_bytes()));
 
         tokio::spawn(async move {
             loop {
@@ -616,16 +320,14 @@ impl ConnectionManager {
                         match result {
                             Ok(recv) => {
                                 let session_manager = session_manager.clone();
-                                let message_tx = message_tx.clone();
-                                let player_routes = player_routes.clone();
+                                let inbox = inbox.clone();
                                 let cm = cm.clone();
 
                                 tokio::spawn(async move {
                                     if let Err(e) = read_ordered_stream(
                                         recv,
                                         &session_manager,
-                                        &message_tx,
-                                        &player_routes,
+                                        &inbox,
                                         endpoint_id_bytes,
                                         &cm,
                                     ).await {
@@ -667,12 +369,54 @@ impl ConnectionManager {
                 }
             }
 
-            // Connection closed - cleanup
-            crate::turn_sync::unregister(&endpoint_id_bytes, &connection);
-            peers.write().remove(&endpoint_id_bytes);
-            player_routes.write().retain(|_, v| v != &endpoint_id_bytes);
-            let _ = message_tx.send(ReceivedMessage::ConnectionLost(endpoint_id));
+            // Connection closed. The registry decides what the loss means,
+            // from the roster's facts, at once: the game polling later must
+            // not delay a re-dial.
+            let roster = RosterFacts {
+                was_host: cm.session_manager.is_node_host(&endpoint_id_bytes),
+                ticket: cm.session_manager.get_player_ticket_by_node(&endpoint_id_bytes),
+            };
+            match cm.friends.link_ended(endpoint_id_bytes, link_id, roster) {
+                LinkEnded::Nothing => {}
+                LinkEnded::Redial { ticket } => cm.spawn_redial(endpoint_id_bytes, ticket),
+            }
         });
+    }
+
+    /// Re-dial a lost friend by its ticket (bounded best-effort): five
+    /// attempts, backing off. Nothing else re-establishes a friend's
+    /// connection after a transient transport loss, and under full mesh a
+    /// dropped edge silently stops that pair from exchanging
+    /// broadcasts/ACKs. connect_by_ticket is idempotent, so a race with a
+    /// heal from the other side is harmless. When a dial succeeds, the
+    /// registry re-attaches the new link to the friend's kept record.
+    fn spawn_redial(&self, endpoint_id_bytes: [u8; 32], ticket: String) {
+        let cm = self.clone();
+        tokio::spawn(async move {
+            for attempt in 1..=5u32 {
+                tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+                match cm.connect_by_ticket(&ticket).await {
+                    Ok(_) => {
+                        info!(attempt, "reconnected to peer after transport loss");
+                        crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
+                        return;
+                    }
+                    Err(e) => {
+                        debug!(attempt, error = %e, "reconnect attempt failed");
+                        crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
+                    }
+                }
+            }
+            cm.friends.redial_gave_up(endpoint_id_bytes);
+        });
+    }
+
+    /// Who we are, for the Hello a re-attached link carries first.
+    fn local_facts(&self) -> LocalFacts {
+        LocalFacts {
+            player: self.session_manager.local_player_id(),
+            ticket: self.our_ticket.clone(),
+        }
     }
 
     /// Establish mesh connection to a new player
@@ -683,9 +427,9 @@ impl ConnectionManager {
         }
 
         // Skip if already connected
-        if self.peers.read().contains_key(&player_info.node_id) {
+        if self.friends.is_connected(player_info.node_id) {
             // Just update routing
-            self.add_player_route(player_info.player_id, player_info.node_id);
+            self.friends.player_joined(player_info.player_id, player_info.node_id);
             return Ok(());
         }
 
@@ -697,25 +441,13 @@ impl ConnectionManager {
 
         info!("Establishing mesh connection to player {}", player_info.player_id);
 
+        // Route first: the link then opens onto the friend's record, and the
+        // registry queues our Hello on it before anything else.
+        self.friends.player_joined(player_info.player_id, player_info.node_id);
+
         // Connect using their ticket
         match self.connect_by_ticket(&player_info.ticket).await {
-            Ok(_peer) => {
-                // Send Hello to identify ourselves
-                let our_player_id = self.session_manager.local_player_id().unwrap_or(0);
-                let hello = Message::Hello {
-                    player_id: our_player_id,
-                    ticket: self.our_ticket.clone(),
-                };
-
-                if let Some(endpoint_id) = EndpointId::try_from(player_info.node_id.as_slice()).ok() {
-                    if let Err(e) = self.send_to_peer(&endpoint_id, &hello) {
-                        warn!("Failed to send Hello: {}", e);
-                    }
-                }
-
-                // Add routing
-                self.add_player_route(player_info.player_id, player_info.node_id);
-
+            Ok(_) => {
                 info!("Mesh connection established to player {}", player_info.player_id);
             }
             Err(e) => {
@@ -728,26 +460,15 @@ impl ConnectionManager {
 
     /// Handle an incoming connection
     pub async fn handle_incoming(&self, connection: Connection, endpoint_id: EndpointId) -> TransportResult<()> {
-        let endpoint_id_bytes: [u8; 32] = *endpoint_id;
-
         info!("Incoming connection from: {}", endpoint_id);
 
-        // Check if we already have this peer
-        let is_new = !self.peers.read().contains_key(&endpoint_id_bytes);
-
-        if is_new {
-            // Ticket will be filled in on Hello
-            let peer = PeerConnection::spawn(
-                connection.clone(),
-                endpoint_id,
-                String::new(),
-                self.options.peer_protocol_version,
-            );
-            self.peers.write().insert(endpoint_id_bytes, peer);
-        }
+        // The ticket comes with the friend's Hello. If the friend already has
+        // a link, the registry keeps this one as a spare.
+        let link = self.build_link(&connection, endpoint_id);
+        let link_id = self.friends.link_opened(*endpoint_id, None, link, &self.local_facts());
 
         // Use shared helper to spawn the connection handler
-        self.spawn_connection_handler(connection, endpoint_id);
+        self.spawn_connection_handler(connection, endpoint_id, link_id);
 
         Ok(())
     }
@@ -759,8 +480,7 @@ impl ConnectionManager {
 async fn read_ordered_stream(
     mut recv: RecvStream,
     session_manager: &SessionManager,
-    message_tx: &mpsc::UnboundedSender<ReceivedMessage>,
-    player_routes: &Arc<RwLock<HashMap<DPID, [u8; 32]>>>,
+    inbox: &GameInbox,
     sender_endpoint_id: [u8; 32],
     cm: &ConnectionManager,
 ) -> TransportResult<()> {
@@ -820,8 +540,7 @@ async fn read_ordered_stream(
         handle_peer_message(
             msg,
             session_manager,
-            message_tx,
-            player_routes,
+            inbox,
             sender_endpoint_id,
             cm,
         )
@@ -835,8 +554,7 @@ async fn read_ordered_stream(
 async fn handle_peer_message(
     msg: Message,
     session_manager: &SessionManager,
-    message_tx: &mpsc::UnboundedSender<ReceivedMessage>,
-    player_routes: &Arc<RwLock<HashMap<DPID, [u8; 32]>>>,
+    inbox: &GameInbox,
     sender_endpoint_id: [u8; 32],
     cm: &ConnectionManager,
 ) {
@@ -844,16 +562,15 @@ async fn handle_peer_message(
         crate::capture::inbound_control(&sender_endpoint_id, &msg);
     }
     match msg {
-        Message::Hello { player_id, ticket: _their_ticket } => {
+        Message::Hello { player_id, ticket } => {
             debug!("Received Hello from player {}", player_id);
             // Update routing
-            player_routes.write().insert(player_id, sender_endpoint_id);
+            cm.friends.route_player_and_record_ticket(sender_endpoint_id, player_id, ticket);
         }
 
         Message::SessionAnnounce { session } => {
             debug!("Received session announcement: {}", session.session_name);
             session_manager.add_discovered_session(session.clone());
-            let _ = message_tx.send(ReceivedMessage::SessionDiscovered(session));
         }
 
         Message::SessionList { sessions } => {
@@ -861,14 +578,13 @@ async fn handle_peer_message(
             for session in &sessions {
                 session_manager.add_discovered_session(session.clone());
             }
-            let _ = message_tx.send(ReceivedMessage::SessionList(sessions));
         }
 
         Message::PlayerJoined { player } => {
             debug!("Player joined: {} ({})", player.player_id, player.name.short_name);
 
             // Add routing for this player
-            player_routes.write().insert(player.player_id, player.node_id);
+            cm.friends.player_joined(player.player_id, player.node_id);
 
             // Add to session
             session_manager.add_remote_player(player.clone());
@@ -886,7 +602,10 @@ async fn handle_peer_message(
                 });
             }
 
-            let _ = message_tx.send(ReceivedMessage::PlayerJoined(player));
+            inbox.add_system(SystemEvent::PlayerJoined {
+                current_players: session_manager.get_players().len() as u32,
+                info: player,
+            });
         }
 
         Message::PlayerLeft { player_id, .. } => {
@@ -902,9 +621,13 @@ async fn handle_peer_message(
                 return;
             }
             debug!("Player left: {}", player_id);
-            player_routes.write().remove(&player_id);
+            cm.friends.player_left(player_id);
+            let (name, flags) = session_manager
+                .get_player(player_id)
+                .map(|p| (p.name.clone(), p.flags))
+                .unwrap_or_else(|| (PlayerName::default(), 0));
             session_manager.remove_player(player_id);
-            let _ = message_tx.send(ReceivedMessage::PlayerLeft(player_id));
+            inbox.add_system(SystemEvent::PlayerLeft { player_id, name, flags });
         }
 
         Message::GameMessage {
@@ -915,10 +638,8 @@ async fn handle_peer_message(
         } => {
             let guaranteed = flags & dp_types::DPSEND_GUARANTEED != 0;
             debug!(from, to, size = data.len(), guaranteed, "received GameMessage, queuing to channel");
-            let capture_id = crate::capture::inbound(&sender_endpoint_id, from, to, guaranteed, &data);
-            crate::turn_sync::inbound(&sender_endpoint_id, &data);
 
-            // Deliver to the local DLL/game.
+            // Deliver to the local DLL/game, through the friend's pipeline.
             //
             // TOPOLOGY: full mesh. Every player holds a direct connection to every
             // other player, so the origin already delivered this GameMessage to us
@@ -927,13 +648,7 @@ async fn handle_peer_message(
             //   * relaying would double-deliver to peers the origin already reached;
             //   * echoing to the sender would duplicate the copy JACKAL already gives
             //     the sender via its internal loopback queue (game @0x64a210).
-            let _ = message_tx.send(ReceivedMessage::GameMessage {
-                from,
-                to,
-                data,
-                guaranteed,
-                capture_id,
-            });
+            cm.friends.receive_game(sender_endpoint_id, from, to, guaranteed, data);
         }
 
         Message::SessionClosed { .. } => {
@@ -943,7 +658,7 @@ async fn handle_peer_message(
                 debug!("Ignoring SessionClosed from a peer that isn't our session's host");
                 return;
             }
-            let _ = message_tx.send(ReceivedMessage::SessionClosed);
+            inbox.add_system(SystemEvent::SessionLost);
         }
 
         Message::PlayerDataUpdate {
@@ -959,7 +674,7 @@ async fn handle_peer_message(
 
             // Generate DPMSG_SETPLAYERORGROUPDATA for the local game
             let sys_msg = serialize_dpmsg_setplayerorgroupdata(player_id, DPPLAYERTYPE_PLAYER, &data);
-            let _ = message_tx.send(ReceivedMessage::SystemMessage(sys_msg));
+            inbox.add_system(SystemEvent::Message(sys_msg));
         }
 
         Message::Ping { timestamp } => {
@@ -971,7 +686,10 @@ async fn handle_peer_message(
             // game hear of it, named, as real DirectPlay would tell it.
             if let Some(joiner) = session_manager.rename_remote_player(player_id, name.clone()) {
                 info!(player_id, long = %name.long_name, "Joiner created its player, announcing it to the game");
-                let _ = message_tx.send(ReceivedMessage::PlayerJoined(joiner));
+                inbox.add_system(SystemEvent::PlayerJoined {
+                    current_players: session_manager.get_players().len() as u32,
+                    info: joiner,
+                });
                 return;
             }
 
@@ -983,7 +701,7 @@ async fn handle_peer_message(
                 &name.short_name,
                 &name.long_name,
             );
-            let _ = message_tx.send(ReceivedMessage::SystemMessage(sys_msg));
+            inbox.add_system(SystemEvent::Message(sys_msg));
         }
 
         Message::SessionDescUpdate { session: desc } => {
@@ -991,7 +709,7 @@ async fn handle_peer_message(
 
             // Generate DPMSG_SETSESSIONDESC for the local game
             let sys_msg = serialize_dpmsg_setsessiondesc(&desc);
-            let _ = message_tx.send(ReceivedMessage::SystemMessage(sys_msg));
+            inbox.add_system(SystemEvent::Message(sys_msg));
 
             // Update session state
             session_manager.update_session_desc(|existing| {
@@ -1100,7 +818,7 @@ async fn handle_bi_stream(
                         // Refresh the route (endpoint may have changed on reconnect),
                         // return the OTHER players (exclude this node's own player),
                         // and emit NO PlayerJoined broadcast.
-                        cm.add_player_route(existing_id, sender_endpoint_id);
+                        cm.friends.player_joined(existing_id, sender_endpoint_id);
                         let players: Vec<PlayerInfo> = session_manager
                             .get_player_infos()
                             .into_iter()
@@ -1147,7 +865,7 @@ async fn handle_bi_stream(
                         // the joiner's CreatePlayer, already named (see add_joiner).
                         session_manager.add_joiner(joiner_info.clone());
                         // Register the route so directed sends to this player resolve
-                        cm.add_player_route(player_id, sender_endpoint_id);
+                        cm.friends.player_joined(player_id, sender_endpoint_id);
                         info!("Added remote player {} to session with route", player_id);
 
                         // Get updated session desc (current_players count updated)
@@ -1209,11 +927,7 @@ async fn handle_bi_stream(
     // itself. (broadcast_player is None for a reconnect — see the idempotency branch.)
     if let Some(player_info) = broadcast_player {
         let broadcast_msg = Message::PlayerJoined { player: player_info };
-        let result = match EndpointId::try_from(&sender_endpoint_id[..]) {
-            Ok(newcomer) => cm.broadcast_except(&newcomer, &broadcast_msg),
-            Err(_) => cm.broadcast(&broadcast_msg),
-        };
-        if let Err(e) = result {
+        if let Err(e) = cm.friends.send_control_to_all_but(sender_endpoint_id, &broadcast_msg) {
             warn!("Failed to broadcast PlayerJoined: {}", e);
         }
     }
