@@ -2,8 +2,9 @@
 //! received from friends goes through it.
 //!
 //! It keeps one record per friend: the friend's endpoint id, its ticket, its
-//! players' DPIDs (these are the routes), its current **link**, and a slot for
-//! facts scoped to the Game session that must outlive a link.
+//! players' DPIDs (these are the routes), its current **link**, any spare
+//! links, and a slot for facts scoped to the Game session that must outlive a
+//! link.
 //!
 //! Like the friend pipeline, the registry only says what should happen with
 //! anything async. The connection manager does the iroh work (dialling, the
@@ -119,7 +120,11 @@ struct Record<H> {
     ticket: Option<String>,
     /// The friend's players: the routes.
     players: Vec<DPID>,
+    /// The current link: every frame to the friend goes on it.
     link: Option<Arc<Link<H>>>,
+    /// Later links to the friend, oldest first, while the current one is open.
+    /// Their readers still deliver; one takes over if the current link ends.
+    spares: Vec<Arc<Link<H>>>,
     /// Nothing reads it yet: it is the home for facts that outlive a link.
     #[allow(dead_code)]
     session: GameSessionFacts,
@@ -131,8 +136,20 @@ impl<H> Default for Record<H> {
             ticket: None,
             players: Vec::new(),
             link: None,
+            spares: Vec::new(),
             session: GameSessionFacts::default(),
         }
+    }
+}
+
+impl<H: Clone> Record<H> {
+    /// Every link's connection handle: the current link's, then the spares'.
+    fn handles(&self) -> Vec<H> {
+        self.link
+            .iter()
+            .chain(&self.spares)
+            .map(|l| l.handle.clone())
+            .collect()
     }
 }
 
@@ -163,9 +180,9 @@ impl<H: Clone> FriendRegistry<H> {
     /// `None` for a connection the friend made to us. Returns the link's id,
     /// for [`link_ended`](Self::link_ended).
     ///
-    /// For now, as before the registry: a link we dialled replaces the
-    /// friend's link, and a link the friend made is kept only if the friend
-    /// has none. A link that isn't kept is dropped, which ends its writer.
+    /// The first link to a friend is current. A later one, from a dial of
+    /// ours or the friend's, is a spare while the current one is open: frames
+    /// keep going to the current link, and the spare's reader still delivers.
     ///
     /// A link that opens onto a record with no link re-attaches it: a friend
     /// being re-dialled, or one whose players were routed before the dial.
@@ -192,11 +209,13 @@ impl<H: Clone> FriendRegistry<H> {
             let id = LinkId(s.next_link);
             let reattaching = s.friends.get(&friend).is_some_and(|r| r.link.is_none());
             let record = s.friends.entry(friend).or_default();
-            let dialled = ticket.is_some();
-            if dialled {
+            if ticket.is_some() {
                 record.ticket = ticket;
             }
-            if dialled || record.link.is_none() {
+            let link = Arc::new(Link { id, ..link });
+            if record.link.is_some() {
+                record.spares.push(link);
+            } else {
                 if reattaching {
                     // Queued while no one else can see the link, so it is the
                     // first frame on it. The friend's Helper routes our player
@@ -205,7 +224,7 @@ impl<H: Clone> FriendRegistry<H> {
                         said_hello = link.outbox.send((frame, None)).is_ok();
                     }
                 }
-                record.link = Some(Arc::new(Link { id, ..link }));
+                record.link = Some(link);
             }
             id
         };
@@ -216,9 +235,15 @@ impl<H: Clone> FriendRegistry<H> {
     }
 
     /// A link to `friend` ended. `roster` is what the session roster says
-    /// about the friend. When it was the friend's current link, the friend is
-    /// lost: the link's pipeline hears "connection lost", the capture's `lost`
-    /// line is written, and
+    /// about the friend.
+    ///
+    /// A spare ending is removed, and nothing else happens. The current link
+    /// ending while a spare is open hands over to the oldest spare: the old
+    /// link's pipeline hears "connection lost", but the friend is not lost.
+    ///
+    /// The current link ending with no spare open loses the friend: the
+    /// link's pipeline hears "connection lost", the capture's `lost` line is
+    /// written, and
     /// - the host is forgotten, and the game told its session is lost
     /// - a friend with players and a roster ticket is kept with no link, so
     ///   directed sends to its players fail while it is re-dialled, and the
@@ -226,16 +251,27 @@ impl<H: Clone> FriendRegistry<H> {
     /// - anyone else (a friend only connected for session discovery) is
     ///   forgotten
     ///
-    /// Any other link of the friend ending changes nothing. A link of a
-    /// friend already forgotten (every friend is, at shutdown) is still a
-    /// loss: the `lost` line is written and, for the host, the game told.
+    /// A link of a friend already forgotten (every friend is, at shutdown) is
+    /// still a loss: the `lost` line is written and, for the host, the game
+    /// told.
     pub fn link_ended(&self, friend: FriendId, ended: LinkId, roster: RosterFacts) -> LinkEnded {
         let (lost, answer) = {
             let mut s = self.state.lock();
             match s.friends.get_mut(&friend) {
                 None => (None, LinkEnded::Nothing),
                 Some(record) if record.link.as_ref().map(|l| l.id) != Some(ended) => {
+                    record.spares.retain(|l| l.id != ended);
                     debug!(endpoint = %short(&friend), "a link that is not the friend's current one ended");
+                    return LinkEnded::Nothing;
+                }
+                Some(record) if !record.spares.is_empty() => {
+                    let next = record.spares.remove(0);
+                    let old = record.link.replace(next);
+                    drop(s);
+                    debug!(endpoint = %short(&friend), "current link ended, a spare took over");
+                    if let Some(old) = old {
+                        old.pipeline.connection_lost();
+                    }
                     return LinkEnded::Nothing;
                 }
                 Some(record) => {
@@ -328,20 +364,19 @@ impl<H: Clone> FriendRegistry<H> {
         }
     }
 
-    /// The connection handle of `friend`'s link, for the caller to close. The
-    /// friend is kept: its loss is handled when the link ends, as any other.
-    pub fn disconnect(&self, friend: FriendId) -> Option<H> {
-        self.link_handle(friend)
+    /// The connection handles of `friend`'s links, current and spare, for the
+    /// caller to close. The friend is kept: its loss is handled when the links
+    /// end, as any other.
+    pub fn disconnect(&self, friend: FriendId) -> Vec<H> {
+        let s = self.state.lock();
+        s.friends.get(&friend).map_or_else(Vec::new, Record::handles)
     }
 
-    /// Forget every friend. Returns their links' connection handles, for the
-    /// caller to close.
+    /// Forget every friend. Returns all their links' connection handles, for
+    /// the caller to close.
     pub fn disconnect_all(&self) -> Vec<H> {
         let removed: Vec<_> = self.state.lock().friends.drain().collect();
-        removed
-            .into_iter()
-            .filter_map(|(_, r)| Some(r.link?.handle.clone()))
-            .collect()
+        removed.iter().flat_map(|(_, r)| r.handles()).collect()
     }
 
     /// Whether `friend` has a link.
@@ -838,12 +873,11 @@ mod tests {
         }
     }
 
+    /// A stand-in link's id and the receiving end of its outbox.
+    type Linked = (LinkId, UnboundedReceiver<Frame>);
+
     /// Open a stand-in link to `friend`, as accepted, and route `player` there.
-    fn linked(
-        reg: &FriendRegistry<()>,
-        friend: FriendId,
-        player: DPID,
-    ) -> (LinkId, UnboundedReceiver<Frame>) {
+    fn linked(reg: &FriendRegistry<()>, friend: FriendId, player: DPID) -> Linked {
         let (link, rx) = stand_in(friend);
         let id = reg.link_opened(friend, None, link, &us());
         reg.player_joined(player, friend);
@@ -982,7 +1016,7 @@ mod tests {
         let reg = FriendRegistry::new(inbox.clone());
         let (bob, _brx) = linked(&reg, BOB, BOB_PLAYER);
 
-        assert_eq!(reg.disconnect(BOB), Some(()));
+        assert_eq!(reg.disconnect(BOB), vec![()]);
 
         assert_eq!(
             reg.link_ended(BOB, bob, a_joiner("bob's ticket")),
@@ -1004,5 +1038,101 @@ mod tests {
             drain(&mut brx),
             vec![hello_from_us(), game(LOCAL, BOB_PLAYER, &[1])]
         );
+    }
+
+    /// A registry with Bob linked twice: the first link, accepted, and a
+    /// spare from our own dial completing after it.
+    fn bob_linked_twice() -> (FriendRegistry<()>, GameInbox, Linked, Linked) {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let first = linked(&reg, BOB, BOB_PLAYER);
+        let (link, rx) = stand_in(BOB);
+        let spare = reg.link_opened(BOB, Some("bob's ticket".into()), link, &us());
+        (reg, inbox, first, (spare, rx))
+    }
+
+    #[test]
+    fn a_second_link_does_not_replace_the_current_one_and_frames_keep_going_to_the_first() {
+        let (reg, _inbox, (_, mut first), (_, mut spare)) = bob_linked_twice();
+
+        sends_to(&reg, BOB_PLAYER).unwrap();
+        reg.send_control(BOB, &ping(2)).unwrap();
+
+        assert_eq!(
+            drain(&mut first),
+            vec![game(LOCAL, BOB_PLAYER, &[1]), format!("{:?}", ping(2))]
+        );
+        assert!(drain(&mut spare).is_empty());
+    }
+
+    #[test]
+    fn a_spare_ending_changes_nothing() {
+        let (reg, inbox, (first_id, mut first), (spare_id, _spare)) = bob_linked_twice();
+
+        assert_eq!(
+            reg.link_ended(BOB, spare_id, a_joiner("bob's ticket")),
+            LinkEnded::Nothing
+        );
+
+        sends_to(&reg, BOB_PLAYER).unwrap();
+        assert_eq!(drain(&mut first), vec![game(LOCAL, BOB_PLAYER, &[1])]);
+        assert_eq!(inbox.count(), 0);
+        // The spare is gone: the first link ending now loses Bob.
+        assert_eq!(
+            reg.link_ended(BOB, first_id, a_joiner("bob's ticket")),
+            LinkEnded::Redial {
+                ticket: "bob's ticket".into()
+            }
+        );
+    }
+
+    #[test]
+    fn the_current_link_ending_with_a_spare_open_moves_frames_to_the_spare() {
+        let (reg, inbox, (first_id, _first), (_, mut spare)) = bob_linked_twice();
+
+        assert_eq!(
+            reg.link_ended(BOB, first_id, a_joiner("bob's ticket")),
+            LinkEnded::Nothing
+        );
+
+        sends_to(&reg, BOB_PLAYER).unwrap();
+        reg.send_control(BOB, &ping(2)).unwrap();
+        // No Hello: Bob's Helper still routes our player to us.
+        assert_eq!(
+            drain(&mut spare),
+            vec![game(LOCAL, BOB_PLAYER, &[1]), format!("{:?}", ping(2))]
+        );
+        assert_eq!(inbox.count(), 0);
+    }
+
+    #[test]
+    fn the_hosts_current_link_ending_with_a_spare_open_is_not_a_lost_session() {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let (first, _arx) = linked(&reg, ALICE, ALICE_PLAYER);
+        let (link, mut spare) = stand_in(ALICE);
+        reg.link_opened(ALICE, None, link, &us());
+
+        assert_eq!(
+            reg.link_ended(ALICE, first, the_host("alice's ticket")),
+            LinkEnded::Nothing
+        );
+
+        assert_eq!(inbox.count(), 0);
+        reg.send_game(LOCAL, dpid::DPID_SERVERPLAYER, true, vec![5], &joiner())
+            .unwrap();
+        assert_eq!(
+            drain(&mut spare),
+            vec![game(LOCAL, dpid::DPID_SERVERPLAYER, &[5])]
+        );
+    }
+
+    #[test]
+    fn disconnecting_a_friend_hands_back_every_link_to_close() {
+        let (reg, _inbox, _first, _spare) = bob_linked_twice();
+        let (_alice, _arx) = linked(&reg, ALICE, ALICE_PLAYER);
+
+        assert_eq!(reg.disconnect(BOB).len(), 2);
+        assert_eq!(reg.disconnect_all().len(), 3);
     }
 }

@@ -251,9 +251,9 @@ impl ConnectionManager {
         Err(TransportError::NotConnected)
     }
 
-    /// Disconnect from a peer
+    /// Disconnect from a peer: close every connection to it.
     pub fn disconnect(&self, endpoint_id: &EndpointId) {
-        if let Some(connection) = self.friends.disconnect(**endpoint_id) {
+        for connection in self.friends.disconnect(**endpoint_id) {
             connection.close(0u32.into(), b"disconnect");
         }
     }
@@ -473,8 +473,8 @@ impl ConnectionManager {
     pub async fn handle_incoming(&self, connection: Connection, endpoint_id: EndpointId) -> TransportResult<()> {
         info!("Incoming connection from: {}", endpoint_id);
 
-        // The ticket comes with the friend's Hello. The registry keeps this
-        // link only if the friend has none.
+        // The ticket comes with the friend's Hello. If the friend already has
+        // a link, the registry keeps this one as a spare.
         let link = self.build_link(&connection, endpoint_id);
         let link_id = self.friends.link_opened(*endpoint_id, None, link, &self.local_facts());
 
