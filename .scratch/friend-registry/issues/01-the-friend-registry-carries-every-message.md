@@ -37,16 +37,29 @@ See the spec: [The friend registry](../spec.md#the-friend-registry), [Sending](.
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] In-process registry tests, using stand-in links (a channel whose receiving end the test holds, and an RTT of "none") and a real game inbox:
+- [x] In-process registry tests, using stand-in links (a channel whose receiving end the test holds, and an RTT of "none") and a real game inbox:
   - all players reaches each friend once, and not the sender
   - the server player loops back to the inbox when we are the host, and reaches the host's friend otherwise
   - a DPID reaches only its friend, and an unknown DPID fails with today's error
-- [ ] In-process: frames on one friend's outbox decode to the messages sent, in call order, with game and control messages interleaved
-- [ ] In-process: game messages from friends reach the inbox in arrival order, and one from a sender with no record is still delivered
-- [ ] Both pipeline outcomes are matched exhaustively, with no field read past the outcome
-- [ ] The registry never reads the session manager; roster facts are passed in
-- [ ] Capture lines, Turn sync log lines and path log lines are unchanged
-- [ ] `GLOSSARY.md` has **Friend** and the corrected **Game session** line
-- [ ] `cargo test` passes, including the Transport's mesh-networking tests and the Helper's UI tests, unchanged
+- [x] In-process: frames on one friend's outbox decode to the messages sent, in call order, with game and control messages interleaved
+- [x] In-process: game messages from friends reach the inbox in arrival order, and one from a sender with no record is still delivered
+- [x] Both pipeline outcomes are matched exhaustively, with no field read past the outcome
+- [x] The registry never reads the session manager; roster facts are passed in
+- [x] Capture lines, Turn sync log lines and path log lines are unchanged
+- [x] `GLOSSARY.md` has **Friend** and the corrected **Game session** line
+- [x] `cargo test` passes, including the Transport's mesh-networking tests and the Helper's UI tests, unchanged
+
+## Comments
+
+**2026-10-19:** Built on branch `friend-registry-01`, commit `538eed0`.
+
+- `crates/datalink-transport/src/friend_registry.rs` holds `FriendRegistry<H>`, generic over the connection handle. Production uses the iroh `Connection`; the tests use `()`. Its in-process tests cover routing, order, inbound, and the Hello and player-left route events.
+- The connection manager's entries, routes map, `PeerConnection`, its player list, the four send functions and the routes interface are gone. `ConnectionManager` builds a `Link` per connection and reports links opening and ending. `Transport::send` passes `SendFacts` and delegates.
+- `capture::outbound` became `capture::outbound_control`, without its game-message branch.
+- Today's lifecycle is kept, so tickets 02 and 03 have work to do here:
+  - A dialled link replaces the current one, and an accepted one is kept only if the friend has none.
+  - `link_ended` forgets the friend, whichever link ended.
+  - The loss policy and the re-dial are still in `act_on_lost_connection`.
+  - `link_ended` already takes the `LinkId`.
