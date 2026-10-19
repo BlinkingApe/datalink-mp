@@ -335,15 +335,14 @@ impl<H: Clone> FriendRegistry<H> {
         }
     }
 
-    /// `player` left: it is no longer routed anywhere.
+    /// `player` left: it is no longer routed anywhere. Its friend is kept,
+    /// even with no players left: a friend is forgotten only when it is lost,
+    /// its re-dial gives up, or it is disconnected.
     pub fn player_left(&self, player: DPID) {
         let mut s = self.state.lock();
         for record in s.friends.values_mut() {
             record.players.retain(|p| *p != player);
         }
-        // A friend with no link and no players is nothing to keep.
-        s.friends
-            .retain(|_, r| r.link.is_some() || !r.players.is_empty());
     }
 
     /// A Game session began: every link's pipeline hears it, and each
@@ -1024,6 +1023,18 @@ mod tests {
                 ticket: "bob's ticket".into()
             }
         );
+    }
+
+    #[test]
+    fn a_friend_being_redialled_whose_last_player_left_is_still_reattached() {
+        let (reg, _inbox) = bob_being_redialled();
+
+        reg.player_left(BOB_PLAYER);
+
+        // Still known: the re-dial's link re-attaches it, Hello first.
+        let (link, mut brx) = stand_in(BOB);
+        reg.link_opened(BOB, Some("bob's ticket".into()), link, &us());
+        assert_eq!(drain(&mut brx), vec![hello_from_us()]);
     }
 
     #[test]
