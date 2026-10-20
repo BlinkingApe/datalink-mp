@@ -1374,3 +1374,142 @@ fn test_shutdown_twice_then_drop_neither_hangs_nor_panics() {
         finished
     );
 }
+
+// ---------------------------------------------------------------------------
+// Host migration (host-migration ticket 02)
+// ---------------------------------------------------------------------------
+
+/// A host with its player and two joiners (Alice joined first), all three
+/// rosters complete. The session is in progress (`DPSESSION_JOINDISABLED`,
+/// which SMAC sets when the game starts) when `in_progress`, else still in
+/// Multiplayer Setup. Returns (host, host player, alice, alice's DPID, bob,
+/// bob's DPID). None when a Transport cannot be created.
+fn three_players(in_progress: bool) -> Option<(Transport, u32, Transport, u32, Transport, u32)> {
+    let host = create_transport()?;
+    let alice = create_transport()?;
+    let bob = create_transport()?;
+    let desc = SessionDesc {
+        flags: dp_types::DPSESSION_MIGRATEHOST,
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Migration Test".to_string(),
+        max_players: 4,
+        ..Default::default()
+    };
+    host.create_session(desc.clone());
+    let host_player = host.create_player(PlayerName::default(), 0, vec![0x03]).expect("host player");
+    let mut joined = Vec::new();
+    for (t, name) in [(&alice, "Alice"), (&bob, "Bob")] {
+        let id = t.join_session_by_ticket(host.our_ticket()).expect("join");
+        t.create_player(
+            PlayerName { short_name: String::new(), long_name: name.to_string() },
+            0,
+            vec![0x02],
+        );
+        joined.push(id);
+    }
+    for t in [&host, &alice, &bob] {
+        poll_until(Duration::from_secs(10), || (t.session_manager().get_players().len() == 3).then_some(()))
+            .expect("every roster should hold all three players");
+    }
+    if in_progress {
+        assert!(host.set_session_desc(SessionDesc {
+            flags: desc.flags | dp_types::DPSESSION_JOINDISABLED,
+            ..desc
+        }));
+        for t in [&alice, &bob] {
+            poll_until(Duration::from_secs(5), || {
+                t.session_manager()
+                    .get_session_desc()
+                    .is_some_and(|d| d.flags & dp_types::DPSESSION_JOINDISABLED != 0)
+                    .then_some(())
+            })
+            .expect("joiners should hear the game started");
+        }
+    }
+    for t in [&host, &alice, &bob] {
+        while t.receive().is_some() {}
+    }
+    Some((host, host_player, alice, joined[0], bob, joined[1]))
+}
+
+/// What a game hears next, until it has heard `player` destroyed or the
+/// deadline passes: (heard system message types, whether `player` was destroyed).
+fn hear_until_destroyed(game: &Transport, player: u32) -> (Vec<Option<u32>>, bool) {
+    let mut heard = Vec::new();
+    let found = poll_until(Duration::from_secs(5), || {
+        while let Some(qm) = game.receive() {
+            heard.push(system_message_type(&qm));
+            if destroyed_player(&qm) == Some(player) {
+                return Some(());
+            }
+        }
+        None
+    })
+    .is_some();
+    // Let any trailing SESSIONLOST arrive too.
+    std::thread::sleep(Duration::from_millis(500));
+    while let Some(qm) = game.receive() {
+        heard.push(system_message_type(&qm));
+    }
+    (heard, found)
+}
+
+#[test]
+fn test_host_closing_mid_game_hands_joiners_a_player_leaving_and_the_lowest_dpid_becomes_host() {
+    let Some((host, host_player, alice, _, bob, _)) = three_players(true) else { return };
+
+    host.close_session();
+
+    for (who, game) in [("alice", &alice), ("bob", &bob)] {
+        let (heard, destroyed) = hear_until_destroyed(game, host_player);
+        assert!(destroyed, "{who}'s game should hear the host's player destroyed");
+        assert!(
+            !heard.contains(&Some(dp_types::sysmsg::DPSYS_SESSIONLOST)),
+            "{who}'s game must not be told the session was lost"
+        );
+    }
+    assert!(alice.session_manager().is_host(), "Alice, the lowest DPID, is the new host");
+    assert!(!bob.session_manager().is_host(), "only one Helper reports itself as host");
+    assert_eq!(
+        bob.session_manager().get_host_node_id(),
+        alice.session_manager().our_node_id(),
+        "Bob's Helper agrees Alice is the host"
+    );
+    assert!(alice.session_manager().in_session() && bob.session_manager().in_session());
+}
+
+#[test]
+fn test_new_host_closing_migrates_again_down_to_the_last_player() {
+    let Some((host, host_player, alice, alice_id, bob, bob_id)) = three_players(true) else { return };
+
+    host.close_session();
+    assert!(hear_until_destroyed(&bob, host_player).1);
+    poll_until(Duration::from_secs(5), || alice.session_manager().is_host().then_some(())).expect("Alice hosts");
+    while alice.receive().is_some() {}
+
+    alice.close_session();
+
+    let (heard, destroyed) = hear_until_destroyed(&bob, alice_id);
+    assert!(destroyed, "Bob's game should hear Alice's player destroyed");
+    assert!(!heard.contains(&Some(dp_types::sysmsg::DPSYS_SESSIONLOST)));
+    assert!(bob.session_manager().is_host(), "the last player is the host");
+    assert_eq!(bob.session_manager().get_players().len(), 1);
+    assert_eq!(bob.session_manager().get_players()[0].id, bob_id);
+}
+
+#[test]
+fn test_host_closing_in_multiplayer_setup_still_tells_joiners_the_session_is_lost() {
+    let Some((host, _, alice, _, bob, _)) = three_players(false) else { return };
+
+    host.close_session();
+
+    for (who, game) in [("alice", &alice), ("bob", &bob)] {
+        let lost = poll_until(Duration::from_secs(5), || {
+            std::iter::from_fn(|| game.receive())
+                .find(|qm| system_message_type(qm) == Some(dp_types::sysmsg::DPSYS_SESSIONLOST))
+        });
+        assert!(lost.is_some(), "{who}'s game should be told the session was lost");
+        assert!(!game.session_manager().is_host());
+    }
+}

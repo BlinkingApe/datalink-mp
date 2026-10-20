@@ -27,6 +27,24 @@ pub enum SessionState {
     Closed,
 }
 
+/// What the host's `SessionClosed` means for a Joiner, as decided by
+/// [`SessionManager::host_closed`].
+#[derive(Debug)]
+pub enum HostClosed {
+    /// The sender isn't our session's host: ignore it.
+    NotFromHost,
+    /// The Game session isn't in progress (Multiplayer Setup): it is lost.
+    SessionLost,
+    /// The Game session is in progress: the host's players left and the host
+    /// role moved to the lowest remaining DPID.
+    Migrated {
+        /// The host's players, now removed from the roster.
+        departed: Vec<Player>,
+        /// Whether this Helper is the new host.
+        we_are_host: bool,
+    },
+}
+
 /// A DirectPlay session
 #[derive(Debug)]
 pub struct Session {
@@ -331,6 +349,53 @@ impl SessionManager {
             .values()
             .find(|p| !p.is_local && p.node_id.as_ref() == Some(node_id))
             .map(|p| p.id)
+    }
+
+    /// The host's Helper says it closed the Game session.
+    ///
+    /// Host-role state lives in this manager: `Session::is_host` says whether
+    /// this Helper hosts ([`is_host`](Self::is_host)), and `host_node_id` says
+    /// who does otherwise ([`get_host_node_id`](Self::get_host_node_id),
+    /// [`is_node_host`](Self::is_node_host)). Once the session is in progress
+    /// (`DPSESSION_JOINDISABLED`), the game asked for host migration, so the
+    /// host's closing moves the role instead of ending the session: its
+    /// players leave the roster and the lowest remaining DPID becomes host.
+    /// Every Helper holds the same roster, so all pick the same player.
+    pub fn host_closed(&self, sender: &[u8; 32]) -> HostClosed {
+        if !self.is_node_host(sender) {
+            return HostClosed::NotFromHost;
+        }
+        let mut guard = self.session.write();
+        let Some(session) = guard.as_mut() else {
+            return HostClosed::NotFromHost;
+        };
+        if session.desc.flags & dp_types::DPSESSION_JOINDISABLED == 0 {
+            return HostClosed::SessionLost;
+        }
+        let departed_ids: Vec<DPID> = session
+            .players
+            .values()
+            .filter(|p| p.node_id.as_ref() == Some(sender))
+            .map(|p| p.id)
+            .collect();
+        let Some(new_host) = session
+            .players
+            .values()
+            .filter(|p| p.node_id.as_ref() != Some(sender))
+            .min_by_key(|p| p.id)
+        else {
+            return HostClosed::SessionLost;
+        };
+        let new_host_node = new_host.node_id;
+        let we_are_host = new_host.is_local;
+        let mut departed = Vec::new();
+        for id in departed_ids {
+            self.pending_player_data.write().remove(&id);
+            departed.extend(session.remove_player(id));
+        }
+        session.is_host = we_are_host;
+        *self.host_node_id.write() = if we_are_host { None } else { new_host_node };
+        HostClosed::Migrated { departed, we_are_host }
     }
 
     /// Close the current session
@@ -765,5 +830,76 @@ mod tests {
 
         manager.update_player_data(player_id, vec![0x02], false);
         assert_eq!(manager.get_player_data(player_id, false), Some(vec![0x02]));
+    }
+
+    fn info(id: DPID, node: u8) -> PlayerInfo {
+        PlayerInfo {
+            player_id: id,
+            name: PlayerName::default(),
+            flags: 0,
+            node_id: [node; 32],
+            ticket: String::new(),
+            data: Vec::new(),
+        }
+    }
+
+    /// A joiner (node 3, DPID 0x30000) in a game hosted by node 1 (DPID
+    /// 0x1001), with node 2 (DPID 0x20000) also joined.
+    fn joiner_in_game(in_progress: bool) -> SessionManager {
+        let manager = SessionManager::new();
+        manager.set_identity([3; 32], String::new());
+        let flags = if in_progress { dp_types::DPSESSION_JOINDISABLED } else { 0 };
+        manager.join_session_with_host(SessionDesc { flags, max_players: 8, ..Default::default() }, 0x30000, [1; 32]);
+        manager.add_remote_player(info(0x1001, 1));
+        manager.add_remote_player(info(0x20000, 2));
+        manager
+    }
+
+    #[test]
+    fn test_host_closed_in_progress_moves_the_host_role_to_the_lowest_remaining_dpid() {
+        let manager = joiner_in_game(true);
+        let HostClosed::Migrated { departed, we_are_host } = manager.host_closed(&[1; 32]) else {
+            panic!("expected a migration");
+        };
+        assert_eq!(departed.iter().map(|p| p.id).collect::<Vec<_>>(), vec![0x1001]);
+        assert!(!we_are_host);
+        assert!(!manager.is_host());
+        assert_eq!(manager.get_host_node_id(), Some([2; 32]));
+        assert!(manager.is_node_host(&[2; 32]));
+    }
+
+    #[test]
+    fn test_host_closed_ignores_the_old_host_after_migration() {
+        let manager = joiner_in_game(true);
+        let _ = manager.host_closed(&[1; 32]);
+        assert!(!manager.is_node_host(&[1; 32]));
+        assert!(matches!(manager.host_closed(&[1; 32]), HostClosed::NotFromHost));
+    }
+
+    #[test]
+    fn test_host_closed_makes_the_lowest_dpid_us_the_host() {
+        let manager = joiner_in_game(true);
+        let _ = manager.host_closed(&[1; 32]);
+        let HostClosed::Migrated { we_are_host, .. } = manager.host_closed(&[2; 32]) else {
+            panic!("expected a second migration");
+        };
+        assert!(we_are_host);
+        assert!(manager.is_host());
+        assert_eq!(manager.get_host_node_id(), None);
+        assert_eq!(manager.get_players().len(), 1);
+    }
+
+    #[test]
+    fn test_host_closed_in_multiplayer_setup_loses_the_session() {
+        let manager = joiner_in_game(false);
+        assert!(matches!(manager.host_closed(&[1; 32]), HostClosed::SessionLost));
+        assert!(manager.is_node_host(&[1; 32]));
+    }
+
+    #[test]
+    fn test_host_closed_from_a_non_host_is_ignored() {
+        let manager = joiner_in_game(true);
+        assert!(matches!(manager.host_closed(&[2; 32]), HostClosed::NotFromHost));
+        assert_eq!(manager.get_players().len(), 3);
     }
 }
