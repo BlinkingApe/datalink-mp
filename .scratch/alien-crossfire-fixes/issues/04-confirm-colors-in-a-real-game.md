@@ -17,3 +17,10 @@ A real multiplayer game on `wtp.exe` shows every faction in its own colors, the 
 ## Comments
 
 2026-10-20, v0.1.3-rc.1 (shared session with host-migration 04): a three-player game on `wtp.exe` (Windows host, two Linux Joiners). Reported by the tester: all three factions had their correct colors. Logs from all three machines are kept locally in `.scratch/alien-crossfire-fixes/captures/2026-10-20-v0.1.3-rc.1-test4/` (`.7z`, not yet read by an agent). Not yet recorded: which factions were seated (the Pirates / a displaced Morgan), the same-area screenshots from two machines, and the DLL log's `classic colors` lines on each machine.
+
+### Log read, same run (extracted under `captures/…/x/`)
+
+- All three DLL logs show `game binary: Alien Crossfire (terranx.exe)` and `classic colors: installed … hooked seating call at 0x00482CD8`, then at game start (09:28:42 on the Joiners, 09:28:40 on the host) the line `seating rewritten, faction art reloaded for seats [1..7], flags restamped`.
+- Seats 1–3 are the same on all three machines: SPARTANS, PIRATES, MORGAN (seating bytes 4, 8, 3). So the game had a Pirates seat and a Morgan seat away from her usual slot. Seats 4–7 differ between machines (unused seats).
+- **The reload changed nothing.** For every seat, on every machine, the color tables read identically before and after the reload. So the tables were already right when the hook ran. The colors were correct, but these logs cannot show the fix caused that. The research's stale-table theory is not what these tables looked like at this moment. To settle it, play the same seating on `v0.1.2` (no fix) or with `SMAC_NO_CLASSIC_COLORS=1`.
+- Still missing: same-area screenshots from two machines.
