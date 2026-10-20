@@ -27,6 +27,7 @@ The DLL's game fixes, starting with classic faction colors, work in the game peo
 ## Decisions so far
 
 <!-- one line per closed ticket -->
+- 02: The crate detects `terran.exe` vs `terranx.exe` from the image PE header and applies patches via a per-binary table; ticket 03 adds `AlienCrossfire` entries. [Answer](issues/02-patches-picked-by-game-binary.md#answer)
 
 ## Not yet specified
 

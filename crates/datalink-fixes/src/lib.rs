@@ -10,14 +10,18 @@
 //!   default; disable with `SMAC_NO_CLASSIC_COLORS=1`)
 //! - `border_fix`: border faction->seat translation used by `classic_colors`
 //!   (also available standalone via `SMAC_BORDER_MATCH_UNITS=1`)
+//! - `binary`: works out which game binary (SMAC or Alien Crossfire) we are in
+//! - `selection`: which patches exist for which binary
 //! - `probe`: Non-invasive logging probes for debugging
 
 #![allow(non_snake_case)]
 #![cfg_attr(not(target_os = "windows"), allow(dead_code))]
 
+mod binary;
 mod blit_fix;
 mod border_fix;
 mod classic_colors;
+mod selection;
 pub mod probe;
 
 pub use probe::{init_probes, install_probe, register_probe};
@@ -27,28 +31,51 @@ use tracing::{error, info, warn};
 #[cfg(not(target_os = "windows"))]
 use tracing::info;
 
-/// Apply all patches
+/// The game binary this process is running, detected once.
+#[cfg(target_os = "windows")]
+fn detected_binary() -> Option<binary::GameBinary> {
+    static DETECTED: std::sync::OnceLock<Option<binary::GameBinary>> = std::sync::OnceLock::new();
+    *DETECTED.get_or_init(|| {
+        let found = binary::detect_current();
+        match found {
+            Some(b) => info!("datalink-fixes: game binary: {}", b),
+            None => warn!("datalink-fixes: game binary: unknown (not SMAC or Alien Crossfire); no patches will be applied"),
+        }
+        found
+    })
+}
+
+/// Apply all patches that exist for the game binary we are running in.
 ///
 /// Call this from the host DLL's DllMain during DLL_PROCESS_ATTACH.
 pub fn apply_all_patches() {
     info!("datalink-fixes: applying patches...");
 
     #[cfg(target_os = "windows")]
-    match unsafe { blit_fix::apply() } {
-        Ok(()) => info!("Backwards blit fix applied successfully"),
-        Err(e) => error!("Failed to apply backwards blit fix: {}", e),
-    }
-
-    #[cfg(target_os = "windows")]
-    match unsafe { classic_colors::apply() } {
-        Ok(()) => info!("Classic-colors fix processed"),
-        Err(e) => error!("Failed to apply classic-colors fix: {}", e),
-    }
-
-    #[cfg(target_os = "windows")]
-    match unsafe { border_fix::apply() } {
-        Ok(()) => info!("Border-recolor option processed"),
-        Err(e) => error!("Failed to apply border recolor: {}", e),
+    for (patch, decision) in selection::plan(detected_binary()) {
+        match decision {
+            selection::Decision::NotAvailable(b) => {
+                info!("datalink-fixes: {} is not available for {}", patch.name(), b)
+            }
+            // Already reported once, by detected_binary().
+            selection::Decision::UnknownBinary => {}
+            selection::Decision::Apply => match patch {
+                selection::Patch::BlitFix => match unsafe { blit_fix::apply() } {
+                    Ok(()) => info!("Backwards blit fix applied successfully"),
+                    Err(e) => error!("Failed to apply backwards blit fix: {}", e),
+                },
+                selection::Patch::ClassicColors => match unsafe { classic_colors::apply() } {
+                    Ok(()) => info!("Classic-colors fix processed"),
+                    Err(e) => error!("Failed to apply classic-colors fix: {}", e),
+                },
+                selection::Patch::BorderFix => match unsafe { border_fix::apply() } {
+                    Ok(()) => info!("Border-recolor option processed"),
+                    Err(e) => error!("Failed to apply border recolor: {}", e),
+                },
+                // Installed separately, by install_debug_probes().
+                selection::Patch::DebugProbes => {}
+            },
+        }
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -69,6 +96,21 @@ pub fn apply_all_patches() {
 /// SMAC_PROBE_LOG environment variable is set to a file path.
 #[cfg(target_os = "windows")]
 pub fn install_debug_probes() {
+    match selection::plan(detected_binary())
+        .into_iter()
+        .find(|(p, _)| *p == selection::Patch::DebugProbes)
+    {
+        Some((_, selection::Decision::Apply)) => install_smac_probes(),
+        Some((patch, selection::Decision::NotAvailable(b))) => {
+            info!("datalink-fixes: {} is not available for {}", patch.name(), b)
+        }
+        _ => {}
+    }
+}
+
+/// The probe addresses below are all `terran.exe` addresses.
+#[cfg(target_os = "windows")]
+fn install_smac_probes() {
     info!("datalink-fixes: installing debug probes...");
 
     // Initialize probe system (spawns background drain thread)
