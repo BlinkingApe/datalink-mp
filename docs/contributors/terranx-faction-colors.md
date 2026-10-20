@@ -9,7 +9,7 @@ Research for the [alien-crossfire-fixes](../../.scratch/alien-crossfire-fixes/ma
 Every fact below carries one of these tags.
 
 - **[binary]**: read from `terranx.exe` v2.0 (sha256 `01901cbf7196b0c5d0df9540a029520f5df8fd9a6b343deef8b5663872805fcf`, the build in `docs/archive/research/smac-jackal-turn-sync.md`) with `objdump -d -M intel`, or from the game's data files. Byte dumps at the patch sites are identical in `terranx_PRACX.exe` and in `terranx_mod.exe` from the WTP install.
-- **[Thinker]**: read from [induktio/thinker](https://github.com/induktio/thinker) `master` (`src/engine.cpp`, `config.cpp`, `game.cpp`, `map.cpp`, `patch.cpp`).
+- **[Thinker]**: read from [induktio/thinker](https://github.com/induktio/thinker) `master` (the `engine`, `config`, `game`, `map` and `patch` sources under its `src` folder).
 - **[WTP]**: read from [tnevolin/thinker-doer-clion](https://github.com/tnevolin/thinker-doer-clion) `master` at commit `2ca03634` (2026-10-01), the source of WTP's `thinker.dll`. I did not hash-match the installed `thinker.dll` (sha256 `04d61fb2...`) to that commit.
 - **[inferred]**: my reading of what the above implies. Nothing here was checked in a running game.
 
