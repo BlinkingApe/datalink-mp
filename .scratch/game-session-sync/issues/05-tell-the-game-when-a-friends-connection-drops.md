@@ -55,4 +55,4 @@ This confirms the lead: the host's Helper re-dials, and the game is never told. 
 
 On the killed-host side, the Helper and DLL do their part: the message is handed over, and the game reacts to it. What's left is SMAC's setup screen showing nothing, so there may be no Helper fix. Whether the page should say the session ended is for this ticket to decide.
 
-2026-10-20: [host-migration ticket 03](../../host-migration/issues/03-host-vanishing-migrates-too.md) covers a *host* that vanishes mid-game: the Joiners' games get `DESTROYPLAYERORGROUP` for the host's player and a new host, once the host has been gone 10 s. A vanished *Joiner* stays with this ticket.
+2026-10-20: [host-migration ticket 03](../../archive/host-migration/issues/03-host-vanishing-migrates-too.md) covers a *host* that vanishes mid-game: the Joiners' games get `DESTROYPLAYERORGROUP` for the host's player and a new host, once the host has been gone 10 s. A vanished *Joiner* stays with this ticket.

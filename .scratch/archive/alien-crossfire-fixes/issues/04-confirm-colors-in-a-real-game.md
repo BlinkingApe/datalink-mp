@@ -6,7 +6,7 @@ Blocked by: 03
 
 ## What to build
 
-A real multiplayer game on `wtp.exe` shows every faction in its own colors, the same on every machine. It can share a test session with [host-migration 04](../../../host-migration/issues/04-confirm-in-a-real-game.md).
+A real multiplayer game on `wtp.exe` shows every faction in its own colors, the same on every machine. It can share a test session with [host-migration 04](../../host-migration/issues/04-confirm-in-a-real-game.md).
 
 ## Acceptance criteria
 

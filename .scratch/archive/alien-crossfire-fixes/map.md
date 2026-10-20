@@ -6,7 +6,7 @@ The DLL's game fixes, starting with classic faction colors, work in the game peo
 
 ## Notes
 
-- Evidence: the 2026-10-20 LAN logs (Windows host, two Linux Joiners, all on `wtp.exe`), kept locally in [host-migration](../../host-migration/map.md)'s `captures/2026-10-20-wtp-lan/`.
+- Evidence: the 2026-10-20 LAN logs (Windows host, two Linux Joiners, all on `wtp.exe`), kept locally in [host-migration](../host-migration/map.md)'s `captures/2026-10-20-wtp-lan/`.
   - Every game launch on every machine logged "original bytes don't match - unknown binary version" for the blit fix and the classic-colors fix, and "unexpected bytes at address" for each debug probe.
   - The host's log shows the colors fix "hooked" once, at 06:34. That was a separate 4-second launch of SMAC (`terran.exe`), not the game that was played.
   - In the game, Rocky's Pirates showed orange (the Believers' color) and the laptop's Morgan showed black (the Spartans'). That fits the unfixed game's seat-colored units (`docs/players/faction-colors.md`), but the logs don't show the seating, so it's unconfirmed.
