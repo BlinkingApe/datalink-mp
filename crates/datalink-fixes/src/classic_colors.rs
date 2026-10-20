@@ -91,12 +91,14 @@ mod ac {
     pub const ASSIGN_ORIG: [u8; 10] = [0x55, 0x8b, 0xec, 0x6a, 0xff, 0x68, 0x06, 0x75, 0x65, 0x00];
     /// `load_faction_art(seat)`, cdecl, one stack argument.
     pub const LOAD_FACTION_ART: usize = 0x453710;
-    pub const LOAD_FACTION_ART_ORIG: [u8; 12] =
-        [0x55, 0x8b, 0xec, 0x83, 0xec, 0x10, 0x56, 0x8b, 0x75, 0x08, 0x57, 0x56];
+    pub const LOAD_FACTION_ART_ORIG: [u8; 12] = [
+        0x55, 0x8b, 0xec, 0x83, 0xec, 0x10, 0x56, 0x8b, 0x75, 0x08, 0x57, 0x56,
+    ];
     /// `load_flags()`, the flag-sprite stamper, no arguments.
     pub const LOAD_FLAGS: usize = 0x453f70;
-    pub const LOAD_FLAGS_ORIG: [u8; 12] =
-        [0x55, 0x8b, 0xec, 0x6a, 0xff, 0x68, 0x50, 0x51, 0x65, 0x00, 0x64, 0xa1];
+    pub const LOAD_FLAGS_ORIG: [u8; 12] = [
+        0x55, 0x8b, 0xec, 0x6a, 0xff, 0x68, 0x50, 0x51, 0x65, 0x00, 0x64, 0xa1,
+    ];
     /// Seating byte of seat n: base + n * stride.
     pub const SEATING_TABLE: usize = 0x90db9b;
     pub const SEATING_STRIDE: usize = 0x17c;
@@ -104,6 +106,8 @@ mod ac {
     pub const MFACTIONS: usize = 0x946a50;
     pub const MFACTIONS_STRIDE: usize = 0x59c;
     pub const FILENAME_OFFSET: usize = 4;
+    /// The four color tables (primary, dark, text, shadow), 8 u32 entries each.
+    pub const TABLES: [usize; 4] = [0x68f9f0, 0x68fa10, 0x68fa30, 0x68fa50];
 }
 
 /// Build the 15-byte detour stub for a stub placed at `stub_va`:
@@ -175,6 +179,23 @@ mod ac_impl {
     use crate::ac_colors::*;
     use tracing::info;
 
+    /// A seat's four color-table entries. Only call once the byte guard in
+    /// `apply` has passed: these are fixed in-process addresses of
+    /// `terranx.exe`, mapped for the life of the process.
+    unsafe fn read_seat_colors(seat: usize) -> [u32; 4] {
+        TABLES.map(|base| *((base + seat * 4) as *const u32))
+    }
+
+    fn log_colors(plan: &[usize], when: &str) {
+        for &seat in plan {
+            let entries = unsafe { read_seat_colors(seat) };
+            info!(
+                "classic colors (Alien Crossfire): {}",
+                seat_colors_line(seat, when, entries)
+            );
+        }
+    }
+
     /// Called from the stub right after the seating function returns.
     pub unsafe extern "C" fn hook() {
         let mut seating = [0u8; 8];
@@ -196,22 +217,36 @@ mod ac_impl {
         }
         for seat in 1..8 {
             let reload = plan.contains(&seat);
-            info!("classic colors (Alien Crossfire): {}", seat_log_line(seat, seating[seat], &names[seat], reload));
+            info!(
+                "classic colors (Alien Crossfire): {}",
+                seat_log_line(seat, seating[seat], &names[seat], reload)
+            );
         }
         if plan.is_empty() {
             return;
         }
+        log_colors(&plan, "before reload");
         let load_art: extern "C" fn(i32) = std::mem::transmute(LOAD_FACTION_ART);
         for &seat in &plan {
             load_art(seat as i32);
         }
         let load_flags: extern "C" fn() = std::mem::transmute(LOAD_FLAGS);
         load_flags();
+        log_colors(&plan, "after reload");
         info!(
             "classic colors (Alien Crossfire): seating rewritten, faction art reloaded for seats {:?}, flags restamped",
             plan
         );
     }
+}
+
+/// Where to hook for one game binary.
+#[cfg(target_os = "windows")]
+struct Site {
+    call_site: usize,
+    call_orig: [u8; 5],
+    assign: usize,
+    hook: unsafe extern "C" fn(),
 }
 
 /// Apply the classic-colors fix. On by default; `SMAC_NO_CLASSIC_COLORS=1`
@@ -231,31 +266,46 @@ pub unsafe fn apply(binary: crate::binary::GameBinary) -> Result<(), &'static st
         return Ok(());
     }
 
-    let (call_site, call_orig, assign, hook): (usize, [u8; 5], usize, unsafe extern "C" fn()) =
-        match binary {
-            GameBinary::Smac => {
-                // The border renderer must index by seat once the tables are rewritten.
-                crate::border_fix::install_detour()?;
-                (CALL_SITE, CALL_ORIG, ASSIGN_PLAYER_FACTIONS, windows_impl::classic_colors_hook)
+    let Site {
+        call_site,
+        call_orig,
+        assign,
+        hook,
+    } = match binary {
+        GameBinary::Smac => {
+            // The border renderer must index by seat once the tables are rewritten.
+            crate::border_fix::install_detour()?;
+            Site {
+                call_site: CALL_SITE,
+                call_orig: CALL_ORIG,
+                assign: ASSIGN_PLAYER_FACTIONS,
+                hook: windows_impl::classic_colors_hook,
             }
-            GameBinary::AlienCrossfire => {
-                // No border detour: borders and flags read the same slot there.
-                check_bytes(ac::ASSIGN_PLAYER_FACTIONS, &ac::ASSIGN_ORIG, "seating function")?;
-                check_bytes(ac::LOAD_FACTION_ART, &ac::LOAD_FACTION_ART_ORIG, "load_faction_art")?;
-                check_bytes(ac::LOAD_FLAGS, &ac::LOAD_FLAGS_ORIG, "load_flags")?;
-                (ac::CALL_SITE, ac::CALL_ORIG, ac::ASSIGN_PLAYER_FACTIONS, ac_impl::hook)
+        }
+        GameBinary::AlienCrossfire => {
+            // No border detour: borders and flags read the same slot there.
+            check_bytes(
+                ac::ASSIGN_PLAYER_FACTIONS,
+                &ac::ASSIGN_ORIG,
+                "seating function",
+            )?;
+            check_bytes(
+                ac::LOAD_FACTION_ART,
+                &ac::LOAD_FACTION_ART_ORIG,
+                "load_faction_art",
+            )?;
+            check_bytes(ac::LOAD_FLAGS, &ac::LOAD_FLAGS_ORIG, "load_flags")?;
+            Site {
+                call_site: ac::CALL_SITE,
+                call_orig: ac::CALL_ORIG,
+                assign: ac::ASSIGN_PLAYER_FACTIONS,
+                hook: ac_impl::hook,
             }
-        };
+        }
+    };
 
     let site = call_site as *mut u8;
-    let actual = std::slice::from_raw_parts(site, call_orig.len());
-    if actual != call_orig {
-        if actual[0] == 0xe8 {
-            // Some call is present but not the expected displacement.
-            return Err("classic colors: unexpected call displacement - unknown binary version");
-        }
-        return Err("classic colors: original bytes don't match - unknown binary version");
-    }
+    check_bytes(call_site, &call_orig, "seating call site")?;
 
     let stub = VirtualAlloc(None, 15, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if stub.is_null() {
@@ -279,7 +329,12 @@ pub unsafe fn apply(binary: crate::binary::GameBinary) -> Result<(), &'static st
     let rel = (stub_va as i64 - (call_site as i64 + 5)) as i32;
     std::ptr::copy_nonoverlapping(rel.to_le_bytes().as_ptr(), site.add(1), 4);
     let mut dummy = PAGE_PROTECTION_FLAGS(0);
-    let _ = VirtualProtect(site as *const core::ffi::c_void, call_orig.len(), old_protect, &mut dummy);
+    let _ = VirtualProtect(
+        site as *const core::ffi::c_void,
+        call_orig.len(),
+        old_protect,
+        &mut dummy,
+    );
 
     info!(
         "classic colors: installed for {}, hooked seating call at 0x{:08X}, stub at 0x{:08X}",
@@ -293,7 +348,12 @@ pub unsafe fn apply(binary: crate::binary::GameBinary) -> Result<(), &'static st
 unsafe fn check_bytes(addr: usize, expected: &[u8], what: &str) -> Result<(), &'static str> {
     let actual = std::slice::from_raw_parts(addr as *const u8, expected.len());
     if actual != expected {
-        tracing::warn!("classic colors: {} at 0x{:08X} has unexpected bytes {:02x?}", what, addr, actual);
+        tracing::warn!(
+            "classic colors: {} at 0x{:08X} has unexpected bytes {:02x?}",
+            what,
+            addr,
+            actual
+        );
         return Err("classic colors: original bytes don't match - unknown binary version");
     }
     Ok(())
@@ -374,7 +434,10 @@ mod tests {
         assert_eq!(s.len(), 15);
         assert_eq!(s[0], 0xe8);
         let rel = i32::from_le_bytes(s[1..5].try_into().unwrap());
-        assert_eq!((stub_va + 5) as i64 + rel as i64, ASSIGN_PLAYER_FACTIONS as i64);
+        assert_eq!(
+            (stub_va + 5) as i64 + rel as i64,
+            ASSIGN_PLAYER_FACTIONS as i64
+        );
         assert_eq!(s[7], 0xe8);
         let rel = i32::from_le_bytes(s[8..12].try_into().unwrap());
         assert_eq!((stub_va + 12) as i64 + rel as i64, hook as i64);

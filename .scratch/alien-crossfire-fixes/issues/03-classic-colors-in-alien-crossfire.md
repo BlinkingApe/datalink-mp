@@ -38,3 +38,10 @@ Not tested in a live game, and inferred rather than known:
 - Calling the loaders needs the game's data files present; if a faction file failed to load the game's own error handling applies.
 
 Docs: `docs/players/faction-colors.md` has an Alien Crossfire and WTP section; the one-line mention in `docs/contributors/building.md` now says both games.
+
+### Known open points for the live test (ticket 04)
+
+Raised in code review; deliberately not built or changed here:
+- No lobby-record filename fallback. If `MFactions[seat].filename` is itself wrong for a seat, reloading from it will not help. The log now also prints each reloaded seat's four color-table entries (`0x68f9f0`, `0x68fa10`, `0x68fa30`, `0x68fa50`) before and after the reload. Stale-then-fresh entries confirm the stale-table theory; unchanged entries mean the filename (or something else) is wrong.
+- Identity-seating skip is unchanged. A multiplayer game seated in default order is left alone, which is right only if the tables are fresh then. Check a default-order MP game for wrong colors.
+- The fix has not been run under WTP's actual `thinker.dll`, and the hook's safety inside the game's loader is reasoned, not observed.

@@ -1,15 +1,13 @@
 # Faction colors in multiplayer
 
-**TL;DR (Alien Crossfire and WTP): the same fix is there for `terranx.exe`,
-which includes WTP games (WTP launches `terranx.exe`). It works differently
-and has not yet been confirmed in a live game; see the Alien Crossfire section
-below. The rest of this page describes SMAC.**
-
 **TL;DR: SMAC's correct colors follow faction identity — Spartans are black,
 the Hive is blue, Gaians are green, always. Single player renders them
 correctly; a vanilla bug makes multiplayer units, flags, and base labels wear
 the wrong faction's colors. This mod fixes it: every faction wears its
-classic colors in multiplayer too. Disable with `SMAC_NO_CLASSIC_COLORS=1`.**
+classic colors in multiplayer too. Disable with `SMAC_NO_CLASSIC_COLORS=1`.
+Alien Crossfire (`terranx.exe`, which WTP also launches) gets the same fix,
+built differently and not yet confirmed in a live game; see the Alien
+Crossfire section below. The sections before it describe SMAC.**
 
 ## The color system
 
@@ -68,8 +66,8 @@ color) and Morgan showed black (the Spartans'). The best explanation, still
 unconfirmed, is that the per-seat color tables kept their startup values
 after the lobby seated the factions.
 
-The fix hooks the same moment as for SMAC (seating finalized at game start,
-`0x482cd8`). When seating is not the default order, it asks the game to load
+The fix hooks the same moment as for SMAC (seating finalized at game start).
+When seating is not the default order, it asks the game to load
 each seat's faction art again, then re-stamps the flag sprites with the game's
 own routines. Because it reuses the game's loaders it covers all 14 factions,
 including the Pirates, which the SMAC table rewrite cannot map. Borders and
@@ -86,7 +84,8 @@ synced is touched, and single player (default seating) is left alone.
   byte, faction file, reloaded or left alone) and `seating rewritten`.
   Please include those lines in a bug report.
 
-Contributor detail: [terranx-faction-colors.md](../contributors/terranx-faction-colors.md).
+Addresses and the evidence behind this are in the contributor note:
+[terranx-faction-colors.md](../contributors/terranx-faction-colors.md).
 
 ## Other visual details worth knowing
 
