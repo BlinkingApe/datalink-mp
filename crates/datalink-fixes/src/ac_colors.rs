@@ -27,8 +27,9 @@ pub(crate) fn parse_filename(raw: &[u8]) -> Option<String> {
     Some(String::from_utf8_lossy(name).into_owned())
 }
 
-/// True when every seat 1 to 7 holds the faction of its own number, which is
-/// how single player seats (and the startup default order).
+/// True when every seat 1 to 7 holds the faction of its own number (seat 1
+/// holds faction 0, and so on). That is how single player seats, and it is
+/// also the startup default order.
 pub(crate) fn is_identity_seating(seating: &[u8; 8]) -> bool {
     (1..8).all(|seat| seating[seat] as usize == seat - 1)
 }
@@ -56,7 +57,21 @@ pub(crate) fn seat_log_line(
     format!(
         "seat {seat}: seating byte {seating_byte}, faction file {}, {}",
         name.as_deref().unwrap_or("(none)"),
-        if reload { "colors reloaded" } else { "left alone" }
+        if reload {
+            "colors reloaded"
+        } else {
+            "left alone"
+        }
+    )
+}
+
+/// One log line with a seat's four color-table entries (primary, dark, text,
+/// shadow), so a live log can show whether they were stale before the reload
+/// and fresh after it. `when` is "before reload" or "after reload".
+pub(crate) fn seat_colors_line(seat: usize, when: &str, entries: [u32; 4]) -> String {
+    format!(
+        "seat {seat} color tables {when}: primary 0x{:x}, dark 0x{:x}, text 0x{:x}, shadow 0x{:x}",
+        entries[0], entries[1], entries[2], entries[3]
     )
 }
 
@@ -78,7 +93,15 @@ mod tests {
 
     #[test]
     fn single_player_is_a_noop() {
-        let n = names(&["GAIANS", "HIVE", "UNIV", "MORGAN", "SPARTANS", "BELIEVERS", "PEACE"]);
+        let n = names(&[
+            "GAIANS",
+            "HIVE",
+            "UNIV",
+            "MORGAN",
+            "SPARTANS",
+            "BELIEVERS",
+            "PEACE",
+        ]);
         assert!(plan_reloads(&IDENTITY, &n).is_empty());
     }
 
@@ -87,7 +110,9 @@ mod tests {
         // Pirates seated 6th, as in the 2026-10-20 game.
         let mut seating = IDENTITY;
         seating[6] = 9;
-        let n = names(&["GAIANS", "HIVE", "UNIV", "MORGAN", "SPARTANS", "PIRATES", "PEACE"]);
+        let n = names(&[
+            "GAIANS", "HIVE", "UNIV", "MORGAN", "SPARTANS", "PIRATES", "PEACE",
+        ]);
         assert_eq!(plan_reloads(&seating, &n), vec![1, 2, 3, 4, 5, 6, 7]);
     }
 
@@ -101,7 +126,9 @@ mod tests {
     #[test]
     fn permuted_smac_factions_are_reloaded_too() {
         let seating = [0, 4, 1, 0, 2, 6, 3, 5];
-        let n = names(&["SPARTANS", "HIVE", "GAIANS", "UNIV", "PEACE", "MORGAN", "BELIEVER"]);
+        let n = names(&[
+            "SPARTANS", "HIVE", "GAIANS", "UNIV", "PEACE", "MORGAN", "BELIEVER",
+        ]);
         assert_eq!(plan_reloads(&seating, &n).len(), 7);
     }
 
@@ -125,9 +152,21 @@ mod tests {
     }
 
     #[test]
+    fn color_line_shows_the_four_table_entries_in_hex() {
+        let l = seat_colors_line(6, "before reload", [0x10, 0x2b, 0xff, 0x0]);
+        assert_eq!(
+            l,
+            "seat 6 color tables before reload: primary 0x10, dark 0x2b, text 0xff, shadow 0x0"
+        );
+    }
+
+    #[test]
     fn log_line_names_byte_file_and_action() {
         let l = seat_log_line(6, 9, &Some("PIRATES".into()), true);
-        assert_eq!(l, "seat 6: seating byte 9, faction file PIRATES, colors reloaded");
+        assert_eq!(
+            l,
+            "seat 6: seating byte 9, faction file PIRATES, colors reloaded"
+        );
         assert!(seat_log_line(3, 0xff, &None, false).contains("(none), left alone"));
     }
 }

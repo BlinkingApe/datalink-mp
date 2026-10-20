@@ -6,8 +6,10 @@
 //! ## Modules
 //!
 //! - `blit_fix`: Fixes crash in backwards blit drawing
-//! - `classic_colors`: classic faction colors in multiplayer (on by
-//!   default; disable with `SMAC_NO_CLASSIC_COLORS=1`)
+//! - `classic_colors`: classic faction colors in multiplayer, in SMAC and in
+//!   Alien Crossfire (on by default; disable with `SMAC_NO_CLASSIC_COLORS=1`)
+//! - `ac_colors`: the pure decisions behind the Alien Crossfire colors fix
+//!   (which seats to reload, what to log)
 //! - `border_fix`: border faction->seat translation used by `classic_colors`
 //!   (also available standalone via `SMAC_BORDER_MATCH_UNITS=1`)
 //! - `binary`: works out which game binary (SMAC or Alien Crossfire) we are in
@@ -53,8 +55,9 @@ pub fn apply_all_patches() {
     info!("datalink-fixes: applying patches...");
 
     #[cfg(target_os = "windows")]
-    for (patch, decision) in selection::plan(detected_binary()) {
-        let binary = detected_binary();
+    let binary = detected_binary();
+    #[cfg(target_os = "windows")]
+    for (patch, decision) in selection::plan(binary) {
         match decision {
             selection::Decision::NotAvailable(b) => {
                 info!("datalink-fixes: {} is not available for {}", patch.name(), b)
@@ -66,10 +69,17 @@ pub fn apply_all_patches() {
                     Ok(()) => info!("Backwards blit fix applied successfully"),
                     Err(e) => error!("Failed to apply backwards blit fix: {}", e),
                 },
-                selection::Patch::ClassicColors => match binary.map_or(Ok(()), |b| unsafe { classic_colors::apply(b) }) {
-                    Ok(()) => info!("Classic-colors fix processed"),
-                    Err(e) => error!("Failed to apply classic-colors fix: {}", e),
-                },
+                selection::Patch::ClassicColors => {
+                    let result = match binary {
+                        // Unreachable: plan() only says Apply for a known binary.
+                        None => Err("classic colors: game binary unknown"),
+                        Some(b) => unsafe { classic_colors::apply(b) },
+                    };
+                    match result {
+                        Ok(()) => info!("Classic-colors fix processed"),
+                        Err(e) => error!("Failed to apply classic-colors fix: {}", e),
+                    }
+                }
                 selection::Patch::BorderFix => match unsafe { border_fix::apply() } {
                     Ok(()) => info!("Border-recolor option processed"),
                     Err(e) => error!("Failed to apply border recolor: {}", e),
