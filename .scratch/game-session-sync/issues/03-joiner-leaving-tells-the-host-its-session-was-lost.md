@@ -60,3 +60,5 @@ Not changed: the "third oddity" above. A Joiner whose host closed still keeps it
 
 
 **2026-10-05 (maintainer, recorded by agent):** Confirmed on `v0.1.0-rc.6`. After both games left Multiplayer Setup and quit with the Helpers still connected, the host hosted again and the Joiner found and joined the game ([ticket 01](01-confirm-ticket-06-fix-in-a-real-game.md)). The Joiner cancelling out of a found game, then joining again, works every time too, including after the Joiner restarts its game or its Helper ([ticket 02](02-shared-root-cause-across-08-09-10.md)).
+
+**2026-10-20 (host-migration ticket 02):** "Only the host can end a session" no longer holds for a game in progress. When the host's `SessionClosed` arrives and the session desc carries `DPSESSION_JOINDISABLED`, the Joiner's Helper treats it as the host's player leaving: the game gets `DESTROYPLAYERORGROUP`, not `SESSIONLOST`, and the host role moves to the lowest remaining DPID. In Multiplayer Setup (no `JOINDISABLED`) this ticket's rule stands. See [host-migration ticket 02](../../host-migration/issues/02-host-close-migrates-the-host.md).

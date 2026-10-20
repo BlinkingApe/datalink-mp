@@ -13,7 +13,7 @@ use crate::friend_registry::{endpoint_short, FriendRegistry, Link, LinkEnded, Li
 use crate::inbox::{GameInbox, SystemEvent};
 use crate::protocol::{decode_message, encode_message, Message, PlayerInfo};
 use crate::runtime::{NetworkMode, TransportOptions};
-use crate::session::SessionManager;
+use crate::session::{HostClosed, SessionManager};
 use crate::{TransportError, TransportResult};
 use dp_types::structs::{serialize_dpmsg_setplayerorgroupdata, serialize_dpmsg_setplayerorgroupname, serialize_dpmsg_setsessiondesc};
 use dp_types::{PlayerName, GUID};
@@ -654,11 +654,27 @@ async fn handle_peer_message(
         Message::SessionClosed { .. } => {
             // Only the host's closing ends the session. A Helper from `-rc.5` or
             // earlier sends this when its Joiner merely leaves.
-            if !session_manager.is_node_host(&sender_endpoint_id) {
-                debug!("Ignoring SessionClosed from a peer that isn't our session's host");
-                return;
+            match session_manager.host_closed(&sender_endpoint_id) {
+                HostClosed::NotFromHost => {
+                    debug!("Ignoring SessionClosed from a peer that isn't our session's host");
+                }
+                HostClosed::SessionLost => {
+                    inbox.add_system(SystemEvent::SessionLost);
+                }
+                HostClosed::Migrated { departed, we_are_host } => {
+                    // A game in progress asked for host migration: its host's
+                    // players left, and JACKAL picks the new host itself.
+                    info!(we_are_host, "host closed a game in progress, host role migrated");
+                    for p in departed {
+                        cm.friends.player_left(p.id);
+                        inbox.add_system(SystemEvent::PlayerLeft {
+                            player_id: p.id,
+                            name: p.name,
+                            flags: p.flags,
+                        });
+                    }
+                }
             }
-            inbox.add_system(SystemEvent::SessionLost);
         }
 
         Message::PlayerDataUpdate {
