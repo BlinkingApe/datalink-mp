@@ -18,3 +18,7 @@ This ticket also checks the one inference the fix rests on: that every game pick
 - [ ] New game: the host presses Stop mid-game, past the warning. The Joiners carry on as above.
 - [ ] Host leaving in Multiplayer Setup behaves as before (no exit, no crash).
 - [ ] Logs from the run are kept locally in this effort's `captures/` folder, and the results are recorded on this ticket.
+
+## Comments
+
+2026-10-20, v0.1.3-rc.1 (shared session with alien-crossfire-fixes 04): reported by the tester, when the host quit mid-game the clients reported it and play switched to Rocky, the first Joiner. That covers the first criterion in outline. Not yet recorded: the same-new-host check in the logs, a further turn finished together, the new host quitting, Stop mid-game, and the Multiplayer Setup case. Logs are in `.scratch/alien-crossfire-fixes/captures/2026-10-20-v0.1.3-rc.1-test4/` (`.7z`, not yet read by an agent).
