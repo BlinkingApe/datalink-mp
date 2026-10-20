@@ -255,7 +255,7 @@ fn add_session(line: &mut Value, desc: &SessionDesc) {
     line["flags"] = json!(format!("{:#010x}", desc.flags));
     line["new_players_disabled"] =
         json!(desc.flags & dp_types::flags::DPSESSION_NEWPLAYERSDISABLED != 0);
-    line["join_disabled"] = json!(desc.flags & dp_types::flags::DPSESSION_JOINDISABLED != 0);
+    line["join_disabled"] = json!(desc.is_in_progress());
     line["current_players"] = json!(desc.current_players);
     line["max_players"] = json!(desc.max_players);
     line["name"] = json!(desc.session_name);

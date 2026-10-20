@@ -284,13 +284,10 @@ impl Transport {
                         self.session_manager.join_session_with_host(desc, id, *host_endpoint_id);
                     }
 
-                    // Add existing players and establish mesh connections
-                    // Also queue DPSYS_CREATEPLAYERORGROUP for each so the game knows about them
+                    // Add the existing players to the roster. Mesh dials come after
+                    // the announcement below, so a slow or failing dial never delays
+                    // telling the game about the roster.
                     for player in &players {
-                        // Try to connect directly to each existing player
-                        if let Err(e) = self.connection_manager.establish_mesh_connection(player).await {
-                            warn!("Failed to establish mesh to {}: {}", player.player_id, e);
-                        }
                         self.session_manager.add_remote_player(player.clone());
                     }
 
@@ -314,6 +311,7 @@ impl Transport {
                     // Note: joiner is already in session_manager (added by join_session_with_host)
                     // so get_players().len() already includes us - don't add +1
                     let current_players = self.session_manager.get_players().len() as u32;
+                    let announce_players = players.clone();
                     let mut announce = players;
                     announce.push(my_info);
                     announce.sort_by_key(|p| p.player_id);
@@ -323,6 +321,13 @@ impl Transport {
                             && player_id == id
                         {
                             info!("Queued CREATEPLAYERORGROUP for self (player_id={})", id);
+                        }
+                    }
+
+                    // Try to connect directly to each existing player
+                    for player in &announce_players {
+                        if let Err(e) = self.connection_manager.establish_mesh_connection(player).await {
+                            warn!("Failed to establish mesh to {}: {}", player.player_id, e);
                         }
                     }
 

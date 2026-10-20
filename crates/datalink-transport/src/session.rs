@@ -317,7 +317,7 @@ impl SessionManager {
         self.session
             .read()
             .as_ref()
-            .is_some_and(|s| s.desc.flags & dp_types::DPSESSION_JOINDISABLED != 0)
+            .is_some_and(|s| s.desc.is_in_progress())
     }
 
     /// Check if a node ID is the host
@@ -376,23 +376,28 @@ impl SessionManager {
         }
         let mut guard = self.session.write();
         let Some(session) = guard.as_mut() else {
+            // `is_node_host` is false outside a session, so this is only a race.
             return HostClosed::NotFromHost;
         };
-        if session.desc.flags & dp_types::DPSESSION_JOINDISABLED == 0 {
+        if !session.desc.is_in_progress() {
             return HostClosed::SessionLost;
         }
-        let departed_ids: Vec<DPID> = session
+        let mut departed_ids: Vec<DPID> = session
             .players
             .values()
             .filter(|p| p.node_id.as_ref() == Some(sender))
             .map(|p| p.id)
             .collect();
+        // HashMap order is arbitrary; the game hears them leave in DPID order.
+        departed_ids.sort();
         let Some(new_host) = session
             .players
             .values()
             .filter(|p| p.node_id.as_ref() != Some(sender))
             .min_by_key(|p| p.id)
         else {
+            // Nobody is left to take over (the host's players were the whole
+            // roster), so there is no session to carry on.
             return HostClosed::SessionLost;
         };
         let new_host_node = new_host.node_id;
@@ -841,7 +846,7 @@ mod tests {
         assert_eq!(manager.get_player_data(player_id, false), Some(vec![0x02]));
     }
 
-    fn info(id: DPID, node: u8) -> PlayerInfo {
+    fn player_info(id: DPID, node: u8) -> PlayerInfo {
         PlayerInfo {
             player_id: id,
             name: PlayerName::default(),
@@ -859,8 +864,8 @@ mod tests {
         manager.set_identity([3; 32], String::new());
         let flags = if in_progress { dp_types::DPSESSION_JOINDISABLED } else { 0 };
         manager.join_session_with_host(SessionDesc { flags, max_players: 8, ..Default::default() }, 0x30000, [1; 32]);
-        manager.add_remote_player(info(0x1001, 1));
-        manager.add_remote_player(info(0x20000, 2));
+        manager.add_remote_player(player_info(0x1001, 1));
+        manager.add_remote_player(player_info(0x20000, 2));
         manager
     }
 

@@ -62,6 +62,12 @@ pub struct SessionDesc {
 }
 
 impl SessionDesc {
+    /// Whether the game is in progress: it started and closed the session to
+    /// new players (`DPSESSION_JOINDISABLED`).
+    pub fn is_in_progress(&self) -> bool {
+        self.flags & crate::flags::DPSESSION_JOINDISABLED != 0
+    }
+
     /// Convert from raw DPSESSIONDESC2 (Unicode version)
     ///
     /// # Safety

@@ -8,7 +8,7 @@ Blocked by: None (can start immediately)
 
 When the host's game closes a Game session that's in progress, each Joiner's game is told the host's player left (`DESTROYPLAYERORGROUP`), not that the session was lost. JACKAL then picks a new host by itself, and the game carries on. Each Joiner's Helper moves its own host role to the same player: the lowest remaining DPID. From then on, that player's Helper is treated as the host everywhere the Helper asks who the host is (whose `SessionClosed` counts, who may say a player left).
 
-"In progress" means the session desc carries `DPSESSION_JOINDISALLOWED`, which SMAC sets when the game starts. In Multiplayer Setup, nothing changes: the host's close still gives Joiners `SESSIONLOST`.
+"In progress" means the session desc carries `DPSESSION_JOINDISABLED`, which SMAC sets when the game starts. In Multiplayer Setup, nothing changes: the host's close still gives Joiners `SESSIONLOST`.
 
 This reverses game-session-sync ticket 03's "only the host's close ends a session" for games in progress. Record that on that ticket. The evidence and the JACKAL behaviour it relies on are in the [map](../map.md).
 

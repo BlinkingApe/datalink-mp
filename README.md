@@ -116,8 +116,8 @@ Your Ticket is new every time datalink-mp starts and every time you press
 and gives you a new Ticket without closing datalink-mp; with the game open,
 return to the game's main menu first. Stopping during a game takes you out
 of it: if you are hosting, the other players' games carry on with a new host
-after about 10 seconds; if you are not, their games may not notice you have gone. **Quit** closes
-datalink-mp.
+after about 10 seconds; if you are not, their games may not notice you have
+gone. **Quit** closes datalink-mp.
 
 If you double-click `datalink-mp` while it's already running, the running copy
 makes way and a fresh one starts, so you always get the copy you just started

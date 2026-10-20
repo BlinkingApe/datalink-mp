@@ -1632,3 +1632,31 @@ fn test_host_connection_that_drops_and_comes_back_migrates_nothing() {
     assert_eq!(alice.session_manager().get_host_node_id(), host.session_manager().our_node_id());
     assert!(bob.receive().is_none());
 }
+
+#[test]
+fn test_host_staying_away_past_the_bound_migrates_once_while_redials_are_in_flight() {
+    let options = datalink_transport::TransportOptions {
+        host_gone_after: Duration::from_secs(1),
+        ..Default::default()
+    };
+    let Some((host, host_player, alice, _, bob, _)) = three_players_with(true, options) else {
+        return;
+    };
+
+    host.shutdown();
+
+    // Well before the five re-dials would have run out (about 7.5 s of waits
+    // alone), the host is migrated away from.
+    let (heard, destroyed) = hear_until_destroyed(&bob, host_player);
+    assert!(destroyed, "bob's game should hear the host's player destroyed: {heard:?}");
+
+    // Once the bound has cut the re-dials off, nothing more is announced.
+    std::thread::sleep(Duration::from_secs(9));
+    let mut later = Vec::new();
+    while let Some(qm) = bob.receive() {
+        later.push(system_message_type(&qm));
+    }
+    assert!(later.is_empty(), "migration must happen once, not again at the re-dials' end: {later:?}");
+    assert!(alice.session_manager().is_host());
+    assert_eq!(alice.session_manager().get_players().len(), 2);
+}

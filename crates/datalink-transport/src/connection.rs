@@ -81,7 +81,8 @@ pub const DEFAULT_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 /// the five re-dials' whole run (about 80 s when each dial times out) because
 /// SMAC's own "Player ... not responding" popup appears after about 30 s
 /// (game-session-sync ticket 02's evidence), and the game should have its new
-/// host before then.
+/// host before then. The Stop warning (README.md, packaging/README.txt, page.html)
+/// says "about 10 seconds": keep it in step with this.
 pub const DEFAULT_HOST_GONE_AFTER: Duration = Duration::from_secs(10);
 
 /// Magic prefix opening every ordered message stream: b"SMAC" + version (u16 LE).
@@ -396,6 +397,27 @@ impl ConnectionManager {
         });
     }
 
+    /// Up to five dial attempts at growing intervals; whether one succeeded.
+    /// Cancelling this future (the host-gone bound) is safe: a dial that
+    /// completed has already opened its link, so `redial_gave_up` finds it.
+    async fn redial_attempts(&self, endpoint_id_bytes: [u8; 32], ticket: &str) -> bool {
+        for attempt in 1..=5u32 {
+            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+            match self.connect_by_ticket(ticket).await {
+                Ok(_) => {
+                    info!(attempt, "reconnected to peer after transport loss");
+                    crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
+                    return true;
+                }
+                Err(e) => {
+                    debug!(attempt, error = %e, "reconnect attempt failed");
+                    crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
+                }
+            }
+        }
+        false
+    }
+
     /// Re-dial a lost friend by its ticket (bounded best-effort): five
     /// attempts, backing off. Nothing else re-establishes a friend's
     /// connection after a transient transport loss, and under full mesh a
@@ -410,27 +432,12 @@ impl ConnectionManager {
     fn spawn_redial(&self, endpoint_id_bytes: [u8; 32], ticket: String, is_host: bool) {
         let cm = self.clone();
         tokio::spawn(async move {
-            let redial = async {
-                for attempt in 1..=5u32 {
-                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
-                    match cm.connect_by_ticket(&ticket).await {
-                        Ok(_) => {
-                            info!(attempt, "reconnected to peer after transport loss");
-                            crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
-                            return true;
-                        }
-                        Err(e) => {
-                            debug!(attempt, error = %e, "reconnect attempt failed");
-                            crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
-                        }
-                    }
-                }
-                false
-            };
             let reconnected = if is_host {
-                tokio::time::timeout(cm.options.host_gone_after, redial).await.unwrap_or(false)
+                tokio::time::timeout(cm.options.host_gone_after, cm.redial_attempts(endpoint_id_bytes, &ticket))
+                    .await
+                    .unwrap_or(false)
             } else {
-                redial.await
+                cm.redial_attempts(endpoint_id_bytes, &ticket).await
             };
             if reconnected {
                 return;
@@ -828,7 +835,7 @@ async fn handle_bi_stream(
 
             if let Some(desc) = session_desc {
                 // Check if joins are disabled
-                if desc.flags & dp_types::DPSESSION_JOINDISABLED != 0 {
+                if desc.is_in_progress() {
                     (Some(Message::JoinResponse {
                         accepted: false,
                         player_id: None,
@@ -963,12 +970,6 @@ async fn handle_bi_stream(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    // Connection tests require actual Iroh infrastructure
-    // These would be integration tests
-}
-
 /// The host is done with the Game session, by saying so (`SessionClosed`) or
 /// by being gone for good: the game is told the session is lost, or, for a
 /// game in progress, its host's players left and the host role migrates.
@@ -994,4 +995,10 @@ fn apply_host_closed(session_manager: &SessionManager, friends: &Friends, inbox:
             }
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    // Connection tests require actual Iroh infrastructure
+    // These would be integration tests
 }

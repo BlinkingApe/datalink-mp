@@ -499,6 +499,8 @@
     // The game keeps its link to the Helper. A host who stops mid-game is
     // migrated away from (host-migration ticket 03); a Joiner who stops is
     // not yet noticed by the others' games (game-session-sync ticket 05).
+    // "About 10 seconds" is DEFAULT_HOST_GONE_AFTER in the transport's
+    // connection.rs; keep the README wording in step if it changes.
     if (gameConnected && !confirm('Return to the game\'s main menu first. Stopping during a game takes you out ' +
         'of it. If you are hosting, the other players\' games carry on with a new host after about ' +
         '10 seconds; if you are not, their games may not notice you have gone. Stop gives you a ' +

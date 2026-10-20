@@ -111,7 +111,7 @@ pub enum LinkEnded {
     /// registry if the re-dial gives up.
     Redial { ticket: String },
     /// The host of a game in progress is lost and cannot be re-dialled (no
-    /// ticket): it is gone now. The caller migrates the host role; the
+    /// ticket, or no players in the roster to re-dial for): it is gone now. The caller migrates the host role; the
     /// registry has queued nothing.
     HostGone,
 }
@@ -350,7 +350,9 @@ impl<H: Clone> FriendRegistry<H> {
     }
 
     /// Every re-dial of `friend` failed: forget it, routes and all, unless a
-    /// link to it opened meanwhile. Says whether it was forgotten. A lost
+    /// link to it opened meanwhile (this is also what makes a re-dial cut off
+    /// by the host-gone bound mid-completion safe: if its link had opened by
+    /// then, nothing is forgotten). Says whether it was forgotten. A lost
     /// host that is forgotten is gone: the caller migrates the host role.
     /// Game-session-sync ticket 05 may later make this tell the game other
     /// friends' players left.
@@ -1196,6 +1198,19 @@ mod tests {
 
         assert_eq!(answer, LinkEnded::HostGone);
         assert_eq!(inbox.count(), 0, "the caller migrates; the registry queues no SESSIONLOST");
+    }
+
+    #[test]
+    fn a_host_mid_game_with_a_ticket_but_no_players_cannot_be_redialled_so_it_is_gone_at_once() {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let (link, _rx) = stand_in(ALICE);
+        let alice = reg.link_opened(ALICE, None, link, &us());
+
+        let answer = reg.link_ended(ALICE, alice, the_host_mid_game(Some("alice's ticket")));
+
+        assert_eq!(answer, LinkEnded::HostGone);
+        assert_eq!(inbox.count(), 0);
     }
 
     #[test]

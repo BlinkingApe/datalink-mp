@@ -17,7 +17,7 @@ When the host's game leaves a game in progress, whether it quits normally, is ki
 
 ### Why that's wrong
 
-- **The game asked for host migration.** The session's `dwFlags` is `0x04` (`DPSESSION_MIGRATEHOST`), and `0x24` once the game starts (`0x20`, `DPSESSION_JOINDISALLOWED`). With migration on, real DirectPlay gives the other players `DESTROYPLAYERORGROUP` for the leaving host's player, never `SESSIONLOST`.
+- **The game asked for host migration.** The session's `dwFlags` is `0x04` (`DPSESSION_MIGRATEHOST`), and `0x24` once the game starts (`0x20`, `DPSESSION_JOINDISABLED`). With migration on, real DirectPlay gives the other players `DESTROYPLAYERORGROUP` for the leaving host's player, never `SESSIONLOST`.
 - **JACKAL migrates the host itself** (`terranx.exe` v2.0; its system-message handler is at `0x632db0`):
   - `SESSIONLOST` (`0x31`): calls the network object's virtual `[+0x10]`, then `0x62e010`, which closes and releases DirectPlay. The game then exits.
   - `DESTROYPLAYERORGROUP` (`0x05`, player type): calls `0x632350(dpid, 1)`. In that function's "player gone" path (`0x6325f6`), if the departing DPID is the host's (`[this+0x764]`), it stores the old host at `0x9be5fc`, makes the first remaining entry of its roster (`[this+0x154]`, stride `0x58`) the host, and calls the virtual `[+0x14]`.
