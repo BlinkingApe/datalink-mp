@@ -19,6 +19,7 @@
 
 mod binary;
 mod blit_fix;
+mod ac_colors;
 mod border_fix;
 mod classic_colors;
 mod selection;
@@ -53,6 +54,7 @@ pub fn apply_all_patches() {
 
     #[cfg(target_os = "windows")]
     for (patch, decision) in selection::plan(detected_binary()) {
+        let binary = detected_binary();
         match decision {
             selection::Decision::NotAvailable(b) => {
                 info!("datalink-fixes: {} is not available for {}", patch.name(), b)
@@ -64,7 +66,7 @@ pub fn apply_all_patches() {
                     Ok(()) => info!("Backwards blit fix applied successfully"),
                     Err(e) => error!("Failed to apply backwards blit fix: {}", e),
                 },
-                selection::Patch::ClassicColors => match unsafe { classic_colors::apply() } {
+                selection::Patch::ClassicColors => match binary.map_or(Ok(()), |b| unsafe { classic_colors::apply(b) }) {
                     Ok(()) => info!("Classic-colors fix processed"),
                     Err(e) => error!("Failed to apply classic-colors fix: {}", e),
                 },

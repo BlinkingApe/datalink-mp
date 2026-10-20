@@ -1,5 +1,10 @@
 # Faction colors in multiplayer
 
+**TL;DR (Alien Crossfire and WTP): the same fix is there for `terranx.exe`,
+which includes WTP games (WTP launches `terranx.exe`). It works differently
+and has not yet been confirmed in a live game; see the Alien Crossfire section
+below. The rest of this page describes SMAC.**
+
 **TL;DR: SMAC's correct colors follow faction identity — Spartans are black,
 the Hive is blue, Gaians are green, always. Single player renders them
 correctly; a vanilla bug makes multiplayer units, flags, and base labels wear
@@ -53,6 +58,35 @@ identically. In single player seating is identity and the whole fix is a
 no-op. `SMAC_NO_CLASSIC_COLORS=1` disables it (vanilla behavior: borders
 classic, units seat-colored; `SMAC_BORDER_MATCH_UNITS=1` then optionally
 recolors borders to match the wrong units instead).
+
+## Alien Crossfire and WTP
+
+Alien Crossfire (`terranx.exe`, also under WTP) colors a seat from that seat's
+own faction art file (`GAIANS.pcx`, `PIRATES.pcx`, ...), not from rows of
+`PALETTE.PCX`. In a 2026-10-20 game the Pirates showed orange (the Believers'
+color) and Morgan showed black (the Spartans'). The best explanation, still
+unconfirmed, is that the per-seat color tables kept their startup values
+after the lobby seated the factions.
+
+The fix hooks the same moment as for SMAC (seating finalized at game start,
+`0x482cd8`). When seating is not the default order, it asks the game to load
+each seat's faction art again, then re-stamps the flag sprites with the game's
+own routines. Because it reuses the game's loaders it covers all 14 factions,
+including the Pirates, which the SMAC table rewrite cannot map. Borders and
+flags read the same seat slot there, so no border change is made. Nothing
+synced is touched, and single player (default seating) is left alone.
+
+- `SMAC_NO_CLASSIC_COLORS=1` turns it off here too.
+- The fix only installs if the game's code still has the exact original
+  bytes at each site; otherwise it logs why and does nothing.
+- WTP's `thinker.dll` patches nearby code but not these sites, and the fix
+  only calls functions WTP calls itself.
+- The DLL log shows `classic colors: installed for
+  Alien Crossfire` at start, then for each game one line per seat (seating
+  byte, faction file, reloaded or left alone) and `seating rewritten`.
+  Please include those lines in a bug report.
+
+Contributor detail: [terranx-faction-colors.md](../contributors/terranx-faction-colors.md).
 
 ## Other visual details worth knowing
 

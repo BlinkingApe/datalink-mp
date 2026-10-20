@@ -80,13 +80,39 @@ fn compute_tables(orig: &[[u32; 8]; 4], seating: &[u8; 8]) -> [[u32; 8]; 4] {
     out
 }
 
+/// Alien Crossfire (`terranx.exe`) addresses. Classic colors there reloads
+/// each seat's faction art instead of rewriting tables (see `ac_colors.rs`).
+mod ac {
+    /// Sole call of the seating function, its target and original bytes.
+    pub const CALL_SITE: usize = 0x482cd8;
+    pub const CALL_ORIG: [u8; 5] = [0xe8, 0xb3, 0x00, 0x00, 0x00]; // call 0x482d90
+    pub const ASSIGN_PLAYER_FACTIONS: usize = 0x482d90;
+    /// Entry bytes of the seating function (checked, WTP patches inside it).
+    pub const ASSIGN_ORIG: [u8; 10] = [0x55, 0x8b, 0xec, 0x6a, 0xff, 0x68, 0x06, 0x75, 0x65, 0x00];
+    /// `load_faction_art(seat)`, cdecl, one stack argument.
+    pub const LOAD_FACTION_ART: usize = 0x453710;
+    pub const LOAD_FACTION_ART_ORIG: [u8; 12] =
+        [0x55, 0x8b, 0xec, 0x83, 0xec, 0x10, 0x56, 0x8b, 0x75, 0x08, 0x57, 0x56];
+    /// `load_flags()`, the flag-sprite stamper, no arguments.
+    pub const LOAD_FLAGS: usize = 0x453f70;
+    pub const LOAD_FLAGS_ORIG: [u8; 12] =
+        [0x55, 0x8b, 0xec, 0x6a, 0xff, 0x68, 0x50, 0x51, 0x65, 0x00, 0x64, 0xa1];
+    /// Seating byte of seat n: base + n * stride.
+    pub const SEATING_TABLE: usize = 0x90db9b;
+    pub const SEATING_STRIDE: usize = 0x17c;
+    /// `MFactions[seat].filename`: base + seat * stride + 4 (inline, 24 bytes).
+    pub const MFACTIONS: usize = 0x946a50;
+    pub const MFACTIONS_STRIDE: usize = 0x59c;
+    pub const FILENAME_OFFSET: usize = 4;
+}
+
 /// Build the 15-byte detour stub for a stub placed at `stub_va`:
 /// call AssignPlayerFactions (ecx/this is already set at the site), then the
 /// Rust hook with all registers and flags preserved, then return to the site.
-fn build_stub(stub_va: usize, hook: usize) -> [u8; 15] {
+fn build_stub(stub_va: usize, assign: usize, hook: usize) -> [u8; 15] {
     let mut s = [0u8; 15];
     s[0] = 0xe8; // call ASSIGN_PLAYER_FACTIONS
-    let rel = (ASSIGN_PLAYER_FACTIONS as i64 - (stub_va as i64 + 5)) as i32;
+    let rel = (assign as i64 - (stub_va as i64 + 5)) as i32;
     s[1..5].copy_from_slice(&rel.to_le_bytes());
     s[5] = 0x9c; // pushfd
     s[6] = 0x60; // pushad
@@ -143,6 +169,51 @@ mod windows_impl {
     }
 }
 
+#[cfg(target_os = "windows")]
+mod ac_impl {
+    use super::ac::*;
+    use crate::ac_colors::*;
+    use tracing::info;
+
+    /// Called from the stub right after the seating function returns.
+    pub unsafe extern "C" fn hook() {
+        let mut seating = [0u8; 8];
+        let mut names: [Option<String>; 8] = Default::default();
+        for seat in 1..8 {
+            seating[seat] = *((SEATING_TABLE + seat * SEATING_STRIDE) as *const u8);
+            let raw = std::slice::from_raw_parts(
+                (MFACTIONS + seat * MFACTIONS_STRIDE + FILENAME_OFFSET) as *const u8,
+                FILENAME_LEN,
+            );
+            names[seat] = parse_filename(raw);
+        }
+        let plan = plan_reloads(&seating, &names);
+        if plan.is_empty() {
+            info!(
+                "classic colors (Alien Crossfire): seating {:?} is the default order, nothing to rewrite",
+                &seating[1..]
+            );
+        }
+        for seat in 1..8 {
+            let reload = plan.contains(&seat);
+            info!("classic colors (Alien Crossfire): {}", seat_log_line(seat, seating[seat], &names[seat], reload));
+        }
+        if plan.is_empty() {
+            return;
+        }
+        let load_art: extern "C" fn(i32) = std::mem::transmute(LOAD_FACTION_ART);
+        for &seat in &plan {
+            load_art(seat as i32);
+        }
+        let load_flags: extern "C" fn() = std::mem::transmute(LOAD_FLAGS);
+        load_flags();
+        info!(
+            "classic colors (Alien Crossfire): seating rewritten, faction art reloaded for seats {:?}, flags restamped",
+            plan
+        );
+    }
+}
+
 /// Apply the classic-colors fix. On by default; `SMAC_NO_CLASSIC_COLORS=1`
 /// disables it (and leaves the vanilla color behavior).
 ///
@@ -151,7 +222,8 @@ mod windows_impl {
 /// Modifies executable code in the process. Call exactly once, early during
 /// process init.
 #[cfg(target_os = "windows")]
-pub unsafe fn apply() -> Result<(), &'static str> {
+pub unsafe fn apply(binary: crate::binary::GameBinary) -> Result<(), &'static str> {
+    use crate::binary::GameBinary;
     use tracing::info;
 
     if std::env::var("SMAC_NO_CLASSIC_COLORS").is_ok() {
@@ -159,12 +231,25 @@ pub unsafe fn apply() -> Result<(), &'static str> {
         return Ok(());
     }
 
-    // The border renderer must index by seat once the tables are rewritten.
-    crate::border_fix::install_detour()?;
+    let (call_site, call_orig, assign, hook): (usize, [u8; 5], usize, unsafe extern "C" fn()) =
+        match binary {
+            GameBinary::Smac => {
+                // The border renderer must index by seat once the tables are rewritten.
+                crate::border_fix::install_detour()?;
+                (CALL_SITE, CALL_ORIG, ASSIGN_PLAYER_FACTIONS, windows_impl::classic_colors_hook)
+            }
+            GameBinary::AlienCrossfire => {
+                // No border detour: borders and flags read the same slot there.
+                check_bytes(ac::ASSIGN_PLAYER_FACTIONS, &ac::ASSIGN_ORIG, "seating function")?;
+                check_bytes(ac::LOAD_FACTION_ART, &ac::LOAD_FACTION_ART_ORIG, "load_faction_art")?;
+                check_bytes(ac::LOAD_FLAGS, &ac::LOAD_FLAGS_ORIG, "load_flags")?;
+                (ac::CALL_SITE, ac::CALL_ORIG, ac::ASSIGN_PLAYER_FACTIONS, ac_impl::hook)
+            }
+        };
 
-    let site = CALL_SITE as *mut u8;
-    let actual = std::slice::from_raw_parts(site, CALL_ORIG.len());
-    if actual != CALL_ORIG {
+    let site = call_site as *mut u8;
+    let actual = std::slice::from_raw_parts(site, call_orig.len());
+    if actual != call_orig {
         if actual[0] == 0xe8 {
             // Some call is present but not the expected displacement.
             return Err("classic colors: unexpected call displacement - unknown binary version");
@@ -177,14 +262,13 @@ pub unsafe fn apply() -> Result<(), &'static str> {
         return Err("classic colors: failed to allocate stub");
     }
     let stub_va = stub as usize;
-    let hook: unsafe extern "C" fn() = windows_impl::classic_colors_hook;
-    let code = build_stub(stub_va, hook as usize);
+    let code = build_stub(stub_va, assign, hook as usize);
     std::ptr::copy_nonoverlapping(code.as_ptr(), stub as *mut u8, code.len());
 
     let mut old_protect = PAGE_PROTECTION_FLAGS(0);
     if VirtualProtect(
         site as *const core::ffi::c_void,
-        CALL_ORIG.len(),
+        call_orig.len(),
         PAGE_EXECUTE_READWRITE,
         &mut old_protect,
     )
@@ -192,21 +276,32 @@ pub unsafe fn apply() -> Result<(), &'static str> {
     {
         return Err("classic colors: VirtualProtect failed");
     }
-    let rel = (stub_va as i64 - (CALL_SITE as i64 + 5)) as i32;
+    let rel = (stub_va as i64 - (call_site as i64 + 5)) as i32;
     std::ptr::copy_nonoverlapping(rel.to_le_bytes().as_ptr(), site.add(1), 4);
     let mut dummy = PAGE_PROTECTION_FLAGS(0);
-    let _ = VirtualProtect(site as *const core::ffi::c_void, CALL_ORIG.len(), old_protect, &mut dummy);
+    let _ = VirtualProtect(site as *const core::ffi::c_void, call_orig.len(), old_protect, &mut dummy);
 
     info!(
-        "classic colors: hooked AssignPlayerFactions call at 0x{:08X}, stub at 0x{:08X}",
-        CALL_SITE, stub_va
+        "classic colors: installed for {}, hooked seating call at 0x{:08X}, stub at 0x{:08X}",
+        binary, call_site, stub_va
     );
+    Ok(())
+}
+
+/// Fail unless `addr` still holds `expected`.
+#[cfg(target_os = "windows")]
+unsafe fn check_bytes(addr: usize, expected: &[u8], what: &str) -> Result<(), &'static str> {
+    let actual = std::slice::from_raw_parts(addr as *const u8, expected.len());
+    if actual != expected {
+        tracing::warn!("classic colors: {} at 0x{:08X} has unexpected bytes {:02x?}", what, addr, actual);
+        return Err("classic colors: original bytes don't match - unknown binary version");
+    }
     Ok(())
 }
 
 /// Stub for non-Windows builds (testing).
 #[cfg(not(target_os = "windows"))]
-pub unsafe fn apply() -> Result<(), &'static str> {
+pub unsafe fn apply(_binary: crate::binary::GameBinary) -> Result<(), &'static str> {
     Ok(())
 }
 
@@ -275,7 +370,7 @@ mod tests {
     fn stub_calls_land_on_targets() {
         let stub_va = 0x30000000usize;
         let hook = 0x10001234usize;
-        let s = build_stub(stub_va, hook);
+        let s = build_stub(stub_va, ASSIGN_PLAYER_FACTIONS, hook);
         assert_eq!(s.len(), 15);
         assert_eq!(s[0], 0xe8);
         let rel = i32::from_le_bytes(s[1..5].try_into().unwrap());
