@@ -110,6 +110,11 @@ JoinRequest left its name blank for the whole game, on every machine.
 
 In-memory patches applied when the DLL loads into the game process:
 
+- **Binary detection** — on load the crate identifies `terran.exe` (SMAC) vs
+  `terranx.exe` (Alien Crossfire) from the game image header and applies only
+  the patches and probes that exist for it (`binary.rs`, `selection.rs`).
+  Today every patch is SMAC-only, so in Alien Crossfire the log says each is
+  not available and nothing is written.
 - **Backwards-blit fix** — repairs a game drawing routine that crashes under
   Wine.
 - **Probe system** — optional, env-gated (`SMAC_PROBE_LOG`) trampoline hooks
