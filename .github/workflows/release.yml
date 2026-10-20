@@ -98,16 +98,20 @@ jobs:
             for l in MIT APACHE FONTS; do cp "LICENSE-$l" "$d/datalink-mp-LICENSE-$l.txt"; done
           done
 
+          cp packaging/logging/datalink-mp-collect-logs.bat stage/windows/
+          cp packaging/logging/datalink-mp-collect-logs.sh stage/linux/
+          chmod 755 stage/linux/datalink-mp-collect-logs.sh
+
           cp target/x86_64-pc-windows-gnu/release/datalink-mp.exe \
             target/i686-pc-windows-gnu/release/dplayx.dll stage/windows/
           (cd stage/windows && zip -X "../../dist/datalink-mp-$VERSION-windows-x86_64.zip" \
-            datalink-mp.exe dplayx.dll "${COMMON[@]}")
+            datalink-mp.exe dplayx.dll datalink-mp-collect-logs.bat "${COMMON[@]}")
 
           cp target/x86_64-unknown-linux-musl/release/datalink-mp \
             target/i686-pc-windows-gnu/release/dplayx.dll stage/linux/
           chmod 755 stage/linux/datalink-mp
           tar -C stage/linux --owner=0 --group=0 --numeric-owner \
-            -czf "dist/datalink-mp-$VERSION-linux-x86_64.tar.gz" datalink-mp dplayx.dll "${COMMON[@]}"
+            -czf "dist/datalink-mp-$VERSION-linux-x86_64.tar.gz" datalink-mp dplayx.dll datalink-mp-collect-logs.sh "${COMMON[@]}"
 
           ls -l dist
 
