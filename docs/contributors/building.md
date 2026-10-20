@@ -177,5 +177,6 @@ Symptoms and their usual causes:
 - **A mismatch in a Helper log:** the machines run different Release versions.
   Build and deploy the same one everywhere.
 - **Faction colors:** vanilla multiplayer colors units by seat, not faction;
-  this project fixes that. Set `SMAC_NO_CLASSIC_COLORS=1` for vanilla behavior.
+  this project fixes that, in SMAC and in Alien Crossfire (including WTP). Set
+  `SMAC_NO_CLASSIC_COLORS=1` for vanilla behavior.
   See [faction-colors.md](../players/faction-colors.md).

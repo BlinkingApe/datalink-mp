@@ -37,7 +37,7 @@ pub(crate) const ALL: [Patch; 4] = [
 /// The binaries each patch has addresses for.
 const AVAILABILITY: [(Patch, &[GameBinary]); 4] = [
     (Patch::BlitFix, &[GameBinary::Smac]),
-    (Patch::ClassicColors, &[GameBinary::Smac]),
+    (Patch::ClassicColors, &[GameBinary::Smac, GameBinary::AlienCrossfire]),
     (Patch::BorderFix, &[GameBinary::Smac]),
     (Patch::DebugProbes, &[GameBinary::Smac]),
 ];
@@ -87,15 +87,16 @@ mod tests {
     }
 
     #[test]
-    fn alien_crossfire_gets_none_of_the_smac_only_patches() {
+    fn alien_crossfire_gets_classic_colors_but_no_border_detour() {
         let plan = plan(Some(GameBinary::AlienCrossfire));
         assert_eq!(plan.len(), 4);
         for (patch, d) in plan {
-            assert_eq!(
-                d,
-                Decision::NotAvailable(GameBinary::AlienCrossfire),
-                "{patch:?}"
-            );
+            let expected = if patch == Patch::ClassicColors {
+                Decision::Apply
+            } else {
+                Decision::NotAvailable(GameBinary::AlienCrossfire)
+            };
+            assert_eq!(d, expected, "{patch:?}");
         }
     }
 
