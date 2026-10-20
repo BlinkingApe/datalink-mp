@@ -1440,9 +1440,17 @@ fn test_every_joiners_game_hears_of_the_players_in_join_order() {
 /// Multiplayer Setup. Returns (host, host player, alice, alice's DPID, bob,
 /// bob's DPID). None when a Transport cannot be created.
 fn three_players(in_progress: bool) -> Option<(Transport, u32, Transport, u32, Transport, u32)> {
-    let host = create_transport()?;
-    let alice = create_transport()?;
-    let bob = create_transport()?;
+    three_players_with(in_progress, datalink_transport::TransportOptions::default())
+}
+
+/// `three_players` with every Helper on `options`.
+fn three_players_with(
+    in_progress: bool,
+    options: datalink_transport::TransportOptions,
+) -> Option<(Transport, u32, Transport, u32, Transport, u32)> {
+    let host = create_transport_with_options(options)?;
+    let alice = create_transport_with_options(options)?;
+    let bob = create_transport_with_options(options)?;
     let desc = SessionDesc {
         flags: dp_types::DPSESSION_MIGRATEHOST,
         guid_instance: GUID::new_random(),
@@ -1567,4 +1575,60 @@ fn test_host_closing_in_multiplayer_setup_still_tells_joiners_the_session_is_los
         assert!(lost.is_some(), "{who}'s game should be told the session was lost");
         assert!(!game.session_manager().is_host());
     }
+}
+
+/// Options with the host counted gone after two seconds, not ten.
+fn quick_host_gone() -> datalink_transport::TransportOptions {
+    datalink_transport::TransportOptions {
+        host_gone_after: Duration::from_secs(2),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn test_host_vanishing_mid_game_migrates_like_its_closing() {
+    let Some((host, host_player, alice, _, bob, _)) = three_players_with(true, quick_host_gone()) else {
+        return;
+    };
+
+    // The host's Helper goes away without a SessionClosed.
+    host.shutdown();
+
+    for (who, game) in [("alice", &alice), ("bob", &bob)] {
+        let (heard, destroyed) = hear_until_destroyed(game, host_player);
+        assert!(destroyed, "{who}'s game should hear the host's player destroyed");
+        assert!(
+            !heard.contains(&Some(dp_types::sysmsg::DPSYS_SESSIONLOST)),
+            "{who}'s game must not be told the session was lost"
+        );
+    }
+    assert!(alice.session_manager().is_host(), "Alice, the lowest DPID, is the new host");
+    assert!(!bob.session_manager().is_host());
+    assert_eq!(
+        bob.session_manager().get_host_node_id(),
+        alice.session_manager().our_node_id(),
+        "Bob's Helper agrees Alice is the host"
+    );
+}
+
+#[test]
+fn test_host_connection_that_drops_and_comes_back_migrates_nothing() {
+    let options = datalink_transport::TransportOptions {
+        host_gone_after: Duration::from_secs(4),
+        ..Default::default()
+    };
+    let Some((host, host_player, alice, _, bob, _)) = three_players_with(true, options) else {
+        return;
+    };
+
+    alice.drop_connection_to(host.endpoint_id());
+    // Wait out the whole bound: the host must not be counted gone.
+    std::thread::sleep(Duration::from_secs(6));
+
+    let (heard, destroyed) = hear_until_destroyed(&alice, host_player);
+    assert!(!destroyed, "no player should leave: {heard:?}");
+    assert!(!heard.contains(&Some(dp_types::sysmsg::DPSYS_SESSIONLOST)));
+    assert!(!alice.session_manager().is_host());
+    assert_eq!(alice.session_manager().get_host_node_id(), host.session_manager().our_node_id());
+    assert!(bob.receive().is_none());
 }

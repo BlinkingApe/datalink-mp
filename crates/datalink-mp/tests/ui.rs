@@ -3151,7 +3151,7 @@ fn test_page_has_stop_hidden_as_it_loads_and_the_words_for_after_stop() {
         "Stop should ask the player to return to the game's main menu first"
     );
     assert!(
-        page.contains("can crash their game"),
+        page.contains("carry on with a new host") && page.contains("may not notice you have gone"),
         "Stop should say what stopping during a game can do"
     );
 }

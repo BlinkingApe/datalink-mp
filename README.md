@@ -114,8 +114,9 @@ Nobody has run these steps on a Mac. They are what should work.
 Your Ticket is new every time datalink-mp starts and every time you press
 **Stop**, so share it again after either. Stop ends your current connections
 and gives you a new Ticket without closing datalink-mp; with the game open,
-return to the game's main menu first. Stopping during a game ends it for
-everyone connected through you, and can crash their game. **Quit** closes
+return to the game's main menu first. Stopping during a game takes you out
+of it: if you are hosting, the other players' games carry on with a new host
+after about 10 seconds; if you are not, their games may not notice you have gone. **Quit** closes
 datalink-mp.
 
 If you double-click `datalink-mp` while it's already running, the running copy

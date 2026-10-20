@@ -311,6 +311,15 @@ impl SessionManager {
         *self.host_node_id.read()
     }
 
+    /// Whether the Game session is in progress: the game started and closed
+    /// it to new players (`DPSESSION_JOINDISABLED`). False outside a session.
+    pub fn is_in_progress(&self) -> bool {
+        self.session
+            .read()
+            .as_ref()
+            .is_some_and(|s| s.desc.flags & dp_types::DPSESSION_JOINDISABLED != 0)
+    }
+
     /// Check if a node ID is the host
     pub fn is_node_host(&self, node_id: &[u8; 32]) -> bool {
         if self.is_host() {

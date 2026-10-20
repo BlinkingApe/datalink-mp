@@ -54,3 +54,5 @@ This confirms the lead: the host's Helper re-dials, and the game is never told. 
 - 17:50:57 to 17:51:11: Windows hosted again, and Linux rejoined after cancelling its old setup screen, without restarting anything. 17:52:02: Linux's `PlayerLeft` as it quit, which Windows showed as "Player Rocky dropped".
 
 On the killed-host side, the Helper and DLL do their part: the message is handed over, and the game reacts to it. What's left is SMAC's setup screen showing nothing, so there may be no Helper fix. Whether the page should say the session ended is for this ticket to decide.
+
+2026-10-20: [host-migration ticket 03](../../host-migration/issues/03-host-vanishing-migrates-too.md) covers a *host* that vanishes mid-game: the Joiners' games get `DESTROYPLAYERORGROUP` for the host's player and a new host, once the host has been gone 10 s. A vanished *Joiner* stays with this ticket.

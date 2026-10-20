@@ -76,6 +76,14 @@ fn classify_dial_error(e: &ConnectError) -> TransportError {
 /// Default bound on a single dial (see `ConnectionManager::connect_by_ticket`).
 pub const DEFAULT_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 
+/// How long a lost host of a game in progress may stay away before it counts
+/// as gone. A brief blip is re-dialled well inside this. It is shorter than
+/// the five re-dials' whole run (about 80 s when each dial times out) because
+/// SMAC's own "Player ... not responding" popup appears after about 30 s
+/// (game-session-sync ticket 02's evidence), and the game should have its new
+/// host before then.
+pub const DEFAULT_HOST_GONE_AFTER: Duration = Duration::from_secs(10);
+
 /// Magic prefix opening every ordered message stream: b"SMAC" + version (u16 LE).
 pub(crate) const STREAM_MAGIC: &[u8; 4] = b"SMAC";
 
@@ -374,11 +382,16 @@ impl ConnectionManager {
             // not delay a re-dial.
             let roster = RosterFacts {
                 was_host: cm.session_manager.is_node_host(&endpoint_id_bytes),
+                in_progress: cm.session_manager.is_in_progress(),
                 ticket: cm.session_manager.get_player_ticket_by_node(&endpoint_id_bytes),
             };
+            let was_host = roster.was_host;
             match cm.friends.link_ended(endpoint_id_bytes, link_id, roster) {
                 LinkEnded::Nothing => {}
-                LinkEnded::Redial { ticket } => cm.spawn_redial(endpoint_id_bytes, ticket),
+                LinkEnded::Redial { ticket } => cm.spawn_redial(endpoint_id_bytes, ticket, was_host),
+                LinkEnded::HostGone => {
+                    apply_host_closed(&cm.session_manager, &cm.friends, &cm.inbox, &endpoint_id_bytes)
+                }
             }
         });
     }
@@ -390,24 +403,43 @@ impl ConnectionManager {
     /// broadcasts/ACKs. connect_by_ticket is idempotent, so a race with a
     /// heal from the other side is harmless. When a dial succeeds, the
     /// registry re-attaches the new link to the friend's kept record.
-    fn spawn_redial(&self, endpoint_id_bytes: [u8; 32], ticket: String) {
+    ///
+    /// The host of a game in progress is re-dialled only for
+    /// `options.host_gone_after`: if it hasn't come back by then (or the
+    /// attempts run out first) it is gone, and the host role migrates.
+    fn spawn_redial(&self, endpoint_id_bytes: [u8; 32], ticket: String, is_host: bool) {
         let cm = self.clone();
         tokio::spawn(async move {
-            for attempt in 1..=5u32 {
-                tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
-                match cm.connect_by_ticket(&ticket).await {
-                    Ok(_) => {
-                        info!(attempt, "reconnected to peer after transport loss");
-                        crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
-                        return;
-                    }
-                    Err(e) => {
-                        debug!(attempt, error = %e, "reconnect attempt failed");
-                        crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
+            let redial = async {
+                for attempt in 1..=5u32 {
+                    tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
+                    match cm.connect_by_ticket(&ticket).await {
+                        Ok(_) => {
+                            info!(attempt, "reconnected to peer after transport loss");
+                            crate::capture::reconnect(&endpoint_id_bytes, attempt, true);
+                            return true;
+                        }
+                        Err(e) => {
+                            debug!(attempt, error = %e, "reconnect attempt failed");
+                            crate::capture::reconnect(&endpoint_id_bytes, attempt, false);
+                        }
                     }
                 }
+                false
+            };
+            let reconnected = if is_host {
+                tokio::time::timeout(cm.options.host_gone_after, redial).await.unwrap_or(false)
+            } else {
+                redial.await
+            };
+            if reconnected {
+                return;
             }
-            cm.friends.redial_gave_up(endpoint_id_bytes);
+            let forgotten = cm.friends.redial_gave_up(endpoint_id_bytes);
+            if forgotten && is_host {
+                info!("host did not come back, treating it as gone");
+                apply_host_closed(&cm.session_manager, &cm.friends, &cm.inbox, &endpoint_id_bytes);
+            }
         });
     }
 
@@ -654,27 +686,7 @@ async fn handle_peer_message(
         Message::SessionClosed { .. } => {
             // Only the host's closing ends the session. A Helper from `-rc.5` or
             // earlier sends this when its Joiner merely leaves.
-            match session_manager.host_closed(&sender_endpoint_id) {
-                HostClosed::NotFromHost => {
-                    debug!("Ignoring SessionClosed from a peer that isn't our session's host");
-                }
-                HostClosed::SessionLost => {
-                    inbox.add_system(SystemEvent::SessionLost);
-                }
-                HostClosed::Migrated { departed, we_are_host } => {
-                    // A game in progress asked for host migration: its host's
-                    // players left, and JACKAL picks the new host itself.
-                    info!(we_are_host, "host closed a game in progress, host role migrated");
-                    for p in departed {
-                        cm.friends.player_left(p.id);
-                        inbox.add_system(SystemEvent::PlayerLeft {
-                            player_id: p.id,
-                            name: p.name,
-                            flags: p.flags,
-                        });
-                    }
-                }
-            }
+            apply_host_closed(session_manager, &cm.friends, inbox, &sender_endpoint_id);
         }
 
         Message::PlayerDataUpdate {
@@ -955,4 +967,31 @@ async fn handle_bi_stream(
 mod tests {
     // Connection tests require actual Iroh infrastructure
     // These would be integration tests
+}
+
+/// The host is done with the Game session, by saying so (`SessionClosed`) or
+/// by being gone for good: the game is told the session is lost, or, for a
+/// game in progress, its host's players left and the host role migrates.
+fn apply_host_closed(session_manager: &SessionManager, friends: &Friends, inbox: &GameInbox, sender: &[u8; 32]) {
+    match session_manager.host_closed(sender) {
+        HostClosed::NotFromHost => {
+            debug!("Ignoring the end of a peer that isn't our session's host");
+        }
+        HostClosed::SessionLost => {
+            inbox.add_system(SystemEvent::SessionLost);
+        }
+        HostClosed::Migrated { departed, we_are_host } => {
+            // A game in progress asked for host migration: its host's
+            // players left, and JACKAL picks the new host itself.
+            info!(we_are_host, "host left a game in progress, host role migrated");
+            for p in departed {
+                friends.player_left(p.id);
+                inbox.add_system(SystemEvent::PlayerLeft {
+                    player_id: p.id,
+                    name: p.name,
+                    flags: p.flags,
+                });
+            }
+        }
+    }
 }
