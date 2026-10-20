@@ -6,7 +6,7 @@ The DLL's game fixes, starting with classic faction colors, work in the game peo
 
 ## Notes
 
-- Evidence: the 2026-10-20 LAN logs (Windows host, two Linux Joiners, all on `wtp.exe`), kept locally in [host-migration](../host-migration/map.md)'s `captures/2026-10-20-wtp-lan/`.
+- Evidence: the 2026-10-20 LAN logs (Windows host, two Linux Joiners, all on `wtp.exe`), kept locally in [host-migration](../../host-migration/map.md)'s `captures/2026-10-20-wtp-lan/`.
   - Every game launch on every machine logged "original bytes don't match - unknown binary version" for the blit fix and the classic-colors fix, and "unexpected bytes at address" for each debug probe.
   - The host's log shows the colors fix "hooked" once, at 06:34. That was a separate 4-second launch of SMAC (`terran.exe`), not the game that was played.
   - In the game, Rocky's Pirates showed orange (the Believers' color) and the laptop's Morgan showed black (the Spartans'). That fits the unfixed game's seat-colored units (`docs/players/faction-colors.md`), but the logs don't show the seating, so it's unconfirmed.
@@ -27,6 +27,7 @@ The DLL's game fixes, starting with classic faction colors, work in the game peo
 ## Decisions so far
 
 <!-- one line per closed ticket -->
+- 04: Confirmed in real `wtp.exe` games on v0.1.3-rc.1: every faction had its correct color in three games; screenshots waived, and the fix's own effect wasn't isolated (tables were already right before the reload). [Result](issues/04-confirm-colors-in-a-real-game.md#result)
 - 03: `terranx.exe` gets the classic-colors fix: after seating, if not default order, it calls the game's `load_faction_art` per seat then `load_flags`, no border detour, byte-guarded, with per-seat logging; built and unit-tested but not run in a live game. [Answer](issues/03-classic-colors-in-alien-crossfire.md#answer)
 - 02: The crate detects `terran.exe` vs `terranx.exe` from the image PE header and applies patches via a per-binary table; ticket 03 adds `AlienCrossfire` entries. [Answer](issues/02-patches-picked-by-game-binary.md#answer)
 - 01: `terranx.exe` fills its color tables per slot from each faction's art file (`load_faction_art`) and already restamps flags after seating; the SMAC patch doesn't port, so ticket 03 should probe, then call the game's own loaders from a hook at `0x482cd8`, with no border detour. Research: `docs/contributors/terranx-faction-colors.md`.

@@ -1,6 +1,6 @@
 # How `terranx.exe` colors factions in multiplayer
 
-Research for the [alien-crossfire-fixes](../../.scratch/alien-crossfire-fixes/map.md) effort, ticket 01. It gives ticket 03 (classic colors in Alien Crossfire) the mechanism and the addresses. The SMAC fix is described in [faction-colors.md](../players/faction-colors.md) and lives in `crates/datalink-fixes/src/classic_colors.rs` and `border_fix.rs`.
+Research for the [alien-crossfire-fixes](../../.scratch/archive/alien-crossfire-fixes/map.md) effort, ticket 01. It gives ticket 03 (classic colors in Alien Crossfire) the mechanism and the addresses. The SMAC fix is described in [faction-colors.md](../players/faction-colors.md) and lives in `crates/datalink-fixes/src/classic_colors.rs` and `border_fix.rs`.
 
 **Bottom line.** Alien Crossfire does not sample its palette tables once from `PALETTE.PCX` like SMAC does. Each seat's colors are read from that seat's own faction art file (`GAIANS.pcx`, `PIRATES.pcx`, ...) by a function `terranx.exe` already has, and `AssignPlayerFactions` already re-stamps the flag sprites afterwards. So the SMAC patch (rewrite tables by seating, restamp, translate borders) does not port. A port should make the game redo its own per-seat color load from the right file, and it needs no border detour.
 

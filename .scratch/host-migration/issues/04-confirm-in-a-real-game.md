@@ -6,7 +6,7 @@ Blocked by: 01, 02, 03
 
 ## What to build
 
-A real game with three players shows the host can leave mid-game and the others play on. Run it with the same setup as the 2026-10-20 logs: a Windows host, two Linux Joiners, all on `wtp.exe`, with logs collected on every machine (`docs/players/collecting-logs.md`). This can share a session with [alien-crossfire-fixes 04](../../alien-crossfire-fixes/issues/04-confirm-colors-in-a-real-game.md).
+A real game with three players shows the host can leave mid-game and the others play on. Run it with the same setup as the 2026-10-20 logs: a Windows host, two Linux Joiners, all on `wtp.exe`, with logs collected on every machine (`docs/players/collecting-logs.md`). This can share a session with [alien-crossfire-fixes 04](../../archive/alien-crossfire-fixes/issues/04-confirm-colors-in-a-real-game.md).
 
 This ticket also checks the one inference the fix rests on: that every game picks the same new host. If the games disagree, or SMAX doesn't cope with a mid-game host change, record what happened here and reopen ticket 02.
 
@@ -21,9 +21,9 @@ This ticket also checks the one inference the fix rests on: that every game pick
 
 ## Comments
 
-2026-10-20, v0.1.3-rc.1 (shared session with alien-crossfire-fixes 04): reported by the tester, when the host quit mid-game the clients reported it and play switched to Rocky, the first Joiner. That covers the first criterion in outline. Not yet recorded: the same-new-host check in the logs, a further turn finished together, the new host quitting, Stop mid-game, and the Multiplayer Setup case. Logs are in `.scratch/alien-crossfire-fixes/captures/2026-10-20-v0.1.3-rc.1-test4/` (`.7z`, not yet read by an agent).
+2026-10-20, v0.1.3-rc.1 (shared session with alien-crossfire-fixes 04): reported by the tester, when the host quit mid-game the clients reported it and play switched to Rocky, the first Joiner. That covers the first criterion in outline. Not yet recorded: the same-new-host check in the logs, a further turn finished together, the new host quitting, Stop mid-game, and the Multiplayer Setup case. Logs are in the `captures/2026-10-20-v0.1.3-rc.1-test4` folder of the archived alien-crossfire-fixes effort (`.7z`, not yet read by an agent).
 
-### Log read, same run (`.scratch/alien-crossfire-fixes/captures/2026-10-20-v0.1.3-rc.1-test4/x/`)
+### Log read, same run (the extracted `x` folder beside them)
 
 - 09:31:10 the host's Helper handles `CloseSession`; its DLL logs `cleanup complete` at 09:31:10.5.
 - 09:31:12.33 both Joiners' Helpers receive `SessionClosed` and log `host left a game in progress, host role migrated`: Rocky `we_are_host=true`, Old_Black `we_are_host=false`. Both agree Rocky (the lower DPID, 0x20000) is the new host.
