@@ -1374,3 +1374,58 @@ fn test_shutdown_twice_then_drop_neither_hangs_nor_panics() {
         finished
     );
 }
+
+/// Every game must hear of its session's players in the same order, ascending
+/// DPID (join order), its own player in its place: JACKAL picks a new host as
+/// the first entry of its roster, which follows announcement order
+/// (host-migration ticket 01).
+#[test]
+fn test_every_joiners_game_hears_of_the_players_in_join_order() {
+    let Some(host) = create_transport() else { return };
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Order Test".to_string(),
+        max_players: 8,
+        ..Default::default()
+    });
+    let host_id = host
+        .create_player(PlayerName::default(), 0, vec![0x03])
+        .expect("host player");
+
+    let mut ids = vec![host_id];
+    let mut joiners = Vec::new();
+    for n in 0..4 {
+        let Some(joiner) = create_transport() else { return };
+        let id = joiner
+            .join_session_by_ticket(host.our_ticket())
+            .expect("join by ticket should succeed");
+        joiner.create_player(
+            PlayerName { short_name: String::new(), long_name: format!("Joiner {n}") },
+            0,
+            vec![0x02],
+        );
+        // Wait for the host to hear of this joiner's data, so the next joiner
+        // finds it in the session.
+        poll_until(Duration::from_secs(10), || {
+            std::iter::from_fn(|| host.receive()).find(|qm| {
+                system_message_type(qm) == Some(dp_types::sysmsg::DPSYS_SETPLAYERORGROUPDATA)
+            })
+        })
+        .expect("the host's game should hear of the joiner");
+        ids.push(id);
+        joiners.push(joiner);
+    }
+    ids.sort();
+
+    for (n, joiner) in joiners.iter().enumerate() {
+        let mut heard = Vec::new();
+        let expected = &ids[..n + 2]; // host, earlier joiners, itself
+        poll_until(Duration::from_secs(10), || {
+            heard.extend(std::iter::from_fn(|| joiner.receive()).filter_map(|qm| created_player(&qm)));
+            (heard.len() >= expected.len()).then_some(())
+        })
+        .expect("the game should hear of every player");
+        assert_eq!(&heard[..expected.len()], expected, "joiner {n} heard players out of join order");
+    }
+}

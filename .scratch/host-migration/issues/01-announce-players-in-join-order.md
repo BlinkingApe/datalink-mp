@@ -1,7 +1,7 @@
 # 01: Announce players to each game in join order
 
 Type: task
-Status: ready-for-agent
+Status: resolved
 Blocked by: None (can start immediately)
 
 ## What to build
@@ -12,7 +12,11 @@ This matters because JACKAL picks a new host as the first remaining entry of its
 
 ## Acceptance criteria
 
-- [ ] A Joiner joining a session that already has several players hands its game `CREATEPLAYERORGROUP` in ascending DPID order, including its own player.
-- [ ] Players who join later are still announced as they arrive (they have the highest DPID, so the order holds).
-- [ ] A Transport-level test with at least three Joiners shows every Joiner's game got the same order, and fails against the current order.
-- [ ] No duplicate `CREATEPLAYERORGROUP` (the inbox's existing duplicate guard still holds).
+- [x] A Joiner joining a session that already has several players hands its game `CREATEPLAYERORGROUP` in ascending DPID order, including its own player.
+- [x] Players who join later are still announced as they arrive (they have the highest DPID, so the order holds).
+- [x] A Transport-level test with at least three Joiners shows every Joiner's game got the same order, and fails against the current order.
+- [x] No duplicate `CREATEPLAYERORGROUP` (the inbox's existing duplicate guard still holds).
+
+## Answer
+
+A Joiner's `join_session` now adds every existing player to the session, then queues `CREATEPLAYERORGROUP` for all of them plus its own player, sorted by ascending DPID, so the game hears host, earlier joiners, itself in join order. Players who join later arrive afterwards with higher DPIDs. The inbox's duplicate guard is untouched. The `current_players` count in each announcement is now the final roster count rather than a running one. Test: `test_every_joiners_game_hears_of_the_players_in_join_order` in `crates/datalink-transport/tests/mesh_networking.rs` (host plus four Joiners; it failed against the old `HashMap` order). Code: `crates/datalink-transport/src/runtime.rs`.
