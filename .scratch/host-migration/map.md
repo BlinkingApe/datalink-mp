@@ -42,3 +42,4 @@ When the host's game leaves a game in progress, whether it quits normally, is ki
 <!-- one line per closed ticket -->
 - Ticket 01: every Joiner's game is announced its players in ascending DPID, itself included, so rosters agree ([ticket](issues/01-announce-players-in-join-order.md)).
 - Ticket 02: the host's Close mid-game (`DPSESSION_JOINDISABLED` set) gives Joiners `DESTROYPLAYERORGROUP`, and the lowest remaining DPID becomes host; host-role state is `SessionManager::host_closed` in `session.rs` ([02](issues/02-host-close-migrates-the-host.md)).
+- Ticket 03: a host lost mid-game is re-dialled for `host_gone_after` (10 s, shorter than SMAC's ~30 s "not responding"); if it hasn't returned it migrates exactly like a closed host; the Stop warning is reworded ([03](issues/03-host-vanishing-migrates-too.md)).

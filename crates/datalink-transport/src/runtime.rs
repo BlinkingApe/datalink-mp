@@ -10,7 +10,7 @@
 //! - `enum_sessions()` queries all connected peers for their sessions
 
 use crate::connection::{
-    peer_protocol_alpn, ConnectionManager, Friends, DEFAULT_DIAL_TIMEOUT,
+    peer_protocol_alpn, ConnectionManager, Friends, DEFAULT_DIAL_TIMEOUT, DEFAULT_HOST_GONE_AFTER,
     STREAM_PROTO_VERSION,
 };
 use crate::friend_registry::{FriendRegistry, SendFacts};
@@ -79,6 +79,10 @@ pub struct TransportOptions {
     pub peer_protocol_version: u16,
     /// How long a dial may take before it fails with `TransportError::CantReach`
     pub dial_timeout: Duration,
+    /// How long a lost host of a game in progress may stay away before it
+    /// counts as gone and the host role migrates. A re-dial that succeeds in
+    /// time migrates nothing.
+    pub host_gone_after: Duration,
 }
 
 impl Default for TransportOptions {
@@ -86,6 +90,7 @@ impl Default for TransportOptions {
         Self {
             peer_protocol_version: STREAM_PROTO_VERSION,
             dial_timeout: DEFAULT_DIAL_TIMEOUT,
+            host_gone_after: DEFAULT_HOST_GONE_AFTER,
         }
     }
 }
