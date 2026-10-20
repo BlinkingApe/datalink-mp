@@ -28,6 +28,7 @@ The DLL's game fixes, starting with classic faction colors, work in the game peo
 
 <!-- one line per closed ticket -->
 - 02: The crate detects `terran.exe` vs `terranx.exe` from the image PE header and applies patches via a per-binary table; ticket 03 adds `AlienCrossfire` entries. [Answer](issues/02-patches-picked-by-game-binary.md#answer)
+- 01: `terranx.exe` fills its color tables per slot from each faction's art file (`load_faction_art`) and already restamps flags after seating; the SMAC patch doesn't port, so ticket 03 should probe, then call the game's own loaders from a hook at `0x482cd8`, with no border detour. Research: `docs/contributors/terranx-faction-colors.md`.
 
 ## Not yet specified
 
