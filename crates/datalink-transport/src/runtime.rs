@@ -281,19 +281,18 @@ impl Transport {
 
                     // Add existing players and establish mesh connections
                     // Also queue DPSYS_CREATEPLAYERORGROUP for each so the game knows about them
-                    for player in players {
+                    for player in &players {
                         // Try to connect directly to each existing player
-                        if let Err(e) = self.connection_manager.establish_mesh_connection(&player).await {
+                        if let Err(e) = self.connection_manager.establish_mesh_connection(player).await {
                             warn!("Failed to establish mesh to {}: {}", player.player_id, e);
                         }
                         self.session_manager.add_remote_player(player.clone());
-
-                        // Queue system message so game discovers this existing player
-                        let current_players = self.session_manager.get_players().len() as u32;
-                        self.inbox.add_system(SystemEvent::PlayerJoined { info: player, current_players });
                     }
 
-                    // Queue CREATEPLAYERORGROUP for ourselves too. In real
+                    // Announce every player to the game in ascending DPID (join
+                    // order), ourselves in our place, so every game's roster has
+                    // the same order (JACKAL picks its new host from the front).
+                    // We also announce ourselves: in real
                     // DirectPlay the joiner receives SUPERENUMPLAYERSREPLY, which
                     // includes their own player, and DirectPlay then generates
                     // CREATEPLAYERORGROUP for ALL players including self; the game
@@ -310,8 +309,16 @@ impl Transport {
                     // Note: joiner is already in session_manager (added by join_session_with_host)
                     // so get_players().len() already includes us - don't add +1
                     let current_players = self.session_manager.get_players().len() as u32;
-                    if self.inbox.add_system(SystemEvent::PlayerJoined { info: my_info, current_players }) {
-                        info!("Queued CREATEPLAYERORGROUP for self (player_id={})", id);
+                    let mut announce = players;
+                    announce.push(my_info);
+                    announce.sort_by_key(|p| p.player_id);
+                    for info in announce {
+                        let player_id = info.player_id;
+                        if self.inbox.add_system(SystemEvent::PlayerJoined { info, current_players })
+                            && player_id == id
+                        {
+                            info!("Queued CREATEPLAYERORGROUP for self (player_id={})", id);
+                        }
                     }
 
                     Ok(id)

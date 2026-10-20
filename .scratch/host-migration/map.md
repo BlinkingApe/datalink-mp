@@ -40,3 +40,4 @@ When the host's game leaves a game in progress, whether it quits normally, is ki
 ## Decisions so far
 
 <!-- one line per closed ticket -->
+- Ticket 01: every Joiner's game is announced its players in ascending DPID, itself included, so rosters agree ([ticket](issues/01-announce-players-in-join-order.md)).
