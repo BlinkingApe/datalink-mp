@@ -4,6 +4,8 @@
 //! to Iroh P2P connections.
 
 pub mod capture;
+#[cfg(feature = "dev-faults")]
+pub mod faults;
 pub mod frame_sink;
 pub mod friend_pipeline;
 pub mod friend_registry;

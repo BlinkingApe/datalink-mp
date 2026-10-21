@@ -220,16 +220,20 @@ impl ConnectionManager {
             })
             .with_early_acks(self.options.early_acks),
         );
-        tokio::spawn(crate::frame_sink::run_ordered_writer(
-            crate::frame_sink::IrohFrameSink::new(connection.clone(), self.options.peer_protocol_version),
-            outbox_rx,
-            *endpoint_id.as_bytes(),
-            endpoint_short(endpoint_id.as_bytes()),
-            {
-                let pipeline = pipeline.clone();
-                move || pipeline.in_flight_frames()
-            },
-        ));
+        let sink = crate::frame_sink::IrohFrameSink::new(connection.clone(), self.options.peer_protocol_version);
+        let peer = *endpoint_id.as_bytes();
+        let peer_label = endpoint_short(endpoint_id.as_bytes());
+        let in_flight = {
+            let pipeline = pipeline.clone();
+            move || pipeline.in_flight_frames()
+        };
+        #[cfg(feature = "dev-faults")]
+        if let Some(n) = crate::faults::Faults::from_env().reset_after {
+            let sink = crate::faults::ResetFrameSink::new(sink, n);
+            tokio::spawn(crate::frame_sink::run_ordered_writer(sink, outbox_rx, peer, peer_label, in_flight));
+            return Link::new(outbox, pipeline, connection.clone());
+        }
+        tokio::spawn(crate::frame_sink::run_ordered_writer(sink, outbox_rx, peer, peer_label, in_flight));
         Link::new(outbox, pipeline, connection.clone())
     }
 

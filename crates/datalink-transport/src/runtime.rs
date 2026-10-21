@@ -177,6 +177,8 @@ impl Transport {
 
         let inbox = GameInbox::new();
         let friends = Arc::new(FriendRegistry::new(inbox.clone()));
+        #[cfg(feature = "dev-faults")]
+        friends.set_drop_after(crate::faults::Faults::from_env().drop_after);
         let (endpoint, connection_manager, session_manager, our_ticket) =
             runtime.block_on(async { Self::init_async(options, inbox.clone(), friends.clone()).await })?;
 
@@ -704,6 +706,10 @@ impl Transport {
             two_players: self.session_manager.get_players().len() == 2,
         };
         let result = self.friends.send_game(from, to, guaranteed, data, &facts);
+        #[cfg(feature = "dev-faults")]
+        for connection in self.friends.take_fault_handles() {
+            connection.close(0u32.into(), b"dev-faults drop");
+        }
         if result.is_ok() {
             debug!("send completed successfully");
         }

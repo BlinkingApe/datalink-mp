@@ -208,6 +208,12 @@ impl<H> State<H> {
 pub struct FriendRegistry<H> {
     state: Mutex<State<H>>,
     inbox: GameInbox,
+    /// `drop:N` fault: counts Early acks made.
+    #[cfg(feature = "dev-faults")]
+    fault_drop: Mutex<Option<crate::faults::DropCounter>>,
+    /// Links the `drop:N` fault wants closed, for the caller to take.
+    #[cfg(feature = "dev-faults")]
+    fault_close: Mutex<Vec<H>>,
 }
 
 impl<H: Clone> FriendRegistry<H> {
@@ -219,7 +225,25 @@ impl<H: Clone> FriendRegistry<H> {
                 next_link: 0,
             }),
             inbox,
+            #[cfg(feature = "dev-faults")]
+            fault_drop: Mutex::new(None),
+            #[cfg(feature = "dev-faults")]
+            fault_close: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Dev fault `drop:N`: after the Nth Early ack is made, the friend's link
+    /// handles are held for [`take_fault_handles`](Self::take_fault_handles).
+    #[cfg(feature = "dev-faults")]
+    pub fn set_drop_after(&self, after: Option<u32>) {
+        *self.fault_drop.lock() = after.map(crate::faults::DropCounter::new);
+    }
+
+    /// The link handles the `drop:N` fault wants closed, if it has fired. The
+    /// caller closes them; the loss is handled by `link_ended` as any other.
+    #[cfg(feature = "dev-faults")]
+    pub fn take_fault_handles(&self) -> Vec<H> {
+        std::mem::take(&mut *self.fault_close.lock())
     }
 
     /// A link to `friend` opened. `ticket` is the one we dialled with, or
@@ -620,6 +644,14 @@ impl<H: Clone> FriendRegistry<H> {
             .map_err(|_| TransportError::NotConnected)?;
         if let (Some(ack), Some(player)) = (early_ack, self.friend_player(&friend)) {
             self.add_early_acks(player, vec![ack]);
+            #[cfg(feature = "dev-faults")]
+            {
+                let fire = self.fault_drop.lock().as_mut().is_some_and(|c| c.early_ack_made());
+                if fire {
+                    let handles = self.disconnect(friend);
+                    self.fault_close.lock().extend(handles);
+                }
+            }
         }
         Ok(())
     }
@@ -1390,5 +1422,19 @@ mod tests {
         reg.link_opened(BOB, None, link, &us());
         reg.player_joined(BOB_PLAYER, BOB);
         assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 1), 1);
+    }
+
+    #[cfg(feature = "dev-faults")]
+    #[test]
+    fn dev_fault_drop_hands_back_the_friends_links_after_the_nth_early_ack() {
+        let (reg, inbox, _link) = bob_early();
+        reg.set_drop_after(Some(2));
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 1), 1);
+        assert!(reg.take_fault_handles().is_empty());
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 2), 1);
+        assert_eq!(reg.take_fault_handles().len(), 1);
+        // fires once only
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 3), 1);
+        assert!(reg.take_fault_handles().is_empty());
     }
 }

@@ -5,6 +5,11 @@ edition.workspace = true
 license.workspace = true
 description = "Iroh-based transport layer for DirectPlay bridge"
 
+[features]
+# Dev-only fault injection (DATALINK_FAULT=drop:N / reset:N) for the
+# fault-injection validation. Never enabled by a release build.
+dev-faults = []
+
 [dependencies]
 dp-types = { workspace = true }
 iroh = { workspace = true }

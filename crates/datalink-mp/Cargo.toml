@@ -8,6 +8,11 @@ license.workspace = true
 name = "datalink-mp"
 path = "src/main.rs"
 
+[features]
+# Dev-only fault injection (DATALINK_FAULT=drop:N / reset:N). Off by default
+# and never passed by the release workflow.
+dev-faults = ["datalink-transport/dev-faults"]
+
 [dependencies]
 datalink-ipc = { path = "../datalink-ipc" }
 datalink-transport = { path = "../datalink-transport" }
