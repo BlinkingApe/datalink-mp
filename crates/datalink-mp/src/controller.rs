@@ -210,6 +210,43 @@ const RESTART_REFUSED_SHOWN_FOR: Duration = Duration::from_secs(60);
 /// version tell themselves apart by it.
 pub const BUILD_ID: &str = env!("DATALINK_BUILD_ID");
 
+/// What the page shows of one friend's Turn sync. Raw facts only; the page
+/// has the words, and decides when the tab title changes.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SyncActivity {
+    /// `syncing` while it runs, `synced` for a few seconds after
+    pub phase: &'static str,
+    /// `turn` or `game_start`
+    pub kind: &'static str,
+    pub turn: Option<u32>,
+    pub elapsed_secs: u64,
+    /// Both ways; only for the game start and a resync
+    pub bytes: Option<u64>,
+    /// Whose game is working: `you` or `friend`
+    pub working: Option<datalink_transport::turn_sync::Working>,
+}
+
+impl SyncActivity {
+    fn from_view(view: datalink_transport::friend_pipeline::SyncView) -> Self {
+        use datalink_transport::friend_pipeline::SyncView;
+        use datalink_transport::turn_sync::SyncKind;
+        let kind = |k| if k == SyncKind::GameStart { "game_start" } else { "turn" };
+        match view {
+            SyncView::Syncing(a) => SyncActivity {
+                phase: "syncing",
+                kind: kind(a.kind),
+                turn: a.turn,
+                elapsed_secs: a.elapsed.as_secs(),
+                bytes: a.bytes,
+                working: a.working,
+            },
+            SyncView::Synced { kind: k, turn } => {
+                SyncActivity { phase: "synced", kind: kind(k), turn, elapsed_secs: 0, bytes: None, working: None }
+            }
+        }
+    }
+}
+
 /// A snapshot of the Helper's status, as the page shows it.
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
@@ -234,6 +271,9 @@ pub struct Status {
     /// How each peer's connection goes, `direct` or `relayed`, by short ID.
     /// A peer whose path isn't selected yet has no entry.
     pub peer_paths: std::collections::BTreeMap<String, datalink_transport::path::PathKind>,
+    /// What each friend's Turn sync is doing, by short ID. A friend with no
+    /// sync running (or just finished) has no entry.
+    pub sync_activity: std::collections::BTreeMap<String, SyncActivity>,
     /// Codes of the active banners
     pub banners: Vec<Banner>,
     /// Why the `invalid_ticket` banner is up, while it is
@@ -349,6 +389,11 @@ impl SessionController {
             .into_iter()
             .map(|(id, class)| (id.fmt_short().to_string(), class.kind))
             .collect();
+        let sync_activity = transport
+            .sync_views()
+            .into_iter()
+            .map(|(id, v)| (id.fmt_short().to_string(), SyncActivity::from_view(v)))
+            .collect();
         let state = session_state(&mut joins, !peers.is_empty());
         let failure = joins.failure;
         drop(joins);
@@ -389,6 +434,7 @@ impl SessionController {
             game_connected: self.game_connected.load(Ordering::Relaxed),
             peers,
             peer_paths,
+            sync_activity,
             banners,
             invalid_ticket,
         }

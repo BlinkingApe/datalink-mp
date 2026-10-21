@@ -773,6 +773,11 @@ impl Transport {
         self.connection_manager.peer_paths()
     }
 
+    /// What the page shows of each friend's Turn sync. A plain lock read.
+    pub fn sync_views(&self) -> Vec<(EndpointId, crate::friend_pipeline::SyncView)> {
+        self.connection_manager.sync_views()
+    }
+
     /// Upper bound on how long `shutdown` blocks.
     pub const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 
