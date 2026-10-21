@@ -9,3 +9,7 @@
 - [ ] Three tester games reviewed, one with Windows hosting, no faults
 - [ ] Both defaults flipped and `=0` turns each off
 - [ ] Release notes written and the gate passes
+
+## Comments
+
+- 2026-10-21: The third Patch B switch, `DATALINK_CONGESTION` ([20](20-congestion-controller-switch.md)), is not part of this flip. It stays opt-in until [19](19-captured-game-on-a-lossy-long-distance-link.md)'s figures decide it, in a later ticket.
