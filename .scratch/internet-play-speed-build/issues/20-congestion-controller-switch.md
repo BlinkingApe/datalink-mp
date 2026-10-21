@@ -13,10 +13,10 @@ It's independent of Early acks and ships as Patch B's third opt-in switch ([ADR-
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] With the variable unset, the endpoint's transport config is unchanged
-- [ ] `bbr`, `cubic` and `newreno` each select that controller; an unknown value warns and keeps the default (unit test on the parsing, as for `DATALINK_RELAY_ONLY`)
-- [ ] An in-process two-Transport test plays messages over a connection with `bbr` on one side and the default on the other
-- [ ] It logs at start which controller is on, when set
-- [ ] `cargo tree -d` shows one `noq-proto`
+- [x] With the variable unset, the endpoint's transport config is unchanged
+- [x] `bbr`, `cubic` and `newreno` each select that controller; an unknown value warns and keeps the default (unit test on the parsing, as for `DATALINK_RELAY_ONLY`)
+- [x] An in-process two-Transport test plays messages over a connection with `bbr` on one side and the default on the other
+- [x] It logs at start which controller is on, when set
+- [x] `cargo tree -d` shows one `noq-proto`
