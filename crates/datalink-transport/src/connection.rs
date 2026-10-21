@@ -354,7 +354,7 @@ impl ConnectionManager {
                                 let cm = cm.clone();
                                 // Taken here, in accept order, so a reopened
                                 // stream's reader waits for the old one's.
-                                let turn = turns.next();
+                                let turn = turns.take_turn();
 
                                 tokio::spawn(async move {
                                     if let Err(e) = read_ordered_stream(

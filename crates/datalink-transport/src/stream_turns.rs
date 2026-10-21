@@ -42,7 +42,7 @@ impl StreamTurns {
     }
 
     /// The turn of a stream just accepted, after every earlier one.
-    pub fn next(&mut self) -> Turn {
+    pub fn take_turn(&mut self) -> Turn {
         let (done, ended) = oneshot::channel();
         Turn { previous: self.last.replace(ended), done: Some(done) }
     }
@@ -91,8 +91,8 @@ mod tests {
     async fn a_reopened_stream_dispatches_nothing_until_the_old_reader_has_finished() {
         let mut turns = StreamTurns::new();
         let log: Log = Default::default();
-        let old_turn = turns.next();
-        let new = reader(turns.next(), log.clone(), &["replay-a", "replay-b"]);
+        let old_turn = turns.take_turn();
+        let new = reader(turns.take_turn(), log.clone(), &["replay-a", "replay-b"]);
         // The new reader is up, but the old one is still reading.
         let_tasks_run().await;
         assert!(log.lock().is_empty());
@@ -107,9 +107,9 @@ mod tests {
     async fn turns_are_taken_in_order_down_a_chain() {
         let mut turns = StreamTurns::new();
         let log: Log = Default::default();
-        let first = turns.next();
-        let second = turns.next();
-        let third = reader(turns.next(), log.clone(), &["third"]);
+        let first = turns.take_turn();
+        let second = turns.take_turn();
+        let third = reader(turns.take_turn(), log.clone(), &["third"]);
         // The second ends at once; the third must still wait for the first.
         drop(second);
         let_tasks_run().await;
@@ -122,9 +122,9 @@ mod tests {
     #[tokio::test]
     async fn the_first_stream_does_not_wait_and_a_stuck_one_is_given_up_on() {
         let mut turns = StreamTurns::new();
-        let mut first = turns.next();
+        let mut first = turns.take_turn();
         assert!(first.wait_for_previous(LONG).await);
-        let mut second = turns.next();
+        let mut second = turns.take_turn();
         assert!(!second.wait_for_previous(Duration::from_millis(20)).await);
     }
 }
