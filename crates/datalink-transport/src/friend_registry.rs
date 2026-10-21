@@ -19,7 +19,7 @@
 //! pipeline and acts on its outcome.
 
 use crate::friend_pipeline::{
-    FriendPipeline, InboundOutcome, InboundResult, OutboundOutcome, OutboundResult,
+    EarlyAck, FriendPipeline, InboundOutcome, InboundResult, OutboundOutcome, OutboundResult,
 };
 use crate::inbox::{GameInbox, SystemEvent};
 use crate::protocol::{encode_message, Message};
@@ -77,6 +77,9 @@ pub struct SendFacts {
     pub host: Option<FriendId>,
     /// Our own player, once the game created it.
     pub local_player: Option<DPID>,
+    /// Whether the Game session holds our player and exactly one remote
+    /// player: the only case Early acks are made in.
+    pub two_players: bool,
 }
 
 /// Who this Helper is, for the Hello a re-attached link carries first.
@@ -483,8 +486,8 @@ impl<H: Clone> FriendRegistry<H> {
                 flags,
                 data: data.clone(),
             })?;
-            queue_on_each(targets, |_, link| {
-                queue_game(link, from, to, guaranteed, &data, encoded.clone())
+            queue_on_each(targets, |friend, link| {
+                self.queue_game(friend, link, (from, to), guaranteed, &data, encoded.clone(), facts)
             })
         });
         if let Err(e) = &result {
@@ -544,7 +547,55 @@ impl<H: Clone> FriendRegistry<H> {
             InboundOutcome::Deliver => self
                 .inbox
                 .add_game_message(from, to, data, guaranteed, capture_id),
+            InboundOutcome::Swallow { released } => self.add_early_acks(from, released),
         }
+    }
+
+    /// Add Early acks to the game inbox, from the friend's player `from`.
+    fn add_early_acks(&self, from: DPID, acks: Vec<EarlyAck>) {
+        for ack in acks {
+            self.inbox
+                .add_game_message(from, ack.to, ack.data.to_vec(), true, None);
+        }
+    }
+
+    /// The friend's player an Early ack comes from.
+    fn friend_player(&self, friend: &FriendId) -> Option<DPID> {
+        self.state.lock().friends.get(friend)?.players.first().copied()
+    }
+
+    /// Call the link's pipeline for an outbound game message and carry out
+    /// its outcome.
+    #[allow(clippy::too_many_arguments)]
+    fn queue_game(
+        &self,
+        friend: FriendId,
+        link: &Link<H>,
+        (from, to): (DPID, DPID),
+        guaranteed: bool,
+        data: &[u8],
+        encoded: Vec<u8>,
+        facts: &SendFacts,
+    ) -> TransportResult<()> {
+        let OutboundResult {
+            outcome,
+            capture_id,
+            sync_event: _,
+        } = link
+            .pipeline
+            .outbound(from, to, guaranteed, data, facts.two_players);
+        let early_ack = match outcome {
+            OutboundOutcome::DropResend => return Ok(()),
+            OutboundOutcome::Send => None,
+            OutboundOutcome::SendWithEarlyAck(ack) => Some(ack),
+        };
+        link.outbox
+            .send((encoded, capture_id))
+            .map_err(|_| TransportError::NotConnected)?;
+        if let (Some(ack), Some(player)) = (early_ack, self.friend_player(&friend)) {
+            self.add_early_acks(player, vec![ack]);
+        }
+        Ok(())
     }
 
     /// Send a control message (any Peer protocol message but a game message)
@@ -605,29 +656,6 @@ fn queue_on_each<H>(
         }
     }
     last_error.map_or(Ok(()), Err)
-}
-
-/// Call the link's pipeline for an outbound game message and carry out its
-/// outcome.
-fn queue_game<H>(
-    link: &Link<H>,
-    from: DPID,
-    to: DPID,
-    guaranteed: bool,
-    data: &[u8],
-    encoded: Vec<u8>,
-) -> TransportResult<()> {
-    let OutboundResult {
-        outcome,
-        capture_id,
-        sync_event: _,
-    } = link.pipeline.outbound(from, to, guaranteed, data);
-    match outcome {
-        OutboundOutcome::Send => link
-            .outbox
-            .send((encoded, capture_id))
-            .map_err(|_| TransportError::NotConnected),
-    }
 }
 
 /// Queue an encoded control message on a link, with its capture line first.
@@ -706,6 +734,7 @@ mod tests {
             is_host: false,
             host: Some(ALICE),
             local_player: Some(LOCAL),
+            two_players: false,
         }
     }
 
@@ -750,6 +779,7 @@ mod tests {
             is_host: true,
             host: None,
             local_player: Some(LOCAL),
+            two_players: false,
         };
         reg.send_game(LOCAL, dpid::DPID_SERVERPLAYER, false, vec![3, 4], &host)
             .unwrap();

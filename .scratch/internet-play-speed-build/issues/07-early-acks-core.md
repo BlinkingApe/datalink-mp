@@ -6,13 +6,13 @@ In short: it acts only on kind `0x0004` messages to the one friend, made when `F
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] With the switch off, behaviour is identical to today
-- [ ] In-process two-Transport tests (as in `tests/mesh_networking.rs`): an early ack appears before the friend has the message, the real ack is swallowed, a resend is dropped, the 17th early ack is withheld, no early acks with three players
-- [ ] In-process pipeline tests (no network, injected clock and RTT) cover the same rules through `outbound`/`inbound` results
-- [ ] Setup kinds `0x12`/`0x14` are left alone
-- [ ] The game receives exactly the bytes sent, in order
+- [x] With the switch off, behaviour is identical to today
+- [x] In-process two-Transport tests (as in `tests/mesh_networking.rs`): an early ack appears before the friend has the message, the real ack is swallowed, a resend is dropped, the 17th early ack is withheld, no early acks with three players
+- [x] In-process pipeline tests (no network, injected clock and RTT) cover the same rules through `outbound`/`inbound` results
+- [x] Setup kinds `0x12`/`0x14` are left alone
+- [x] The game receives exactly the bytes sent, in order
 
 ## Comments
 
