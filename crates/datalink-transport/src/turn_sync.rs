@@ -104,6 +104,48 @@ pub struct EarlyAckCounts {
     pub swallowed: u64,
 }
 
+/// One reading of the friend's connection's selected path.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LinkStats {
+    /// UDP datagrams sent on the path so far.
+    pub datagrams_sent: u64,
+    /// Packets the path has lost so far.
+    pub lost_packets: u64,
+    /// Congestion events on the path so far.
+    pub congestion_events: u64,
+    /// The congestion window now, in bytes.
+    pub cwnd: u64,
+}
+
+/// What the link did over one sync: the counters' growth and the median
+/// congestion window of the readings taken during it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LinkFigures {
+    pub datagrams_sent: u64,
+    pub lost_packets: u64,
+    pub congestion_events: u64,
+    pub cwnd_median: u64,
+}
+
+impl LinkFigures {
+    /// The figures between the `start` and `end` readings. `cwnds` holds the
+    /// congestion windows read during the sync (the end's included).
+    pub fn between(start: LinkStats, end: LinkStats, cwnds: &mut [u64]) -> Self {
+        cwnds.sort_unstable();
+        let cwnd_median = match cwnds.len() {
+            0 => end.cwnd,
+            n if n % 2 == 1 => cwnds[n / 2],
+            n => (cwnds[n / 2 - 1] + cwnds[n / 2]) / 2,
+        };
+        LinkFigures {
+            datagrams_sent: end.datagrams_sent.saturating_sub(start.datagrams_sent),
+            lost_packets: end.lost_packets.saturating_sub(start.lost_packets),
+            congestion_events: end.congestion_events.saturating_sub(start.congestion_events),
+            cwnd_median,
+        }
+    }
+}
+
 impl EarlyAckCounts {
     /// The counts since `earlier`.
     pub fn since(self, earlier: EarlyAckCounts) -> EarlyAckCounts {
@@ -345,7 +387,7 @@ fn ms(d: Duration) -> u64 {
     d.as_millis() as u64
 }
 
-pub(crate) fn log_report(peer: &[u8; 32], r: &Report, early: EarlyAckCounts) {
+pub(crate) fn log_report(peer: &[u8; 32], r: &Report, early: EarlyAckCounts, link: Option<LinkFigures>) {
     let what = match r.kind {
         SyncKind::GameStart => "game start",
         SyncKind::Turn => "turn sync",
@@ -353,12 +395,22 @@ pub(crate) fn log_report(peer: &[u8; 32], r: &Report, early: EarlyAckCounts) {
     let peer = format!("{:08x}", u32::from_be_bytes([peer[0], peer[1], peer[2], peer[3]]));
     let turn = r.turn.map(i64::from).unwrap_or(-1);
     let rtt = r.rtt_median.map(ms).map(|v| v as i64).unwrap_or(-1);
+    // -1 when the connection's stats couldn't be read.
+    let fig = |f: fn(&LinkFigures) -> u64| link.as_ref().map(|l| f(l) as i64).unwrap_or(-1);
+    let (datagrams, lost, congestion, cwnd) = (
+        fig(|l| l.datagrams_sent),
+        fig(|l| l.lost_packets),
+        fig(|l| l.congestion_events),
+        fig(|l| l.cwnd_median),
+    );
     match capture::path() {
         Some(file) => info!(
             peer = %peer, turn, duration_ms = ms(r.duration),
             out_msgs = r.out_msgs, out_bytes = r.out_bytes, in_msgs = r.in_msgs, in_bytes = r.in_bytes,
             idle_ms = ms(r.idle), rtt_median_ms = rtt, hops = r.hops, hop_ms = ms(r.hop_total),
-            early_acks_made = early.made, early_acks_withheld = early.withheld, early_acks_swallowed = early.swallowed, capture = %file.display(),
+            early_acks_made = early.made, early_acks_withheld = early.withheld, early_acks_swallowed = early.swallowed,
+            datagrams_sent = datagrams, packets_lost = lost, congestion_events = congestion, cwnd_median = cwnd,
+            capture = %file.display(),
             "{what} finished"
         ),
         None => info!(
@@ -366,6 +418,7 @@ pub(crate) fn log_report(peer: &[u8; 32], r: &Report, early: EarlyAckCounts) {
             out_msgs = r.out_msgs, out_bytes = r.out_bytes, in_msgs = r.in_msgs, in_bytes = r.in_bytes,
             idle_ms = ms(r.idle), rtt_median_ms = rtt, hops = r.hops, hop_ms = ms(r.hop_total),
             early_acks_made = early.made, early_acks_withheld = early.withheld, early_acks_swallowed = early.swallowed,
+            datagrams_sent = datagrams, packets_lost = lost, congestion_events = congestion, cwnd_median = cwnd,
             "{what} finished"
         ),
     }

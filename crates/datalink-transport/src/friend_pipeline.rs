@@ -15,7 +15,7 @@
 
 use crate::capture;
 use crate::turn_sync::{self, Direction, Event, TurnSyncDetector};
-pub use crate::turn_sync::EarlyAckCounts;
+pub use crate::turn_sync::{EarlyAckCounts, LinkFigures, LinkStats};
 use dp_types::DPID;
 use parking_lot::Mutex;
 use crate::jackal::Jackal;
@@ -120,7 +120,23 @@ struct State {
     detector: TurnSyncDetector,
     now: Box<dyn Fn() -> Instant + Send>,
     rtt: Box<dyn FnMut() -> Option<Duration> + Send>,
+    /// Reads the link's counters and congestion window, if it can.
+    link: Option<Box<dyn FnMut() -> Option<LinkStats> + Send>>,
+    /// The running sync's link readings: at its start, and the windows seen.
+    sync_link: Option<(LinkStats, Vec<u64>, Instant)>,
+    /// What the last finished sync logged.
+    last_sync: Option<SyncFigures>,
 }
+
+/// The figures the pipeline adds to a finished sync's log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncFigures {
+    pub early: EarlyAckCounts,
+    pub link: Option<LinkFigures>,
+}
+
+/// Least time between two congestion window readings during a sync.
+const LINK_SAMPLE_EVERY: Duration = Duration::from_millis(250);
 
 /// One friend's pipeline. See the module docs.
 pub struct FriendPipeline {
@@ -153,8 +169,24 @@ impl FriendPipeline {
                 detector: TurnSyncDetector::new(),
                 now: Box::new(now),
                 rtt: Box::new(rtt),
+                link: None,
+                sync_link: None,
+                last_sync: None,
             }),
         }
+    }
+
+    /// Give the pipeline a way to read the friend's connection (datagrams
+    /// sent, packets lost, congestion events, congestion window), for the
+    /// figures on each sync's log line.
+    pub fn with_link_stats(self, link: impl FnMut() -> Option<LinkStats> + Send + 'static) -> Self {
+        self.state.lock().link = Some(Box::new(link));
+        self
+    }
+
+    /// What the last finished sync added to its log line.
+    pub fn last_sync_figures(&self) -> Option<SyncFigures> {
+        self.state.lock().last_sync
     }
 
     /// Turn Early acks on or off for this pipeline (off unless asked).
@@ -305,18 +337,52 @@ impl FriendPipeline {
     }
 
     fn observe(&self, dir: Direction, data: &[u8]) -> Option<Event> {
-        let (event, early) = {
+        let (event, figures) = {
             let mut s = self.state.lock();
             let s = &mut *s;
             let now = (s.now)();
             let event = s.detector.observe(now, dir, data, &mut s.rtt);
-            if matches!(event, Some(Event::Started(_))) {
-                s.sync_base = s.counts;
+            let reading = if event.is_some() || s.sync_link.is_some() {
+                s.link.as_mut().and_then(|read| read())
+            } else {
+                None
+            };
+            match (&event, reading) {
+                (Some(Event::Started(_)), reading) => {
+                    s.sync_base = s.counts;
+                    s.sync_link = reading.map(|r| (r, vec![r.cwnd], now));
+                }
+                (Some(Event::Finished(_)), Some(end)) => {
+                    if let Some((_, cwnds, _)) = s.sync_link.as_mut() {
+                        cwnds.push(end.cwnd);
+                    }
+                }
+                (None, Some(r)) => {
+                    if let Some((_, cwnds, last)) = s.sync_link.as_mut() {
+                        if now.saturating_duration_since(*last) >= LINK_SAMPLE_EVERY {
+                            *last = now;
+                            cwnds.push(r.cwnd);
+                        }
+                    }
+                }
+                _ => {}
             }
-            (event, s.counts.since(s.sync_base))
+            let figures = match (&event, reading) {
+                (Some(Event::Finished(_)), end) => {
+                    let link = match (s.sync_link.take(), end) {
+                        (Some((start, mut cwnds, _)), Some(end)) => Some(LinkFigures::between(start, end, &mut cwnds)),
+                        _ => None,
+                    };
+                    let f = SyncFigures { early: s.counts.since(s.sync_base), link };
+                    s.last_sync = Some(f);
+                    Some(f)
+                }
+                _ => None,
+            };
+            (event, figures)
         };
-        if let Some(Event::Finished(report)) = &event {
-            turn_sync::log_report(&self.peer, report, early);
+        if let (Some(Event::Finished(report)), Some(f)) = (&event, figures) {
+            turn_sync::log_report(&self.peer, report, f.early, f.link);
         }
         event
     }
@@ -376,6 +442,63 @@ mod tests {
             events.extend(e);
         }
         events
+    }
+
+    #[test]
+    fn a_sync_carries_the_links_growth_and_median_window() {
+        let base = Instant::now();
+        let clock = Arc::new(Mutex::new(base));
+        let stats = Arc::new(Mutex::new(LinkStats::default()));
+        let (c, st) = (clock.clone(), stats.clone());
+        let pipe = FriendPipeline::new([1; 32], move || *c.lock(), || None).with_link_stats(move || Some(*st.lock()));
+        let step = |ms: u64, s: LinkStats| {
+            *clock.lock() = base + Duration::from_millis(ms);
+            *stats.lock() = s;
+        };
+        let mut start = vec![4, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x83, 0, 0, 0, 0, 0, 0];
+        start.resize(32, 0);
+        let mut end = vec![4, 0, 0, 0, 2, 0, 0, 0, 0x09, 0x43, 0, 0, 0, 0, 0, 0];
+        end.resize(32, 0);
+        let mut mid = vec![4, 0, 0, 0, 3, 0, 0, 0, 0x05, 0x23, 0, 0, 0, 0, 0, 0];
+        mid.resize(32, 0);
+        // Counters before the sync don't count; cwnd readings: 30, 10, 20, 50.
+        step(0, LinkStats { datagrams_sent: 100, lost_packets: 4, congestion_events: 1, cwnd: 99 });
+        pipe.inbound(2, 1, true, &mid);
+        assert_eq!(pipe.last_sync_figures(), None);
+        step(1000, LinkStats { datagrams_sent: 120, lost_packets: 5, congestion_events: 1, cwnd: 30 });
+        pipe.outbound(1, 2, true, &start, false);
+        step(1100, LinkStats { datagrams_sent: 130, lost_packets: 5, congestion_events: 1, cwnd: 777 });
+        pipe.inbound(2, 1, true, &mid); // under 250 ms after the last reading: not read
+        step(1300, LinkStats { datagrams_sent: 150, lost_packets: 6, congestion_events: 2, cwnd: 10 });
+        pipe.inbound(2, 1, true, &ack_for(4));
+        step(1600, LinkStats { datagrams_sent: 170, lost_packets: 8, congestion_events: 3, cwnd: 20 });
+        pipe.inbound(2, 1, true, &ack_for(5));
+        step(1900, LinkStats { datagrams_sent: 220, lost_packets: 9, congestion_events: 4, cwnd: 50 });
+        pipe.inbound(2, 1, true, &end);
+        let f = pipe.last_sync_figures().expect("the sync finished");
+        assert_eq!(
+            f.link,
+            Some(LinkFigures { datagrams_sent: 100, lost_packets: 4, congestion_events: 3, cwnd_median: 25 })
+        );
+    }
+
+    fn ack_for(seq: u32) -> Vec<u8> {
+        let mut v = vec![0u8; 12];
+        v[0] = 2;
+        v[4..8].copy_from_slice(&seq.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn without_link_stats_a_sync_has_no_link_figures() {
+        let pipe = FriendPipeline::new([1; 32], Instant::now, || None);
+        let mut start = vec![4, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x83, 0, 0, 0, 0, 0, 0];
+        start.resize(32, 0);
+        let mut end = vec![4, 0, 0, 0, 2, 0, 0, 0, 0x09, 0x43, 0, 0, 0, 0, 0, 0];
+        end.resize(32, 0);
+        pipe.outbound(1, 2, true, &start, false);
+        pipe.inbound(2, 1, true, &end);
+        assert_eq!(pipe.last_sync_figures().map(|f| f.link), Some(None));
     }
 
     #[test]

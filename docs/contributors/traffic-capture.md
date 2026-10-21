@@ -191,7 +191,7 @@ Written by the friend pipeline when Early acks (`DATALINK_EARLY_ACKS=1`) act. Al
 
 ## The Helper's log
 
-Independent of the capture, the Helper logs at info a `turn sync finished` or `game start finished` line per friend, with raw figures (`.scratch/internet-play-speed-build` 05). Each line also has `hops` and `hop_ms` (changes of direction from our message to the friend's, and their total time, measured from when the Helper queued our last message, so a little shorter than the capture analysis's written-based figure) and `early_acks_made`, `early_acks_withheld` and `early_acks_swallowed` (counted over that sync; zero with the switch off). With a capture on, the line names the capture file.
+Independent of the capture, the Helper logs at info a `turn sync finished` or `game start finished` line per friend, with raw figures (`.scratch/internet-play-speed-build` 05). Each line also has `hops` and `hop_ms` (changes of direction from our message to the friend's, and their total time, measured from when the Helper queued our last message, so a little shorter than the capture analysis's written-based figure) and `early_acks_made`, `early_acks_withheld` and `early_acks_swallowed` (counted over that sync; zero with the switch off). The link's growth over the sync is there too: `datagrams_sent`, `packets_lost`, `congestion_events` and `cwnd_median` (the median congestion window in bytes of the readings taken at the sync's start, end and at most every 250 ms between). All four are -1 when the connection's stats couldn't be read. With a capture on, the line names the capture file.
 
 ## Where it lives
 
