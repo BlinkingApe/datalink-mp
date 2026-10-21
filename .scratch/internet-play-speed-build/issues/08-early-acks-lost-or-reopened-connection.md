@@ -4,12 +4,12 @@
 
 **Blocked by:** 07 (not 10)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] Tests: no early acks after a loss, for the rest of the Game session
-- [ ] Test: a reset stream replays in order and delivers each message once, using `MemoryFrameSink` (it fails chosen opens or writes by index), so no fault injection from ticket 10 is needed
-- [ ] The receiving side dispatches nothing from a reopened stream until the old stream's reader has finished, with a test at whatever seam this ticket settles on
-- [ ] Existing lost-connection behaviour is unchanged
+- [x] Tests: no early acks after a loss, for the rest of the Game session
+- [x] Test: a reset stream replays in order and delivers each message once, using `MemoryFrameSink` (it fails chosen opens or writes by index), so no fault injection from ticket 10 is needed
+- [x] The receiving side dispatches nothing from a reopened stream until the old stream's reader has finished, with a test at whatever seam this ticket settles on
+- [x] Existing lost-connection behaviour is unchanged
 
 ## Comments
 
@@ -19,3 +19,5 @@
   - **Pipelines are per link** (`Link::pipeline`), and each hears "connection lost" once, when its link stops being current. That happens in `link_ended`, either on a hand-over to a spare (`record.link.replace`) or on a loss (`record.link.take`). A spare that ends, and links drained by `disconnect_all`, never hear it. Decide whether a hand-over to a spare counts as "lost a link this Game session". It isn't a lost friend: there is no `lost` line and no re-dial.
   - **A promoted spare missed "Game session began".** `game_session_began` reaches only the current link's pipeline (`r.link`), not `r.spares`. A spare promoted mid-session therefore has a pipeline that never heard that the session began. Decide whether a promoted spare's pipeline needs it, for example by notifying spares too, or by having `link_ended` tell the promoted pipeline when it hands over.
   - **New criterion, from the spec's candidate 5:** the receiving side dispatches nothing from a reopened stream until the old stream's reader has finished. Today `spawn_connection_handler` in `connection.rs` spawns a `read_ordered_stream` task for each accepted stream, and nothing orders a new one after the old one. Once replay exists, the old stream's tail and the replay can interleave. Test it at whatever seam this ticket settles on. Added to the checklist above.
+
+- 2026-10-21: Resolved. Decisions: a hand-over to a spare counts as "lost a link this Game session" (what the old link carried may be lost with it, and the spare's pipeline knows nothing of it), and the promoted spare's pipeline is told "connection lost". `GameSessionFacts::lost_a_link` is set on any loss or hand-over, cleared by `game_session_began`, and `link_opened` tells a new link's pipeline when it is set. `game_session_began` now also reaches spares' pipelines. The pipeline keeps the encoded frame of every reliable message sent and not really acked (`in_flight_frames`); `run_ordered_writer` takes a closure for it and, after a reopen, replays those it has already written (it remembers hashes of its last 1024 frames), in order, before the retried frame. The receiving side's seam is `stream_turns.rs`: each accepted stream takes a `Turn` and its reader waits for the previous reader to finish (30 s cap, logged) before dispatching.

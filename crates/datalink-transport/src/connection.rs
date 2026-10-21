@@ -86,6 +86,10 @@ pub const DEFAULT_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 pub const DEFAULT_HOST_GONE_AFTER: Duration = Duration::from_secs(10);
 
 /// Magic prefix opening every ordered message stream: b"SMAC" + version (u16 LE).
+/// How long a reopened stream's reader waits for the old stream's reader to
+/// finish before dispatching anyway.
+const OLD_STREAM_WAIT: Duration = Duration::from_secs(30);
+
 pub(crate) const STREAM_MAGIC: &[u8; 4] = b"SMAC";
 
 /// Upper bound on a single framed message (defensive against corrupt frames).
@@ -196,29 +200,37 @@ impl ConnectionManager {
         // depends on this single-queue/single-stream design: separate streams
         // or tasks per message would leave ordering to the scheduler.
         let (outbox, outbox_rx) = mpsc::unbounded_channel();
+        let pipeline = Arc::new(
+            FriendPipeline::new(*endpoint_id.as_bytes(), std::time::Instant::now, {
+                let connection = connection.clone();
+                move || connection.paths().iter().find(|p| p.is_selected()).map(|p| p.stats().rtt)
+            })
+            .with_link_stats({
+                let connection = connection.clone();
+                move || {
+                    let paths = connection.paths();
+                    let s = paths.iter().find(|p| p.is_selected())?.stats();
+                    Some(crate::friend_pipeline::LinkStats {
+                        datagrams_sent: s.udp_tx.datagrams,
+                        lost_packets: s.lost_packets,
+                        congestion_events: s.congestion_events,
+                        cwnd: s.cwnd,
+                    })
+                }
+            })
+            .with_early_acks(self.options.early_acks),
+        );
         tokio::spawn(crate::frame_sink::run_ordered_writer(
             crate::frame_sink::IrohFrameSink::new(connection.clone(), self.options.peer_protocol_version),
             outbox_rx,
+            *endpoint_id.as_bytes(),
             endpoint_short(endpoint_id.as_bytes()),
+            {
+                let pipeline = pipeline.clone();
+                move || pipeline.in_flight_frames()
+            },
         ));
-        let pipeline = FriendPipeline::new(*endpoint_id.as_bytes(), std::time::Instant::now, {
-            let connection = connection.clone();
-            move || connection.paths().iter().find(|p| p.is_selected()).map(|p| p.stats().rtt)
-        });
-        let pipeline = pipeline.with_link_stats({
-            let connection = connection.clone();
-            move || {
-                let paths = connection.paths();
-                let s = paths.iter().find(|p| p.is_selected())?.stats();
-                Some(crate::friend_pipeline::LinkStats {
-                    datagrams_sent: s.udp_tx.datagrams,
-                    lost_packets: s.lost_packets,
-                    congestion_events: s.congestion_events,
-                    cwnd: s.cwnd,
-                })
-            }
-        });
-        Link::new(outbox, pipeline.with_early_acks(self.options.early_acks), connection.clone())
+        Link::new(outbox, pipeline, connection.clone())
     }
 
     /// Connect to a peer by ticket, unless it is already connected.
@@ -338,6 +350,7 @@ impl ConnectionManager {
         crate::path::spawn_path_logger(connection.clone(), endpoint_short(endpoint_id.as_bytes()));
 
         tokio::spawn(async move {
+            let mut turns = crate::stream_turns::StreamTurns::new();
             loop {
                 tokio::select! {
                     // Handle unidirectional streams: each is a long-lived ORDERED
@@ -353,10 +366,14 @@ impl ConnectionManager {
                                 let session_manager = session_manager.clone();
                                 let inbox = inbox.clone();
                                 let cm = cm.clone();
+                                // Taken here, in accept order, so a reopened
+                                // stream's reader waits for the old one's.
+                                let turn = turns.take_turn();
 
                                 tokio::spawn(async move {
                                     if let Err(e) = read_ordered_stream(
                                         recv,
+                                        turn,
                                         &session_manager,
                                         &inbox,
                                         endpoint_id_bytes,
@@ -540,6 +557,7 @@ impl ConnectionManager {
 /// stream ends (peer closed it) or on a framing/protocol error.
 async fn read_ordered_stream(
     mut recv: RecvStream,
+    mut turn: crate::stream_turns::Turn,
     session_manager: &SessionManager,
     inbox: &GameInbox,
     sender_endpoint_id: [u8; 32],
@@ -571,6 +589,12 @@ async fn read_ordered_stream(
         error!(peer = %peer_label, their_version, our_version,
                "PEER PROTOCOL VERSION MISMATCH — one machine has a stale build");
         return Err(TransportError::ProtocolMismatch(their_version, our_version));
+    }
+
+    // A stream the peer reopened carries a replay of what the old stream may
+    // have lost: dispatch none of it until the old stream's reader is done.
+    if !turn.wait_for_previous(OLD_STREAM_WAIT).await {
+        warn!(peer = %peer_label, "the old ordered stream's reader is still running; dispatching the new stream anyway");
     }
 
     let mut len_buf = [0u8; 4];
