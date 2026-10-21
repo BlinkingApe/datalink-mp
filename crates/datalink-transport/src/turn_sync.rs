@@ -84,6 +84,35 @@ pub struct Report {
     pub idle: Duration,
     /// The median of the RTT samples taken during the sync.
     pub rtt_median: Option<Duration>,
+    /// How many times the traffic changed from our message to the friend's,
+    /// and the time those changes took in all: from the last message we queued
+    /// to the friend's next one read. The Helper sees "queued", not "written";
+    /// the capture analysis uses the written time for the exact figure.
+    pub hops: u32,
+    pub hop_total: Duration,
+}
+
+/// How many Early acks the pipeline made, withheld and swallowed (the real
+/// acks it kept from the game), over a sync or since the pipeline began.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EarlyAckCounts {
+    /// Early acks given to the game.
+    pub made: u64,
+    /// Early acks held back because 16 were already in flight.
+    pub withheld: u64,
+    /// Real acks (duplicates too) not given to the game.
+    pub swallowed: u64,
+}
+
+impl EarlyAckCounts {
+    /// The counts since `earlier`.
+    pub fn since(self, earlier: EarlyAckCounts) -> EarlyAckCounts {
+        EarlyAckCounts {
+            made: self.made.saturating_sub(earlier.made),
+            withheld: self.withheld.saturating_sub(earlier.withheld),
+            swallowed: self.swallowed.saturating_sub(earlier.swallowed),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -106,6 +135,11 @@ struct Active {
     waiting: HashSet<(Direction, u32)>,
     rtts: Vec<Duration>,
     last_sample: Option<Instant>,
+    /// The direction of the last message, and when we last queued one.
+    last_dir: Option<Direction>,
+    last_out: Option<Instant>,
+    hops: u32,
+    hop_total: Duration,
 }
 
 /// Finds Turn syncs and the game start in one friend's game messages.
@@ -226,6 +260,16 @@ impl TurnSyncDetector {
                 a.idle += now.saturating_duration_since(a.last);
             }
             a.last = now;
+            if dir == Direction::In && a.last_dir == Some(Direction::Out) {
+                if let Some(out) = a.last_out {
+                    a.hops += 1;
+                    a.hop_total += now.saturating_duration_since(out);
+                }
+            }
+            if dir == Direction::Out {
+                a.last_out = Some(now);
+            }
+            a.last_dir = Some(dir);
             match dir {
                 Direction::Out => {
                     a.out_msgs += 1;
@@ -261,6 +305,10 @@ impl TurnSyncDetector {
             waiting: HashSet::new(),
             rtts: Vec::new(),
             last_sample: None,
+            last_dir: None,
+            last_out: None,
+            hops: 0,
+            hop_total: Duration::ZERO,
         });
         Some(Event::Started(kind))
     }
@@ -284,6 +332,8 @@ impl TurnSyncDetector {
             in_bytes: a.in_bytes,
             idle: a.idle,
             rtt_median,
+            hops: a.hops,
+            hop_total: a.hop_total,
         }
     }
 }
@@ -295,7 +345,7 @@ fn ms(d: Duration) -> u64 {
     d.as_millis() as u64
 }
 
-pub(crate) fn log_report(peer: &[u8; 32], r: &Report) {
+pub(crate) fn log_report(peer: &[u8; 32], r: &Report, early: EarlyAckCounts) {
     let what = match r.kind {
         SyncKind::GameStart => "game start",
         SyncKind::Turn => "turn sync",
@@ -307,13 +357,15 @@ pub(crate) fn log_report(peer: &[u8; 32], r: &Report) {
         Some(file) => info!(
             peer = %peer, turn, duration_ms = ms(r.duration),
             out_msgs = r.out_msgs, out_bytes = r.out_bytes, in_msgs = r.in_msgs, in_bytes = r.in_bytes,
-            idle_ms = ms(r.idle), rtt_median_ms = rtt, capture = %file.display(),
+            idle_ms = ms(r.idle), rtt_median_ms = rtt, hops = r.hops, hop_ms = ms(r.hop_total),
+            early_acks_made = early.made, early_acks_withheld = early.withheld, early_acks_swallowed = early.swallowed, capture = %file.display(),
             "{what} finished"
         ),
         None => info!(
             peer = %peer, turn, duration_ms = ms(r.duration),
             out_msgs = r.out_msgs, out_bytes = r.out_bytes, in_msgs = r.in_msgs, in_bytes = r.in_bytes,
-            idle_ms = ms(r.idle), rtt_median_ms = rtt,
+            idle_ms = ms(r.idle), rtt_median_ms = rtt, hops = r.hops, hop_ms = ms(r.hop_total),
+            early_acks_made = early.made, early_acks_withheld = early.withheld, early_acks_swallowed = early.swallowed,
             "{what} finished"
         ),
     }
@@ -434,6 +486,31 @@ mod tests {
 
     fn feed(d: &mut TurnSyncDetector, base: Instant, ms: u64, dir: Direction, data: &[u8]) -> Option<Event> {
         d.observe(base + Duration::from_millis(ms), dir, data, &mut || None)
+    }
+
+    #[test]
+    fn a_hop_runs_from_our_last_message_to_the_friends_next_at_each_change_of_direction() {
+        let mut d = TurnSyncDetector::new();
+        let t = Instant::now();
+        feed(&mut d, t, 0, Direction::Out, &data_msg(1, 0x4301, 44));
+        feed(&mut d, t, 10, Direction::Out, &data_msg(2, 0x4303, 44));
+        // Hop 1: from the last out (10 ms) to the first in (70 ms) = 60 ms.
+        feed(&mut d, t, 70, Direction::In, &ack(1));
+        feed(&mut d, t, 75, Direction::In, &ack(2));
+        // A change from in to out is the friend's turnaround, not a hop.
+        feed(&mut d, t, 100, Direction::Out, &data_msg(3, 0x4305, 44));
+        // Hop 2: 100 -> 150 = 50 ms; it ends on the finishing message.
+        let Some(Event::Finished(r)) = feed(&mut d, t, 150, Direction::In, &data_msg(9, 0x4309, 44)) else {
+            panic!("no report")
+        };
+        assert_eq!((r.hops, r.hop_total), (2, Duration::from_millis(110)));
+    }
+
+    #[test]
+    fn early_ack_counts_since_an_earlier_snapshot() {
+        let a = EarlyAckCounts { made: 5, withheld: 2, swallowed: 4 };
+        let b = EarlyAckCounts { made: 9, withheld: 2, swallowed: 7 };
+        assert_eq!(b.since(a), EarlyAckCounts { made: 4, withheld: 0, swallowed: 3 });
     }
 
     #[test]

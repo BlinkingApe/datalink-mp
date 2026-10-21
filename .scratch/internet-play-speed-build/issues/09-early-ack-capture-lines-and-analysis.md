@@ -6,13 +6,13 @@ The counts and the `out` line's id come from the friend pipeline (`friend_pipeli
 
 **Blocked by:** 02, 05, 07
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] New capture lines appear as described, documented in `docs/contributors/traffic-capture.md`
-- [ ] The analysis reports hop time, network time and delivery-check results on a capture with early acks
-- [ ] The Turn sync log lines carry the new fields
-- [ ] The Turn sync log lines carry datagrams sent, packets lost, congestion events and the median congestion window over the sync
-- [ ] A sample capture exercises the delivery check, including a failing case
+- [x] New capture lines appear as described, documented in `docs/contributors/traffic-capture.md`
+- [x] The analysis reports hop time, network time and delivery-check results on a capture with early acks
+- [x] The Turn sync log lines carry the new fields
+- [x] The Turn sync log lines carry datagrams sent, packets lost, congestion events and the median congestion window over the sync
+- [x] A sample capture exercises the delivery check, including a failing case
 
 ## Comments
 

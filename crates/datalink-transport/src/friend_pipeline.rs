@@ -15,10 +15,11 @@
 
 use crate::capture;
 use crate::turn_sync::{self, Direction, Event, TurnSyncDetector};
+pub use crate::turn_sync::EarlyAckCounts;
 use dp_types::DPID;
 use parking_lot::Mutex;
 use crate::jackal::Jackal;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 /// The most reliable messages in flight per friend that get an Early ack.
@@ -81,16 +82,41 @@ struct EarlyAcks {
     carried: HashSet<u32>,
     /// Seqs Early-acked, whose real acks (duplicates too) are swallowed.
     acked: HashSet<u32>,
-    /// Early-acked seqs still waiting for their real ack (the slots in use).
-    in_flight: HashSet<u32>,
+    /// Early-acked seqs still waiting for their real ack (the slots in use),
+    /// with the time each message was queued.
+    in_flight: HashMap<u32, Instant>,
     /// Sent, but the cap was full: their Early acks wait for a free slot.
-    withheld: VecDeque<(u32, EarlyAck)>,
+    withheld: VecDeque<Withheld>,
     /// The connection was lost: no more Early acks this Game session.
     lost: bool,
+    /// Whether this Game session's `early_acks` capture line is written.
+    state_noted: bool,
+}
+
+/// A message whose Early ack waits for a free slot.
+struct Withheld {
+    seq: u32,
+    ack: EarlyAck,
+    /// When the message was queued.
+    since: Instant,
+    /// The message's `out` line in the capture.
+    capture_id: Option<u64>,
+}
+
+/// What `early_outbound` decided, for the capture lines written once the
+/// message's own `out` line (and its id) exist.
+enum Note {
+    Made(u32),
+    Withheld(u32),
+    Resend(u32),
 }
 
 struct State {
     early: EarlyAcks,
+    /// Early ack counts since the pipeline began, never reset.
+    counts: EarlyAckCounts,
+    /// The counts when the running sync began.
+    sync_base: EarlyAckCounts,
     detector: TurnSyncDetector,
     now: Box<dyn Fn() -> Instant + Send>,
     rtt: Box<dyn FnMut() -> Option<Duration> + Send>,
@@ -122,6 +148,8 @@ impl FriendPipeline {
             early_acks: false,
             state: Mutex::new(State {
                 early: EarlyAcks::default(),
+                counts: EarlyAckCounts::default(),
+                sync_base: EarlyAckCounts::default(),
                 detector: TurnSyncDetector::new(),
                 now: Box::new(now),
                 rtt: Box::new(rtt),
@@ -145,41 +173,85 @@ impl FriendPipeline {
         data: &[u8],
         two_players: bool,
     ) -> OutboundResult {
-        let outcome = if self.early_acks && two_players {
+        self.note_early_acks_state(data, two_players);
+        let (outcome, note) = if self.early_acks && two_players {
             self.early_outbound(from, data)
         } else {
-            OutboundOutcome::Send
+            (OutboundOutcome::Send, None)
         };
-        if outcome == OutboundOutcome::DropResend {
+        if let Some(Note::Resend(seq)) = note {
+            capture::resend_dropped(&self.peer, seq);
             return OutboundResult { outcome, capture_id: None, sync_event: None };
         }
         let capture_id = capture::outbound_game(&self.peer, from, to, guaranteed, data);
+        match note {
+            Some(Note::Made(seq)) => capture::early_ack(&self.peer, seq, capture_id, 0),
+            Some(Note::Withheld(seq)) => {
+                let mut s = self.state.lock();
+                if let Some(w) = s.early.withheld.iter_mut().find(|w| w.seq == seq) {
+                    w.capture_id = capture_id;
+                }
+            }
+            _ => {}
+        }
         let sync_event = self.observe(Direction::Out, data);
         OutboundResult { outcome, capture_id, sync_event }
     }
 
-    fn early_outbound(&self, from: DPID, data: &[u8]) -> OutboundOutcome {
-        let Some(j) = Jackal::decode(data).filter(Jackal::is_exactly_reliable_data) else {
-            return OutboundOutcome::Send;
-        };
-        let Some(head) = data.get(..12) else { return OutboundOutcome::Send };
+    /// The Early ack counts so far, since this pipeline began.
+    pub fn snapshot(&self) -> EarlyAckCounts {
+        self.state.lock().counts
+    }
+
+    /// Write the `early_acks` capture line the first time a reliable message
+    /// goes out in a Game session (and again after a lost connection).
+    fn note_early_acks_state(&self, data: &[u8], two_players: bool) {
+        if !capture::enabled() || Jackal::decode(data).filter(Jackal::is_exactly_reliable_data).is_none() {
+            return;
+        }
         let mut s = self.state.lock();
+        if std::mem::replace(&mut s.early.state_noted, true) {
+            return;
+        }
+        let why = if !self.early_acks {
+            "switch"
+        } else if s.early.lost {
+            "connection_lost"
+        } else if !two_players {
+            "players"
+        } else {
+            "on"
+        };
+        drop(s);
+        capture::early_acks_state(&self.peer, why == "on", why);
+    }
+
+    fn early_outbound(&self, from: DPID, data: &[u8]) -> (OutboundOutcome, Option<Note>) {
+        let Some(j) = Jackal::decode(data).filter(Jackal::is_exactly_reliable_data) else {
+            return (OutboundOutcome::Send, None);
+        };
+        let Some(head) = data.get(..12) else { return (OutboundOutcome::Send, None) };
+        let mut s = self.state.lock();
+        let s = &mut *s;
+        let now = (s.now)();
         let e = &mut s.early;
         if e.lost {
-            return OutboundOutcome::Send;
+            return (OutboundOutcome::Send, None);
         }
         if !e.carried.insert(j.seq) {
-            return OutboundOutcome::DropResend;
+            return (OutboundOutcome::DropResend, Some(Note::Resend(j.seq)));
         }
         let mut ack = EarlyAck { to: from, data: head.try_into().expect("12 bytes") };
         ack.data[0..2].copy_from_slice(&0x0002u16.to_le_bytes());
         if e.in_flight.len() >= EARLY_ACK_CAP {
-            e.withheld.push_back((j.seq, ack));
-            return OutboundOutcome::Send;
+            e.withheld.push_back(Withheld { seq: j.seq, ack, since: now, capture_id: None });
+            s.counts.withheld += 1;
+            return (OutboundOutcome::Send, Some(Note::Withheld(j.seq)));
         }
-        e.in_flight.insert(j.seq);
+        e.in_flight.insert(j.seq, now);
         e.acked.insert(j.seq);
-        OutboundOutcome::SendWithEarlyAck(ack)
+        s.counts.made += 1;
+        (OutboundOutcome::SendWithEarlyAck(ack), Some(Note::Made(j.seq)))
     }
 
     /// A game message was read from the friend.
@@ -195,23 +267,29 @@ impl FriendPipeline {
             return InboundOutcome::Deliver;
         };
         let mut s = self.state.lock();
+        let s = &mut *s;
+        let now = (s.now)();
         let e = &mut s.early;
         if e.acked.contains(&j.seq) {
+            s.counts.swallowed += 1;
             // Free the slot (once, for duplicates) and give withheld acks their turn.
             let mut released = Vec::new();
-            if e.in_flight.remove(&j.seq) {
+            if let Some(queued) = e.in_flight.remove(&j.seq) {
+                capture::real_ack(&self.peer, j.seq, micros(now.saturating_duration_since(queued)));
                 while e.in_flight.len() < EARLY_ACK_CAP {
-                    let Some((seq, ack)) = e.withheld.pop_front() else { break };
-                    e.in_flight.insert(seq);
-                    e.acked.insert(seq);
-                    released.push(ack);
+                    let Some(w) = e.withheld.pop_front() else { break };
+                    e.in_flight.insert(w.seq, w.since);
+                    e.acked.insert(w.seq);
+                    let waited = micros(now.saturating_duration_since(w.since));
+                    capture::early_ack(&self.peer, w.seq, w.capture_id, waited);
+                    released.push(w.ack);
                 }
             }
             return InboundOutcome::Swallow { released };
         }
         // The real ack of a message whose Early ack was withheld is the only
         // ack the game gets for it; the withheld one is no longer wanted.
-        e.withheld.retain(|(seq, _)| *seq != j.seq);
+        e.withheld.retain(|w| w.seq != j.seq);
         InboundOutcome::Deliver
     }
 
@@ -227,17 +305,25 @@ impl FriendPipeline {
     }
 
     fn observe(&self, dir: Direction, data: &[u8]) -> Option<Event> {
-        let event = {
+        let (event, early) = {
             let mut s = self.state.lock();
             let s = &mut *s;
             let now = (s.now)();
-            s.detector.observe(now, dir, data, &mut s.rtt)
+            let event = s.detector.observe(now, dir, data, &mut s.rtt);
+            if matches!(event, Some(Event::Started(_))) {
+                s.sync_base = s.counts;
+            }
+            (event, s.counts.since(s.sync_base))
         };
         if let Some(Event::Finished(report)) = &event {
-            turn_sync::log_report(&self.peer, report);
+            turn_sync::log_report(&self.peer, report, early);
         }
         event
     }
+}
+
+fn micros(d: Duration) -> u64 {
+    d.as_micros() as u64
 }
 
 #[cfg(test)]
@@ -440,6 +526,25 @@ mod early_ack_tests {
         assert_eq!(p.inbound(2, 1, true, &msg(2, 17)).outcome, InboundOutcome::Deliver);
         let r = p.inbound(2, 1, true, &msg(2, 1)).outcome;
         assert_eq!(r, InboundOutcome::Swallow { released: vec![] });
+    }
+
+    #[test]
+    fn the_snapshot_counts_early_acks_made_withheld_and_swallowed() {
+        let p = pipe();
+        assert_eq!(p.snapshot(), EarlyAckCounts::default());
+        for seq in 1..=17 {
+            send(&p, 4, seq);
+        }
+        send(&p, 4, 3); // a dropped resend is none of the three
+        assert_eq!(p.snapshot(), EarlyAckCounts { made: 16, withheld: 1, swallowed: 0 });
+        p.inbound(2, 1, true, &msg(2, 1));
+        p.inbound(2, 1, true, &msg(2, 1)); // duplicates are swallowed too
+        p.inbound(2, 1, true, &msg(2, 99)); // not Early-acked: delivered
+        assert_eq!(p.snapshot(), EarlyAckCounts { made: 16, withheld: 1, swallowed: 2 });
+        // Counts run on across Game sessions and lost connections.
+        p.game_session_began();
+        p.connection_lost();
+        assert_eq!(p.snapshot().made, 16);
     }
 
     #[test]

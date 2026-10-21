@@ -177,9 +177,21 @@ whether that friend was the session's host. Losing the host means the game is
 handed `SESSIONLOST`. Losing anyone else starts up to five re-dials, each
 recorded as a `reconnect` line with `attempt` (1–5) and `ok`.
 
+### Early ack lines: `early_ack`, `real_ack`, `resend_dropped`, `replay`, `early_acks`
+
+Written by the friend pipeline when Early acks (`DATALINK_EARLY_ACKS=1`) act. All have `peer`. They follow the `out` or `in` line of the message that caused them, so a line's order shows what the pipeline did first.
+
+- `early_ack`: the game was handed an Early ack for an `out` message. `seq` is the message's seq, `id` the `out` line's id, `withheld_us` how long the cap (16 in flight per friend) held the ack back after the message was queued: 0 when it was made at once. A withheld ack's line is written when a real ack frees a slot.
+- `real_ack`: the real ack of an Early-acked message arrived and was swallowed. `seq`, and `rtt_us`: the time from queueing the message to this ack. Duplicate real acks are swallowed without a line. The `in` line of a swallowed ack has no `drain`.
+- `resend_dropped`: a resend of a message this connection already carried was not queued (`seq`). It has no `out` line.
+- `replay`: `count` in-flight frames were replayed to `peer` after its stream was reopened. The line and its writer belong to the lost-or-reopened-connection work (`.scratch/internet-play-speed-build` 08); until that lands, no `replay` line is written.
+- `early_acks`: once per Game session and friend, when the first reliable message goes out (and again after a lost connection): `on` and `why`, which is `on`, `switch` (the switch is off), `players` (not exactly two players) or `connection_lost` (no Early acks for the rest of the Game session).
+
+`.scratch/internet-play-speed/analysis/early_ack_analysis.py` (also run by `analyse_capture.py`) reads these lines. It reports the one-way **hop** (from our last message's `written` to the `in` of the friend's next message, at each change of direction), **network time** (hops plus the DLL polls, `in` to `drain`), and a **delivery check**: one `real_ack` per `early_ack`, no gaps in the friend's reliable seqs, and every message handed to the game drained exactly once. Samples of a passing and a failing capture, with tests, are in `.scratch/internet-play-speed/analysis/samples/`.
+
 ## The Helper's log
 
-Independent of the capture, the Helper logs at info a `turn sync finished` or `game start finished` line per friend, with raw figures (`.scratch/internet-play-speed-build` 05). With a capture on, the line names the capture file.
+Independent of the capture, the Helper logs at info a `turn sync finished` or `game start finished` line per friend, with raw figures (`.scratch/internet-play-speed-build` 05). Each line also has `hops` and `hop_ms` (changes of direction from our message to the friend's, and their total time, measured from when the Helper queued our last message, so a little shorter than the capture analysis's written-based figure) and `early_acks_made`, `early_acks_withheld` and `early_acks_swallowed` (counted over that sync; zero with the switch off). With a capture on, the line names the capture file.
 
 ## Where it lives
 

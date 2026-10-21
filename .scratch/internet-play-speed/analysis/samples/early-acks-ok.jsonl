@@ -1,0 +1,21 @@
+{"ev": "start", "t_us": 0, "format": 1, "unix_ms": 1760000000000, "pid": 1}
+{"ev": "early_acks", "t_us": 900, "peer": "aaaa0001", "on": true, "why": "on"}
+{"ev": "out", "id": 1, "t_us": 1000, "peer": "aaaa0001", "to": 2, "guaranteed": false, "size": 24, "kind": 4, "seq": 1, "hex": "", "from": 1}
+{"ev": "early_ack", "t_us": 1010, "peer": "aaaa0001", "seq": 1, "id": 1, "withheld_us": 0}
+{"ev": "written", "id": 1, "t_us": 1100}
+{"ev": "out", "id": 2, "t_us": 2000, "peer": "aaaa0001", "to": 2, "guaranteed": false, "size": 24, "kind": 4, "seq": 2, "hex": "", "from": 1}
+{"ev": "early_ack", "t_us": 2010, "peer": "aaaa0001", "seq": 2, "id": 2, "withheld_us": 0}
+{"ev": "written", "id": 2, "t_us": 2100}
+{"ev": "in", "id": 3, "t_us": 61100, "peer": "aaaa0001", "to": 2, "guaranteed": false, "size": 12, "kind": 2, "seq": 1, "hex": "", "from": 1}
+{"ev": "real_ack", "t_us": 61110, "peer": "aaaa0001", "seq": 1, "rtt_us": 60100}
+{"ev": "in", "id": 4, "t_us": 61200, "peer": "aaaa0001", "to": 2, "guaranteed": false, "size": 12, "kind": 2, "seq": 2, "hex": "", "from": 1}
+{"ev": "real_ack", "t_us": 61210, "peer": "aaaa0001", "seq": 2, "rtt_us": 59200}
+{"ev": "in", "id": 5, "t_us": 70000, "peer": "aaaa0001", "to": 2, "guaranteed": false, "size": 24, "kind": 4, "seq": 1, "hex": "", "from": 1}
+{"ev": "drain", "id": 5, "t_us": 71000}
+{"ev": "in", "id": 6, "t_us": 70500, "peer": "aaaa0001", "to": 2, "guaranteed": false, "size": 24, "kind": 4, "seq": 2, "hex": "", "from": 1}
+{"ev": "drain", "id": 6, "t_us": 71000}
+{"ev": "out", "id": 7, "t_us": 72000, "peer": "aaaa0001", "to": 2, "guaranteed": false, "size": 12, "kind": 2, "seq": 1, "hex": "", "from": 1}
+{"ev": "written", "id": 7, "t_us": 72050}
+{"ev": "in", "id": 8, "t_us": 140000, "peer": "aaaa0001", "to": 2, "guaranteed": false, "size": 24, "kind": 4, "seq": 3, "hex": "", "from": 1}
+{"ev": "drain", "id": 8, "t_us": 141500}
+{"ev": "resend_dropped", "t_us": 150000, "peer": "aaaa0001", "seq": 2}
