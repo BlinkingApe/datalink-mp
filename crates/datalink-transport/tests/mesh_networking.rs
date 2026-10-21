@@ -1660,3 +1660,53 @@ fn test_host_staying_away_past_the_bound_migrates_once_while_redials_are_in_flig
     assert!(alice.session_manager().is_host());
     assert_eq!(alice.session_manager().get_players().len(), 2);
 }
+
+/// A Helper on BBR and a Helper on the default controller play together: the
+/// controller governs only what its own side sends, so no protocol change.
+#[test]
+fn test_bbr_on_one_side_and_default_on_the_other_exchange_messages() {
+    let host = match create_transport_with_options(datalink_transport::TransportOptions {
+        congestion: Some(datalink_transport::CongestionController::Bbr),
+        ..Default::default()
+    }) {
+        Some(t) => t,
+        None => return,
+    };
+    let joiner = match create_transport() {
+        Some(t) => t,
+        None => return,
+    };
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Bbr".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+    let host_player = host
+        .create_player(PlayerName { short_name: "H".into(), long_name: "H".into() }, 0, vec![0x03])
+        .expect("host player");
+    let joiner_id = joiner.join_session_by_ticket(host.our_ticket()).expect("join");
+    joiner.create_player(PlayerName { short_name: "J".into(), long_name: "J".into() }, 0, vec![0x42]);
+
+    // Host (BBR) sends to joiner (default) and back
+    for i in 0..50u32 {
+        host.send(host_player, joiner_id, i.to_le_bytes().to_vec(), true).expect("send");
+        joiner.send(joiner_id, host_player, i.to_le_bytes().to_vec(), true).expect("send");
+    }
+    let mut got = (0u32, 0u32);
+    let ok = poll_until(Duration::from_secs(15), || {
+        while let Some(qm) = joiner.receive() {
+            if qm.from == host_player && qm.data.len() == 4 {
+                got.0 += 1;
+            }
+        }
+        while let Some(qm) = host.receive() {
+            if qm.from == joiner_id && qm.data.len() == 4 {
+                got.1 += 1;
+            }
+        }
+        (got.0 >= 50 && got.1 >= 50).then_some(())
+    });
+    assert!(ok.is_some(), "messages lost across mixed controllers: {:?}", got);
+}
