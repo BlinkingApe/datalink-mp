@@ -1,6 +1,6 @@
 # ADR-0005: Internet play speed: Helpers answer JACKAL's acks
 
-- **Status:** Accepted (2026-10-06)
+- **Status:** Accepted (2026-10-06), amended 2026-10-21 (see [Amendments](#amendments))
 - **Supersedes:** [ADR-0004](0004-internet-play-speed-in-0-2-0.md)
 - **Related:** [ADR-0002](0002-releases-versioning-pipeline-trust.md) (versioning, the release gate). Decision trail: `.scratch/internet-play-speed/map.md`. Evidence: `.scratch/internet-play-speed/analysis/turn-sync-fixes.md`.
 
@@ -44,14 +44,14 @@ All of it is a 0.1.x patch. No minor release is needed unless compression return
   - always-on info logging: a line per path change, and a line per Turn sync and game start
   - the dev traffic capture (off by default, `DATALINK_CAPTURE`)
   - `DATALINK_RELAY_ONLY`, undocumented for players, so a tester abroad can capture a Relayed game
-- **Patch B, the fixes, opt-in.** `DATALINK_EARLY_ACKS=1` on the Helper and `DATALINK_FAST_WAKE=1` for the DLL, each testable alone. Early acks change the reliability semantics the game has relied on, and a bug there shows as a desync or a hung game, so they start off.
+- **Patch B, the fixes, opt-in.** `DATALINK_EARLY_ACKS=1` on the Helper and `DATALINK_FAST_WAKE=1` for the DLL, each testable alone. A third Helper switch picks QUIC's congestion controller (BBR instead of the default), for lossy links; it stays opt-in until a captured game shows it helps, and Patch C doesn't flip it. Early acks change the reliability semantics the game has relied on, and a bug there shows as a desync or a hung game, so they start off.
 - **Patch C, on by default.** Both switches flip to on (and become off switches) once the six validation steps pass and at least 3 real tester games with them on, one with Windows hosting, show no hang, no `SEND MESSAGE TIME EXPIRED` and no delivery fault.
 - **Page activity** ("Syncing turn N", whose game is working, and the tab title after about 10 s) is low priority, because players don't look at the Helper mid-game. It ships with Patch B or later and never holds up the fixes.
 
 ### 5. Dropped and conditional
 
 - **Dropped:** delta encoding (about 0.05 s), our own relay or chasing Direct connections (under 1 s per Turn sync once Early acks exist), and a realistic `dwLatency` (the game would see it, and Early acks make it redundant).
-- **Conditional: compression.** It returns as a new effort, with a minor release for the Peer protocol change, only if a Relayed capture taken after Early acks shows bytes still adding ≥ 1 s to a resync turn or the game start.
+- **Conditional: compression.** It returns as a new effort, with a minor release for the Peer protocol change, only if a capture taken after Early acks, Direct or Relayed, shows bytes still adding ≥ 1 s to a resync turn or the game start.
 - **Known and not addressed:** the game's own compute share, and why two of five checksums mismatched on stock 0.1.0. Early acks are judged by a delivery check instead.
 
 ## Considered options
@@ -65,3 +65,12 @@ All of it is a 0.1.x patch. No minor release is needed unless compression return
 
 - Players on any 0.1.x can still play together. A Helper that lacks Early acks interoperates with one that has them.
 - A bug in Early acks could hang or desync a game, which is why Patch B ships opt-in and Patch C waits on real games.
+
+## Amendments
+
+### 2026-10-21: lossy links
+
+A captured two-player game over a long-distance Direct connection (`.scratch/internet-play-speed-build/analysis/lossy-direct-game.md`) lost about 5% of packets under load. QUIC held its sending window at 2–3 packets, a 2 KB message took 945 ms to be acked, and the game's resends added 156% to the bytes sent. The game start took 214 s, 157 s of it waiting on the network.
+
+- **The compression condition no longer needs a Relayed capture.** A lossy Direct link limits bytes as a relay does. On that link, Early acks alone should leave an estimated 6–10 s of bytes in the game start, and the payloads compress to 8–12%. The condition still waits for a capture with Early acks on.
+- **A congestion controller switch joins Patch B.** iroh lets the Helper set QUIC's congestion controller, and BBR is less sensitive to random loss than the default. It changes only the sending side, so it needs no Peer protocol change.
