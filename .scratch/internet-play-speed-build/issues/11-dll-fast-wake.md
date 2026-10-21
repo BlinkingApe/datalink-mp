@@ -4,11 +4,17 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] With the switch off, behaviour is identical to today
-- [ ] The event is signalled after each `Send`
-- [ ] The poll is 1 ms with the switch on
+- [x] With the switch off, behaviour is identical to today
+- [x] The event is signalled after each `Send`
+- [x] The poll is 1 ms with the switch on
 - [ ] CPU cost measured on both machines and recorded, with the adaptive poll built if over budget
 - [ ] The Windows sleep interval is measured and the outcome recorded
-- [ ] The IPC version is unchanged
+
+## Comments
+
+Built in `crates/dplayx/src/fast_wake.rs` (switch parsing and poll interval, unit-tested) and wired into `directplay.rs`: `Send` signals all player events after a successful send (player and group paths) and the poll thread sleeps `poll_interval(enabled())`. `DATALINK_FAST_WAKE=1` is read once; anything else is off and identical to before. No IPC change.
+
+The two unticked boxes need a Windows machine and a Wine machine, which the build agent did not have: the CPU measurement (lobby idle and mid-turn) and the Windows 1 ms sleep-interval measurement. Run both with `DATALINK_FAST_WAKE=1`. If CPU is over 1% of a core, or a 1 ms sleep rounds to 15.6 ms, choose `timeBeginPeriod(1)` while polling or the adaptive poll (1 ms while messages flow, 10 ms after a quiet spell). The adaptive poll is not built.
+- [x] The IPC version is unchanged

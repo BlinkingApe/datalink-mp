@@ -306,7 +306,7 @@ impl DirectPlayObject {
                     }
                 }
 
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::sleep(crate::fast_wake::poll_interval(crate::fast_wake::enabled()));
             }
 
             debug!("Polling thread stopped");
@@ -1922,6 +1922,9 @@ unsafe extern "system" fn DirectPlay_Send(
                     }
                 }
             }
+            if crate::fast_wake::enabled() {
+                dp.signal_all_player_events();
+            }
             return DP_OK;
         }
     }
@@ -1932,6 +1935,9 @@ unsafe extern "system" fn DirectPlay_Send(
             match c.send(idFrom, idTo, data, guaranteed) {
                 Ok(()) => {
                     debug!("send completed");
+                    if crate::fast_wake::enabled() {
+                        dp.signal_all_player_events();
+                    }
                     return DP_OK;
                 }
                 Err(e) => {
