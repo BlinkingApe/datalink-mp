@@ -3235,3 +3235,74 @@ fn test_page_badges_each_friend_direct_or_relayed_slower_in_plain_text() {
     assert!(page.contains("class=\"path\"") || page.contains("className = 'path'"), "the badge should have its own element");
     assert!(!page.contains("rtt"), "the page should show no RTT figures");
 }
+
+// ---------------------------------------------------------------------------
+// Ticket 12: page activity and tab title
+// ---------------------------------------------------------------------------
+
+/// A JACKAL data message of game type `ty`, as the game sends it.
+fn jackal_message(seq: u32, ty: u16) -> Vec<u8> {
+    let mut v = vec![0u8; 44];
+    v[0] = 4;
+    v[4..8].copy_from_slice(&seq.to_le_bytes());
+    v[8..10].copy_from_slice(&ty.to_le_bytes());
+    v
+}
+
+/// DPID_ALLPLAYERS: every friend with a link.
+const ALL_PLAYERS: u32 = 0;
+
+#[test]
+fn test_status_shows_a_friends_turn_sync_while_it_runs_and_a_short_synced_after() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let Some(friend) = friend() else {
+        return;
+    };
+    assert_eq!(started.status()["sync_activity"], serde_json::json!({}));
+
+    dial_the_helper(&friend, &started);
+    started.wait_for_peers(&[short_id(&friend)]);
+    let id = short_id(&friend);
+
+    // The friend's end of turn (0x8301) starts a Turn sync on the Helper's side.
+    friend
+        .send(1, ALL_PLAYERS, jackal_message(1, 0x8301), true)
+        .expect("the friend should send to the Helper");
+    let syncing = common::poll_until(PEER_NOTICE_DEADLINE, || {
+        let a = started.status()["sync_activity"][&id].clone();
+        (a["phase"] == "syncing").then_some(a)
+    })
+    .unwrap_or_else(|| panic!("expected a running sync, got {}", started.status()["sync_activity"]));
+    assert_eq!(syncing["kind"], "turn");
+    // The friend sent last, so the Helper's own game is the one working; no bytes for a plain turn.
+    assert_eq!(syncing["working"], "you");
+    assert_eq!(syncing["bytes"], serde_json::Value::Null);
+    assert!(syncing["elapsed_secs"].as_u64().is_some());
+
+    // The end of the sync (0x4309) clears it to a brief "synced".
+    friend
+        .send(1, ALL_PLAYERS, jackal_message(2, 0x4309), true)
+        .expect("the friend should send to the Helper");
+    common::poll_until(PEER_NOTICE_DEADLINE, || {
+        (started.status()["sync_activity"][&id]["phase"] == "synced").then_some(())
+    })
+    .unwrap_or_else(|| panic!("expected synced, got {}", started.status()["sync_activity"]));
+}
+
+#[test]
+fn test_page_words_the_activity_on_the_friends_row_and_changes_the_title_only_after_ten_seconds() {
+    let Some(started) = start(false) else {
+        return;
+    };
+    let page = http_get(started.ui_port(), "/", &[]).body;
+
+    assert!(page.contains("sync_activity"), "the page should read each friend's sync from status");
+    assert!(page.contains("Syncing turn"), "the page should say which turn is syncing");
+    assert!(page.contains("game is working"), "the page should say whose game is working");
+    assert!(page.contains("Turn synced"), "the page should end with a brief Turn synced");
+    assert!(!page.to_lowercase().contains("waiting for your friend"), "never claim to be waiting for the friend");
+    assert!(page.contains("TITLE_AFTER_SECS = 10"), "the title should change only after about 10 s");
+    assert!(page.contains("Syncing\\u2026"), "the title should say plain Syncing");
+}

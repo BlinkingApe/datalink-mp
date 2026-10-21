@@ -448,6 +448,16 @@ impl<H: Clone> FriendRegistry<H> {
             .collect()
     }
 
+    /// What the page shows of each connected friend's syncs; a friend with no
+    /// sync running or just finished is left out.
+    pub fn sync_views(&self) -> Vec<(FriendId, crate::friend_pipeline::SyncView)> {
+        let s = self.state.lock();
+        s.friends
+            .iter()
+            .filter_map(|(id, r)| Some((*id, r.link.as_ref()?.pipeline.sync_view()?)))
+            .collect()
+    }
+
     /// Send a game message from the local game. Routes by DPID, calls each
     /// target friend's pipeline and carries out its outcome:
     /// - all players: every friend with a link, once each, never back to us

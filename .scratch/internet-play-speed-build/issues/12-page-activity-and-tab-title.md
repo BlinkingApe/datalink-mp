@@ -4,9 +4,13 @@
 
 **Blocked by:** 05
 
-**Status:** ready-for-agent
+**Status:** resolved
 
-- [ ] The activity text appears and clears with the detector, with no flicker between bursts
-- [ ] Elapsed seconds always, bytes only on a resync or the game start
-- [ ] The tab title changes only after about 10 s
-- [ ] UI tests cover it
+- [x] The activity text appears and clears with the detector, with no flicker between bursts
+- [x] Elapsed seconds always, bytes only on a resync or the game start
+- [x] The tab title changes only after about 10 s
+- [x] UI tests cover it
+
+## Comments
+
+Built on the shared detector: `TurnSyncDetector::activity` (turn_sync.rs) gives kind, turn, elapsed, bytes (game start or a phase-7 resync only) and whose game is working (who sent last); `FriendPipeline::sync_view` adds the 4 s "synced" after a sync ends. Status carries `sync_activity` by short ID; page.html words it after the friend on the Helpers line and sets the tab title to "Syncing\u2026" only once a sync passes 10 s. The page decides the wording; the 10 s rule and the words are checked by page-content tests, the status data by a test that drives a real friend. Not run by hand in a browser. `cargo clippy --workspace` fails on warnings that were already there (datalink-fixes, session.rs).
