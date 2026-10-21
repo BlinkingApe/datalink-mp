@@ -3,7 +3,14 @@ rem Starts datalink-mp and the game with every log switched on, for an
 rem internet-speed test. See docs/players/collecting-logs.md.
 rem
 rem Double-click this file from the Game folder (the one holding datalink-mp.exe
-rem and dplayx.dll), or run:  datalink-mp-collect-logs.bat [game.exe]
+rem and dplayx.dll), or run:
+rem   datalink-mp-collect-logs.bat [game.exe] [--early-acks] [--fast-wake] [--congestion NAME]
+rem
+rem Test switches, all off unless given (DATALINK_EARLY_ACKS, DATALINK_FAST_WAKE
+rem and DATALINK_CONGESTION already set in the console count too):
+rem   --early-acks       Helper acks reliable messages at once
+rem   --fast-wake        the DLL polls every 1 ms
+rem   --congestion NAME  bbr, cubic or newreno
 setlocal
 cd /d "%~dp0"
 
@@ -16,7 +23,13 @@ if not exist dplayx.dll (
   goto :fail
 )
 
-set "GAME=%~1"
+set "GAME="
+set "NEXT_IS_CONGESTION="
+for %%A in (%*) do call :arg "%%~A"
+if defined NEXT_IS_CONGESTION (
+  echo --congestion needs a name: bbr, cubic or newreno
+  goto :fail
+)
 if not defined GAME (
   for %%G in (wtp.exe thinker.exe terran_PRACX.exe terranx.exe) do (
     if not defined GAME if exist "%%G" set "GAME=%%G"
@@ -38,6 +51,8 @@ set "RUST_LOG=debug"
 set "DATALINK_CAPTURE=%LOG_DIR%\capture"
 set "DPLAYX_LOG_FILE=%LOG_DIR%\dll.log"
 set "DPLAYX_RXTRACE=1"
+echo DATALINK_EARLY_ACKS=%DATALINK_EARLY_ACKS% DATALINK_FAST_WAKE=%DATALINK_FAST_WAKE% DATALINK_CONGESTION=%DATALINK_CONGESTION%> "%LOG_DIR%\switches.txt"
+echo Switches: & type "%LOG_DIR%\switches.txt"
 
 start "datalink-mp" datalink-mp.exe
 timeout /t 2 /nobreak >nul
@@ -69,3 +84,15 @@ exit /b 0
 :fail
 pause
 exit /b 1
+
+:arg
+if defined NEXT_IS_CONGESTION (
+  set "DATALINK_CONGESTION=%~1"
+  set "NEXT_IS_CONGESTION="
+  exit /b 0
+)
+if /i "%~1"=="--early-acks" ( set "DATALINK_EARLY_ACKS=1" & exit /b 0 )
+if /i "%~1"=="--fast-wake" ( set "DATALINK_FAST_WAKE=1" & exit /b 0 )
+if /i "%~1"=="--congestion" ( set "NEXT_IS_CONGESTION=1" & exit /b 0 )
+if not defined GAME set "GAME=%~1"
+exit /b 0

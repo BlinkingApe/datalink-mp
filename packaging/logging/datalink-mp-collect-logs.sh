@@ -4,11 +4,33 @@
 # yourself from Faugus. See docs/players/collecting-logs.md.
 #
 # Run from the Game folder (the one holding datalink-mp and dplayx.dll):
-#   ./datalink-mp-collect-logs.sh
+#   ./datalink-mp-collect-logs.sh [--early-acks] [--fast-wake] [--congestion NAME]
+#
+# Test switches (all off unless given; DATALINK_EARLY_ACKS, DATALINK_FAST_WAKE
+# and DATALINK_CONGESTION already set in the environment count too):
+#   --early-acks         Helper acks reliable messages at once (DATALINK_EARLY_ACKS=1)
+#   --fast-wake          the DLL polls every 1 ms (DATALINK_FAST_WAKE=1)
+#   --congestion NAME    bbr, cubic or newreno (DATALINK_CONGESTION)
 #
 # Optional environment:
 #   LOG_DIR=<folder>   where logs go (default: ~/dl-logs)
 set -u
+
+EARLY_ACKS="${DATALINK_EARLY_ACKS:-}"
+FAST_WAKE="${DATALINK_FAST_WAKE:-}"
+CONGESTION="${DATALINK_CONGESTION:-}"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --early-acks) EARLY_ACKS=1 ;;
+    --fast-wake) FAST_WAKE=1 ;;
+    --congestion)
+      CONGESTION="${2:-}"
+      [[ -n "$CONGESTION" ]] || { echo "--congestion needs a name: bbr, cubic or newreno" >&2; exit 2; }
+      shift ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
 
 cd "$(dirname "$(readlink -f "$0")")" || exit 1
 
@@ -27,6 +49,18 @@ mkdir -p "$LOG_DIR"
 # Under Wine and Proton, Z: is the Linux root.
 WIN_DLL_LOG="Z:${LOG_DIR//\//\\}\\dll.log"
 
+# Record which switches this run used, next to the logs.
+SWITCHES="DATALINK_EARLY_ACKS=${EARLY_ACKS:-off} DATALINK_FAST_WAKE=${FAST_WAKE:-off} DATALINK_CONGESTION=${CONGESTION:-default}"
+echo "$SWITCHES" > "$LOG_DIR/switches.txt"
+
+# Only the switches that are on reach the Helper's environment.
+HELPER_ENV=()
+[[ -n "$EARLY_ACKS" ]] && HELPER_ENV+=("DATALINK_EARLY_ACKS=$EARLY_ACKS")
+[[ -n "$CONGESTION" ]] && HELPER_ENV+=("DATALINK_CONGESTION=$CONGESTION")
+GAME_SWITCHES=""
+[[ -n "$FAST_WAKE" ]] && GAME_SWITCHES=" DATALINK_FAST_WAKE=$FAST_WAKE"
+
+env ${HELPER_ENV[@]+"${HELPER_ENV[@]}"} \
 SMAC_HELPER_LOG_FILE="$LOG_DIR/helper.log" \
 RUST_LOG=debug \
 DATALINK_CAPTURE="$LOG_DIR/capture" \
@@ -48,11 +82,12 @@ fi
 cat <<TEXT
 
 datalink-mp is running with logging on (pid $HELPER_PID).
+Switches: $SWITCHES
 
 In Faugus, open the game's settings and put this in Game Arguments / Launch
 Arguments (one line), then press Play:
 
-  WINEDLLOVERRIDES=dplayx=n,b DPLAYX_LOG_FILE='$WIN_DLL_LOG' DPLAYX_RXTRACE=1
+  WINEDLLOVERRIDES=dplayx=n,b DPLAYX_LOG_FILE='$WIN_DLL_LOG' DPLAYX_RXTRACE=1$GAME_SWITCHES
 
 Play your test. When the game has closed, come back here and press Enter (or
 Ctrl-C) to stop datalink-mp so its log is saved.

@@ -4,10 +4,10 @@ This page shows how to record the logs that tell us how fast turns sync over
 the internet, and (once the feature ships) whether **Early acks** help. It
 works the same way on Windows and Linux. You don't need it to play.
 
-> **Status:** Early acks are not in the released Helper yet
-> ([ADR 0005](../adr/0005-internet-play-speed-helpers-answer-acks.md) plans
-> them as an opt-in switch). Until then these logs give a *baseline*. When the
-> feature lands, repeat the test with its switch on and compare.
+> **Status:** Early acks, fast wake and the BBR congestion controller ship
+> as opt-in test switches ([ADR 0005](../adr/0005-internet-play-speed-helpers-answer-acks.md)).
+> All are off unless you turn them on, so a run without them is the *baseline*.
+> Repeat the test with a switch on and compare.
 
 ## What you'll produce
 
@@ -16,6 +16,7 @@ works the same way on Windows and Linux. You don't need it to play.
 | `helper.log` | the Helper (datalink-mp) | connections, routes, errors |
 | `dll.log` | the game's DLL | DirectPlay calls and traffic |
 | `capture/capture-*.jsonl` | the Helper | every game message with timings (one side is enough) |
+| `switches.txt` | the log script | which test switches this run used |
 
 ## Before you start
 
@@ -31,6 +32,18 @@ The Windows zip and the Linux tarball include a script that sets every variable 
 - **Linux (Faugus):** run `./datalink-mp-collect-logs.sh` from the Game folder. It starts datalink-mp with logging on and prints one line of settings to paste into the game's Game Arguments in Faugus (the Wine override plus the DLL log switches). Press Play in Faugus, test, then press Enter in the script's terminal to stop datalink-mp. Logs go to `~/dl-logs` (set `LOG_DIR=...` to change).
 
 The Windows script looks for `wtp.exe`, `thinker.exe`, `terran_PRACX.exe` or `terranx.exe` (in that order); to name another, pass it as an argument. Steam launches can't use the Linux script; use the manual steps.
+
+## Test switches
+
+| Switch | Set on | What it does |
+|---|---|---|
+| `DATALINK_EARLY_ACKS=1` | the Helper | answers reliable messages at once instead of after a round trip (two-player games only) |
+| `DATALINK_FAST_WAKE=1` | the game (the DLL) | the DLL polls every 1 ms instead of 10 ms |
+| `DATALINK_CONGESTION=bbr` | the Helper | uses the BBR congestion controller (`cubic` and `newreno` also work) |
+
+Only the host's Helper needs `DATALINK_EARLY_ACKS` and `DATALINK_CONGESTION`; the friend can run any 0.1.x. Say which switches you used when you send logs.
+
+With the log script, pass them as options: `./datalink-mp-collect-logs.sh --early-acks --fast-wake --congestion bbr` (Linux) or `datalink-mp-collect-logs.bat --early-acks --fast-wake --congestion bbr` from a console (Windows; double-clicking runs with every switch off). The script prints the switches and, on Linux, adds `DATALINK_FAST_WAKE=1` to the line you paste into Faugus. By hand, set `DATALINK_EARLY_ACKS` and `DATALINK_CONGESTION` in the shell that starts the Helper, and `DATALINK_FAST_WAKE` where you start the game (`DATALINK_FAST_WAKE=1 wine terranx.exe`, or in the Faugus/Steam launch line).
 
 ## Linux (by hand)
 
