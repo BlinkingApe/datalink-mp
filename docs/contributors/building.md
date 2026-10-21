@@ -164,6 +164,26 @@ Every layer can log:
 | `DPLAYX_RXTRACE=1` | DLL | per-message send/receive trace lines |
 | `SMAC_PROBE_LOG=/path` | DLL | game-internal diagnostic probes (see [architecture.md](architecture.md)) |
 
+Test switches, read by the Helper at start (not for players):
+
+| Variable | Effect |
+|---|---|
+| `DATALINK_EARLY_ACKS=1` | the Helper acks a Friend's reliable messages for its own game at once (see [architecture.md](architecture.md)) |
+| `DATALINK_CONGESTION=bbr\|cubic\|newreno` | QUIC congestion controller for every connection; unset keeps iroh's default (Cubic) |
+| `DATALINK_CAPTURE=/dir` | write a traffic capture there ([traffic-capture.md](traffic-capture.md)) |
+| `DATALINK_FAULT=drop:N,reset:N` | fault injection, only in a `dev-faults` build (below) |
+
+### The `dev-faults` feature
+
+`cargo build -p datalink-mp --features dev-faults` builds a Helper that reads
+`DATALINK_FAULT`. It is in no default feature set and no release build, and
+the release workflow never passes it. `drop:N` closes the Friend's connection
+right after the Nth Early ack is made (counted over the Helper's whole run, so
+it fires once, in the first game). `reset:N` makes the write after the Nth
+frame on the ordered stream fail once, so the writer reopens the stream and
+replays. Each logs a warning when it fires. `drop:N` needs
+`DATALINK_EARLY_ACKS=1`.
+
 Set `DPLAYX_LOG_FILE` and `RUST_LOG=debug`, then read the two logs side by
 side; timestamps are correlated.
 

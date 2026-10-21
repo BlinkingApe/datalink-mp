@@ -83,6 +83,36 @@ from the Helper's queue.
   control-plane messages produce multi-day debugging sessions; this codebase
   chooses noise.
 
+### Early acks, stream reopen and Turn sync tracking
+
+All three live in the **friend pipeline** (`friend_pipeline.rs`), one per link
+in the friend registry; the registry calls it and carries out what it says.
+
+- **Early acks** (`DATALINK_EARLY_ACKS=1`, two-player games only). When a
+  reliable game message is queued for a Friend, the pipeline can say "give the
+  game an **Early ack**": a 12-byte ack rewritten from the message's header, which
+  the registry adds to the game's inbox at once, so the game does not wait a
+  round trip. When the Friend's game later sends the **real ack**, the pipeline
+  swallows it. At most `EARLY_ACK_CAP` messages are in flight per Friend; past
+  that the ack is withheld until a real ack frees a place. A resent copy of a
+  message already carried is dropped. After a lost connection no Early acks
+  are made for the rest of the Game session (`GameSessionFacts::lost_a_link`
+  in the registry), and nothing is replayed across a reconnect.
+- **Stream reopen and replay.** If a write on the ordered stream fails, the
+  writer (`run_ordered_writer`, `frame_sink.rs`) finishes the old stream,
+  opens a new one, replays the pipeline's in-flight frames it has already
+  written, in order, then retries the failing frame. The Friend's JACKAL layer
+  drops any seq it already has. On the receiving side, `stream_turns.rs`
+  gives each accepted stream a turn: a reopened stream's reader dispatches
+  nothing until the old stream's reader has finished (30 s cap, logged).
+- **Turn sync tracking** (`turn_sync.rs`). A pure detector, fed every game
+  message in both directions, finds each **Turn sync** and the game start from
+  the message kinds and logs one line when it finishes (hops, Early ack counts,
+  and the link's datagrams, losses, congestion events and median window in
+  packets). The page's sync activity and the tab title follow the same
+  detector. The capture lines are in
+  [traffic-capture.md](traffic-capture.md).
+
 ### Why the player-data byte matters (a JACKAL note)
 
 The game registers each remote player with a one-byte "flags" value taken from

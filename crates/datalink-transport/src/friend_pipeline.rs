@@ -266,16 +266,16 @@ impl FriendPipeline {
             return;
         }
         let why = if !self.early_acks {
-            "switch"
+            capture::EarlyAcksWhy::Switch
         } else if s.early.lost {
-            "connection_lost"
+            capture::EarlyAcksWhy::ConnectionLost
         } else if !two_players {
-            "players"
+            capture::EarlyAcksWhy::Players
         } else {
-            "on"
+            capture::EarlyAcksWhy::On
         };
         drop(s);
-        capture::early_acks_state(&self.peer, why == "on", why);
+        capture::early_acks_state(&self.peer, why);
     }
 
     fn early_outbound(&self, from: DPID, to: DPID, data: &[u8]) -> (OutboundOutcome, Option<Note>) {

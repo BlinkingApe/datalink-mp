@@ -196,10 +196,10 @@ impl Capture {
     }
 
     /// Whether Early acks are on for `peer` this Game session, and why.
-    fn early_acks_state(&self, peer: &[u8; 32], on: bool, why: &str) {
+    fn early_acks_state(&self, peer: &[u8; 32], why: EarlyAcksWhy) {
         self.write(json!({
             "ev": "early_acks", "t_us": self.t_us(), "peer": peer_label(peer),
-            "on": on, "why": why,
+            "on": why == EarlyAcksWhy::On, "why": why.as_str(),
         }));
     }
 
@@ -501,11 +501,32 @@ pub fn replay(peer: &[u8; 32], count: usize) {
     }
 }
 
-/// Once per Game session and friend: Early acks are `on`, or off for `why`
-/// (`switch`, `players` or `connection_lost`).
-pub fn early_acks_state(peer: &[u8; 32], on: bool, why: &str) {
+/// Why Early acks are on or off for a friend this Game session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EarlyAcksWhy {
+    On,
+    /// The switch is off.
+    Switch,
+    /// Not exactly two players.
+    Players,
+    ConnectionLost,
+}
+
+impl EarlyAcksWhy {
+    fn as_str(self) -> &'static str {
+        match self {
+            EarlyAcksWhy::On => "on",
+            EarlyAcksWhy::Switch => "switch",
+            EarlyAcksWhy::Players => "players",
+            EarlyAcksWhy::ConnectionLost => "connection_lost",
+        }
+    }
+}
+
+/// Once per Game session and friend: Early acks are on, or off for `why`.
+pub fn early_acks_state(peer: &[u8; 32], why: EarlyAcksWhy) {
     if let Some(c) = capture() {
-        c.early_acks_state(peer, on, why);
+        c.early_acks_state(peer, why);
     }
 }
 
@@ -592,7 +613,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("datalink-capture-early-{}", std::process::id()));
         let (capture, path) = Capture::open(&dir).unwrap();
         let peer = [0xab, 0xcd, 0, 1, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9];
-        capture.early_acks_state(&peer, false, "players");
+        capture.early_acks_state(&peer, EarlyAcksWhy::Players);
         capture.early_ack(&peer, 7, Some(12), 0);
         capture.early_ack(&peer, 8, None, 1500);
         capture.real_ack(&peer, 7, 61_000);

@@ -204,6 +204,18 @@ impl<H> State<H> {
     }
 }
 
+/// One game message on its way to a friend: what the pipeline is asked, and
+/// the encoded frame to queue.
+#[derive(Clone, Copy)]
+struct GameSend<'a> {
+    from: DPID,
+    to: DPID,
+    guaranteed: bool,
+    data: &'a [u8],
+    encoded: &'a [u8],
+    two_players: bool,
+}
+
 /// See the module docs.
 pub struct FriendRegistry<H> {
     state: Mutex<State<H>>,
@@ -536,9 +548,8 @@ impl<H: Clone> FriendRegistry<H> {
                 flags,
                 data: data.clone(),
             })?;
-            queue_on_each(targets, |friend, link| {
-                self.queue_game(friend, link, (from, to), guaranteed, &data, encoded.clone(), facts)
-            })
+            let send = GameSend { from, to, guaranteed, data: &data, encoded: &encoded, two_players: facts.two_players };
+            queue_on_each(targets, |friend, link| self.queue_game(friend, link, &send))
         });
         if let Err(e) = &result {
             debug!(error = %e, "send failed");
@@ -616,31 +627,22 @@ impl<H: Clone> FriendRegistry<H> {
 
     /// Call the link's pipeline for an outbound game message and carry out
     /// its outcome.
-    #[allow(clippy::too_many_arguments)]
-    fn queue_game(
-        &self,
-        friend: FriendId,
-        link: &Link<H>,
-        (from, to): (DPID, DPID),
-        guaranteed: bool,
-        data: &[u8],
-        encoded: Vec<u8>,
-        facts: &SendFacts,
-    ) -> TransportResult<()> {
+    fn queue_game(&self, friend: FriendId, link: &Link<H>, send: &GameSend) -> TransportResult<()> {
+        let GameSend { from, to, guaranteed, data, encoded, two_players } = *send;
         let OutboundResult {
             outcome,
             capture_id,
             sync_event: _,
         } = link
             .pipeline
-            .outbound(from, to, guaranteed, data, facts.two_players);
+            .outbound(from, to, guaranteed, data, two_players);
         let early_ack = match outcome {
             OutboundOutcome::DropResend => return Ok(()),
             OutboundOutcome::Send => None,
             OutboundOutcome::SendWithEarlyAck(ack) => Some(ack),
         };
         link.outbox
-            .send((encoded, capture_id))
+            .send((encoded.to_vec(), capture_id))
             .map_err(|_| TransportError::NotConnected)?;
         if let (Some(ack), Some(player)) = (early_ack, self.friend_player(&friend)) {
             self.add_early_acks(player, vec![ack]);

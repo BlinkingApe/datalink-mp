@@ -63,7 +63,8 @@ impl Direction {
 }
 
 /// What kind of sync a [`Report`] is about.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SyncKind {
     GameStart,
     Turn,
@@ -113,7 +114,7 @@ pub struct LinkStats {
     pub lost_packets: u64,
     /// Congestion events on the path so far.
     pub congestion_events: u64,
-    /// The congestion window now, in bytes.
+    /// The congestion window now, in packets (`cwnd` / `current_mtu`).
     pub cwnd: u64,
 }
 

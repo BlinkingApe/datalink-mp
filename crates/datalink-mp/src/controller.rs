@@ -210,14 +210,23 @@ const RESTART_REFUSED_SHOWN_FOR: Duration = Duration::from_secs(60);
 /// version tell themselves apart by it.
 pub const BUILD_ID: &str = env!("DATALINK_BUILD_ID");
 
+/// Whether a friend's sync is running or has just finished.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SyncPhase {
+    /// While it runs
+    Syncing,
+    /// For a few seconds after
+    Synced,
+}
+
 /// What the page shows of one friend's Turn sync. Raw facts only; the page
 /// has the words, and decides when the tab title changes.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SyncActivity {
-    /// `syncing` while it runs, `synced` for a few seconds after
-    pub phase: &'static str,
-    /// `turn` or `game_start`
-    pub kind: &'static str,
+    pub phase: SyncPhase,
+    /// Serialized as `turn` or `game_start`
+    pub kind: datalink_transport::turn_sync::SyncKind,
     pub turn: Option<u32>,
     pub elapsed_secs: u64,
     /// Both ways; only for the game start and a resync
@@ -229,19 +238,17 @@ pub struct SyncActivity {
 impl SyncActivity {
     fn from_view(view: datalink_transport::friend_pipeline::SyncView) -> Self {
         use datalink_transport::friend_pipeline::SyncView;
-        use datalink_transport::turn_sync::SyncKind;
-        let kind = |k| if k == SyncKind::GameStart { "game_start" } else { "turn" };
         match view {
             SyncView::Syncing(a) => SyncActivity {
-                phase: "syncing",
-                kind: kind(a.kind),
+                phase: SyncPhase::Syncing,
+                kind: a.kind,
                 turn: a.turn,
                 elapsed_secs: a.elapsed.as_secs(),
                 bytes: a.bytes,
                 working: a.working,
             },
-            SyncView::Synced { kind: k, turn } => {
-                SyncActivity { phase: "synced", kind: kind(k), turn, elapsed_secs: 0, bytes: None, working: None }
+            SyncView::Synced { kind, turn } => {
+                SyncActivity { phase: SyncPhase::Synced, kind, turn, elapsed_secs: 0, bytes: None, working: None }
             }
         }
     }

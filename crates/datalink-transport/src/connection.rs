@@ -21,7 +21,7 @@ use dp_types::{PlayerName, GUID};
 /// DPPLAYERTYPE_PLAYER constant (player, not group)
 const DPPLAYERTYPE_PLAYER: u32 = 1;
 use iroh::endpoint::{
-    ConnectError, ConnectingError, Connection, ConnectionError, RecvStream, SendStream,
+    ConnectError, ConnectingError, Connection, ConnectionError, PathStats, RecvStream, SendStream,
     TransportErrorCode,
 };
 use iroh::{Endpoint, EndpointAddr, EndpointId};
@@ -85,15 +85,20 @@ pub const DEFAULT_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 /// says "about 10 seconds": keep it in step with this.
 pub const DEFAULT_HOST_GONE_AFTER: Duration = Duration::from_secs(10);
 
-/// Magic prefix opening every ordered message stream: b"SMAC" + version (u16 LE).
 /// How long a reopened stream's reader waits for the old stream's reader to
 /// finish before dispatching anyway.
 const OLD_STREAM_WAIT: Duration = Duration::from_secs(30);
 
+/// Magic prefix opening every ordered message stream: b"SMAC" + version (u16 LE).
 pub(crate) const STREAM_MAGIC: &[u8; 4] = b"SMAC";
 
 /// Upper bound on a single framed message (defensive against corrupt frames).
 const MAX_FRAME_LEN: u32 = 1 << 20; // 1 MiB
+
+/// The figures of the connection's selected path, if it has one.
+fn selected_path_stats(connection: &Connection) -> Option<PathStats> {
+    connection.paths().iter().find(|p| p.is_selected()).map(|p| p.stats())
+}
 
 /// The friend registry as the connection manager holds it: each link's
 /// handle is its iroh connection.
@@ -203,18 +208,18 @@ impl ConnectionManager {
         let pipeline = Arc::new(
             FriendPipeline::new(*endpoint_id.as_bytes(), std::time::Instant::now, {
                 let connection = connection.clone();
-                move || connection.paths().iter().find(|p| p.is_selected()).map(|p| p.stats().rtt)
+                move || selected_path_stats(&connection).map(|s| s.rtt)
             })
             .with_link_stats({
                 let connection = connection.clone();
                 move || {
-                    let paths = connection.paths();
-                    let s = paths.iter().find(|p| p.is_selected())?.stats();
+                    let s = selected_path_stats(&connection)?;
                     Some(crate::friend_pipeline::LinkStats {
                         datagrams_sent: s.udp_tx.datagrams,
                         lost_packets: s.lost_packets,
                         congestion_events: s.congestion_events,
-                        cwnd: s.cwnd,
+                        // In packets, as the Turn sync log reports it.
+                        cwnd: s.cwnd / u64::from(s.current_mtu).max(1),
                     })
                 }
             })

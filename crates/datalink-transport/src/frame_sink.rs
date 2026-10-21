@@ -117,6 +117,10 @@ impl IrohFrameSink {
 
 impl FrameSink for IrohFrameSink {
     async fn open(&mut self) -> TransportResult<()> {
+        // A reopen ends the old stream now, so the friend's reader for it
+        // sees the end at once and the new stream's reader is not kept
+        // waiting (see `stream_turns`).
+        self.finish();
         let mut s = self.connection.open_uni().await?;
         let mut preamble = [0u8; 6];
         preamble[..4].copy_from_slice(STREAM_MAGIC);
