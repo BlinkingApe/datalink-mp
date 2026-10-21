@@ -58,7 +58,7 @@ All of it is a 0.1.x patch. No minor release is needed unless compression return
 
 - **Amend ADR-0004.** Rejected: its premise and order are contradicted, and its central constraint changes meaning.
 - **Early acks on by default from the first patch.** Rejected: see Patch B.
-- **Early acks in games of three or more.** Rejected for now: unsafe without holding messages, and the gain is small.
+- **Early acks in games of three or more.** Rejected for now: unsafe without holding messages, and the gain is small. A three-player capture (2026-10-20) confirms it: 96% of the host's bytes went to every player, and the Joiners messaged each other directly. Routing every game message through the host's Helper would make Early acks safe there, at the cost of a Peer protocol change. That is recorded for later consideration in `.scratch/internet-play-speed-build/analysis/three-player-early-acks.md`.
 - **Patching the game to send less, or running our own relay.** Still rejected, as in ADR-0004.
 
 ## Consequences
