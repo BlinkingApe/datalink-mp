@@ -30,6 +30,10 @@ use tracing::{debug, debug_span, error, info, warn};
 /// Relayed connection.
 pub const RELAY_ONLY_ENV: &str = "DATALINK_RELAY_ONLY";
 
+/// The environment variable that turns Early acks on (`1`). Early acks are
+/// made only in a two-player Game session.
+pub const EARLY_ACKS_ENV: &str = "DATALINK_EARLY_ACKS";
+
 /// Whether a `DATALINK_RELAY_ONLY` value turns the switch on. Unset, empty, `0`
 /// and `false` are off; anything else is on.
 fn relay_only_enabled(value: Option<&str>) -> bool {
@@ -66,6 +70,8 @@ pub struct Transport {
     our_ticket: String,
     /// Everything the game will be handed, in order
     inbox: GameInbox,
+    /// Whether Early acks are on, for the log line at each Game session
+    early_acks: bool,
 }
 
 /// Options for constructing a [`Transport`].
@@ -83,6 +89,8 @@ pub struct TransportOptions {
     /// counts as gone and the host role migrates. A re-dial that succeeds in
     /// time migrates nothing.
     pub host_gone_after: Duration,
+    /// Whether to make Early acks for a friend in a two-player game
+    pub early_acks: bool,
 }
 
 impl Default for TransportOptions {
@@ -91,6 +99,7 @@ impl Default for TransportOptions {
             peer_protocol_version: STREAM_PROTO_VERSION,
             dial_timeout: DEFAULT_DIAL_TIMEOUT,
             host_gone_after: DEFAULT_HOST_GONE_AFTER,
+            early_acks: relay_only_enabled(std::env::var(EARLY_ACKS_ENV).ok().as_deref()),
         }
     }
 }
@@ -104,6 +113,10 @@ impl Transport {
     /// Create a new transport instance with non-default options
     pub fn with_options(options: TransportOptions) -> TransportResult<Self> {
         crate::capture::init();
+        let early_acks = options.early_acks;
+        if early_acks {
+            info!("early acks on");
+        }
 
         let runtime = Builder::new_multi_thread()
             .worker_threads(2)
@@ -124,6 +137,7 @@ impl Transport {
             session_manager,
             our_ticket,
             inbox,
+            early_acks,
         })
     }
 
@@ -237,6 +251,9 @@ impl Transport {
     fn discard_earlier_sessions_messages(&self) {
         self.inbox.session_began();
         self.friends.game_session_began();
+        if self.early_acks {
+            info!("early acks on");
+        }
     }
 
     /// Join a session using the host ticket
@@ -623,6 +640,7 @@ impl Transport {
             is_host: self.session_manager.is_host(),
             host: self.session_manager.get_host_node_id(),
             local_player: self.session_manager.local_player_id(),
+            two_players: self.session_manager.get_players().len() == 2,
         };
         let result = self.friends.send_game(from, to, guaranteed, data, &facts);
         if result.is_ok() {

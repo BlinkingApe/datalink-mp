@@ -205,7 +205,7 @@ impl ConnectionManager {
             let connection = connection.clone();
             move || connection.paths().iter().find(|p| p.is_selected()).map(|p| p.stats().rtt)
         });
-        Link::new(outbox, pipeline, connection.clone())
+        Link::new(outbox, pipeline.with_early_acks(self.options.early_acks), connection.clone())
     }
 
     /// Connect to a peer by ticket, unless it is already connected.

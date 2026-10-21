@@ -1660,3 +1660,156 @@ fn test_host_staying_away_past_the_bound_migrates_once_while_redials_are_in_flig
     assert!(alice.session_manager().is_host());
     assert_eq!(alice.session_manager().get_players().len(), 2);
 }
+
+// ---------------------------------------------------------------------------
+// Early acks (DATALINK_EARLY_ACKS), two-player games
+// ---------------------------------------------------------------------------
+
+fn early_ack_options() -> datalink_transport::TransportOptions {
+    datalink_transport::TransportOptions { early_acks: true, ..Default::default() }
+}
+
+/// A JACKAL message of `kind` and `seq`, 24 bytes with a recognisable tail.
+fn jackal(kind: u16, seq: u32) -> Vec<u8> {
+    let mut d: Vec<u8> = (0..24u8).map(|i| 0x40 + i).collect();
+    d[0..2].copy_from_slice(&kind.to_le_bytes());
+    d[2..4].copy_from_slice(&[0, 0]);
+    d[4..8].copy_from_slice(&seq.to_le_bytes());
+    d
+}
+
+fn jackal_kind_seq(data: &[u8]) -> Option<(u16, u32)> {
+    let kind = u16::from_le_bytes(data.get(0..2)?.try_into().ok()?);
+    let seq = u32::from_le_bytes(data.get(4..8)?.try_into().ok()?);
+    Some((kind, seq))
+}
+
+fn named(short: &str) -> PlayerName {
+    PlayerName { short_name: short.to_string(), long_name: short.to_string() }
+}
+
+/// A host and a joiner, both with Early acks on, each with a player. Returns
+/// (host, joiner, host's player, joiner's player).
+fn early_ack_pair() -> Option<(Transport, Transport, u32, u32)> {
+    let host = create_transport_with_options(early_ack_options())?;
+    let joiner = create_transport_with_options(early_ack_options())?;
+    host.create_session(SessionDesc {
+        guid_instance: GUID::new_random(),
+        guid_application: GUID::new_random(),
+        session_name: "Early acks".to_string(),
+        max_players: 4,
+        ..Default::default()
+    });
+    let host_player = host.create_player(named("Host"), 0, vec![0x03]).expect("host player");
+    let joiner_player = joiner.join_session_by_ticket(host.our_ticket()).expect("join");
+    joiner.create_player(named("Joiner"), 0, vec![0x42]);
+    poll_until(Duration::from_secs(10), || {
+        host.session_manager().get_player_data(joiner_player, false).map(|_| ())
+    })
+    .expect("host sees the joiner");
+    Some((host, joiner, host_player, joiner_player))
+}
+
+type Got = (u16, u32, u32, Vec<u8>);
+
+/// Game messages (not system ones) waiting in `t`'s inbox, as (kind, seq, from, bytes).
+fn drain_game(t: &Transport) -> Vec<Got> {
+    let mut out = Vec::new();
+    while let Some(qm) = t.receive() {
+        if qm.from != 0 {
+            if let Some((k, s)) = jackal_kind_seq(&qm.data) {
+                out.push((k, s, qm.from, qm.data));
+            }
+        }
+    }
+    out
+}
+
+/// Wait until `t` has been handed a game message of this kind and seq, and
+/// return every game message received up to then.
+fn receive_until(t: &Transport, kind: u16, seq: u32) -> Vec<Got> {
+    let mut got = Vec::new();
+    let found = poll_until(Duration::from_secs(10), || {
+        got.extend(drain_game(t));
+        got.iter().any(|g| (g.0, g.1) == (kind, seq)).then_some(())
+    });
+    let seen: Vec<_> = got.iter().map(|g| (g.0, g.1)).collect();
+    assert!(found.is_some(), "never received kind {kind:#x} seq {seq}; got {seen:?}");
+    got
+}
+
+#[test]
+fn early_ack_appears_at_once_the_real_ack_is_swallowed_and_a_resend_is_dropped() {
+    let Some((host, joiner, host_player, joiner_player)) = early_ack_pair() else { return };
+    drain_game(&joiner);
+    drain_game(&host);
+
+    let m = jackal(4, 1);
+    joiner.send(joiner_player, host_player, m.clone(), true).unwrap();
+    // Right after Send returns, with the host not having read anything yet.
+    let acks = drain_game(&joiner);
+    assert_eq!(acks.len(), 1, "one early ack: {acks:?}");
+    assert_eq!((acks[0].0, acks[0].1, acks[0].2), (2, 1, host_player));
+    let mut want = m[..12].to_vec();
+    want[0] = 2;
+    assert_eq!(acks[0].3, want);
+
+    // The resend is dropped: the host sees the message once.
+    joiner.send(joiner_player, host_player, m.clone(), true).unwrap();
+    joiner.send(joiner_player, host_player, jackal(4, 2), true).unwrap();
+    let seen = receive_until(&host, 4, 2);
+    let copies: Vec<_> = seen.iter().filter(|g| (g.0, g.1) == (4, 1)).collect();
+    assert_eq!(copies.len(), 1);
+    assert_eq!(copies[0].3, m, "the game receives exactly the bytes sent");
+    drain_game(&joiner);
+
+    // The host's real ack of seq 1 is swallowed; a later message arrives.
+    host.send(host_player, joiner_player, jackal(2, 1), true).unwrap();
+    host.send(host_player, joiner_player, jackal(0x12, 1), true).unwrap();
+    let seen = receive_until(&joiner, 0x12, 1);
+    assert!(!seen.iter().any(|g| (g.0, g.1) == (2, 1)), "real ack reached the game: {seen:?}");
+}
+
+#[test]
+fn the_17th_early_ack_is_withheld_until_a_real_ack_frees_a_slot() {
+    let Some((host, joiner, host_player, joiner_player)) = early_ack_pair() else { return };
+    drain_game(&joiner);
+    for seq in 1..=17 {
+        joiner.send(joiner_player, host_player, jackal(4, seq), true).unwrap();
+    }
+    let acks = drain_game(&joiner);
+    let seqs: Vec<u32> = acks.iter().map(|a| a.1).collect();
+    assert_eq!(seqs, (1..=16).collect::<Vec<_>>());
+
+    host.send(host_player, joiner_player, jackal(2, 1), true).unwrap();
+    host.send(host_player, joiner_player, jackal(0x12, 1), true).unwrap();
+    let seen = receive_until(&joiner, 0x12, 1);
+    let got: Vec<_> = seen.iter().map(|g| (g.0, g.1)).collect();
+    assert!(got.contains(&(2, 17)), "released early ack for 17: {got:?}");
+    assert!(!got.contains(&(2, 1)), "real ack 1 swallowed: {got:?}");
+    // And the host's game still received all 17, in order.
+    let seen = receive_until(&host, 4, 17);
+    let seqs: Vec<u32> = seen.iter().filter(|g| g.0 == 4).map(|g| g.1).collect();
+    assert_eq!(seqs, (1..=17).collect::<Vec<_>>());
+}
+
+#[test]
+fn no_early_acks_with_three_players() {
+    let Some((host, joiner, host_player, joiner_player)) = early_ack_pair() else { return };
+    let Some(third) = create_transport_with_options(early_ack_options()) else { return };
+    third.join_session_by_ticket(host.our_ticket()).expect("third joins");
+    third.create_player(named("Third"), 0, vec![0x42]);
+    poll_until(Duration::from_secs(10), || {
+        (host.session_manager().get_players().len() == 3).then_some(())
+    })
+    .expect("host has three players");
+    drain_game(&joiner);
+    drain_game(&host);
+
+    host.send(host_player, joiner_player, jackal(4, 1), true).unwrap();
+    assert!(drain_game(&host).is_empty(), "host got an early ack in a three-player game");
+    receive_until(&joiner, 4, 1);
+    // The joiner's real ack passes through to the host's game.
+    joiner.send(joiner_player, host_player, jackal(2, 1), true).unwrap();
+    receive_until(&host, 2, 1);
+}
