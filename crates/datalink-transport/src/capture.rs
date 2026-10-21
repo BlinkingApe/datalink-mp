@@ -163,6 +163,46 @@ impl Capture {
         self.write(line);
     }
 
+    /// An Early ack was given to the game for the `out` message `id`, after
+    /// being withheld for `withheld_us` (0 when it was made at once).
+    fn early_ack(&self, peer: &[u8; 32], seq: u32, id: Option<u64>, withheld_us: u64) {
+        self.write(json!({
+            "ev": "early_ack", "t_us": self.t_us(), "peer": peer_label(peer),
+            "seq": seq, "id": id, "withheld_us": withheld_us,
+        }));
+    }
+
+    /// The real ack of an Early-acked message was swallowed, `rtt_us` after
+    /// the message was queued.
+    fn real_ack(&self, peer: &[u8; 32], seq: u32, rtt_us: u64) {
+        self.write(json!({
+            "ev": "real_ack", "t_us": self.t_us(), "peer": peer_label(peer),
+            "seq": seq, "rtt_us": rtt_us,
+        }));
+    }
+
+    /// A resend of a message this connection already carried was dropped.
+    fn resend_dropped(&self, peer: &[u8; 32], seq: u32) {
+        self.write(json!({
+            "ev": "resend_dropped", "t_us": self.t_us(), "peer": peer_label(peer), "seq": seq,
+        }));
+    }
+
+    /// `count` in-flight frames were replayed to `peer` on a reopened stream.
+    fn replay(&self, peer: &[u8; 32], count: usize) {
+        self.write(json!({
+            "ev": "replay", "t_us": self.t_us(), "peer": peer_label(peer), "count": count,
+        }));
+    }
+
+    /// Whether Early acks are on for `peer` this Game session, and why.
+    fn early_acks_state(&self, peer: &[u8; 32], on: bool, why: &str) {
+        self.write(json!({
+            "ev": "early_acks", "t_us": self.t_us(), "peer": peer_label(peer),
+            "on": on, "why": why,
+        }));
+    }
+
     /// Record a later moment in a game message's life.
     fn mark(&self, ev: &str, id: u64) {
         self.write(json!({ "ev": ev, "id": id, "t_us": self.t_us() }));
@@ -431,6 +471,44 @@ pub fn inbound(peer: &[u8; 32], from: DPID, to: DPID, guaranteed: bool, data: &[
     Some(capture()?.game_message("in", Some(peer), from, to, guaranteed, data))
 }
 
+/// An Early ack was given to the game for the `out` message `id` (its capture
+/// id, if a capture was running), `withheld_us` after the message was queued
+/// when the cap held it back, else 0.
+pub fn early_ack(peer: &[u8; 32], seq: u32, id: Option<u64>, withheld_us: u64) {
+    if let Some(c) = capture() {
+        c.early_ack(peer, seq, id, withheld_us);
+    }
+}
+
+/// The real ack of an Early-acked message was swallowed.
+pub fn real_ack(peer: &[u8; 32], seq: u32, rtt_us: u64) {
+    if let Some(c) = capture() {
+        c.real_ack(peer, seq, rtt_us);
+    }
+}
+
+/// A resend the same connection already carried was dropped.
+pub fn resend_dropped(peer: &[u8; 32], seq: u32) {
+    if let Some(c) = capture() {
+        c.resend_dropped(peer, seq);
+    }
+}
+
+/// `count` in-flight frames were replayed to `peer` after a stream was reopened.
+pub fn replay(peer: &[u8; 32], count: usize) {
+    if let Some(c) = capture() {
+        c.replay(peer, count);
+    }
+}
+
+/// Once per Game session and friend: Early acks are `on`, or off for `why`
+/// (`switch`, `players` or `connection_lost`).
+pub fn early_acks_state(peer: &[u8; 32], on: bool, why: &str) {
+    if let Some(c) = capture() {
+        c.early_acks_state(peer, on, why);
+    }
+}
+
 /// An outbound message's frame was written to its peer's stream.
 pub fn written(id: u64) {
     if let Some(c) = capture() {
@@ -507,6 +585,40 @@ mod tests {
         assert_eq!(capture_dir(None), None);
         assert_eq!(capture_dir(Some(OsString::new())), None);
         assert_eq!(capture_dir(Some(OsString::from("caps"))), Some(PathBuf::from("caps")));
+    }
+
+    #[test]
+    fn early_ack_lines_carry_their_fields() {
+        let dir = std::env::temp_dir().join(format!("datalink-capture-early-{}", std::process::id()));
+        let (capture, path) = Capture::open(&dir).unwrap();
+        let peer = [0xab, 0xcd, 0, 1, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9];
+        capture.early_acks_state(&peer, false, "players");
+        capture.early_ack(&peer, 7, Some(12), 0);
+        capture.early_ack(&peer, 8, None, 1500);
+        capture.real_ack(&peer, 7, 61_000);
+        capture.resend_dropped(&peer, 7);
+        capture.replay(&peer, 3);
+        drop(capture);
+        let mut text = String::new();
+        for _ in 0..50 {
+            text = std::fs::read_to_string(&path).unwrap();
+            if text.lines().count() == 7 {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let l: Vec<Value> = text.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(l.len(), 7);
+        let p = "abcd0001";
+        assert_eq!((l[1]["ev"].as_str(), l[1]["peer"].as_str()), (Some("early_acks"), Some(p)));
+        assert_eq!((&l[1]["on"], &l[1]["why"]), (&json!(false), &json!("players")));
+        assert_eq!(l[2]["ev"], "early_ack");
+        assert_eq!((&l[2]["seq"], &l[2]["id"], &l[2]["withheld_us"]), (&json!(7), &json!(12), &json!(0)));
+        assert_eq!((&l[3]["id"], &l[3]["withheld_us"]), (&Value::Null, &json!(1500)));
+        assert_eq!((&l[4]["ev"], &l[4]["seq"], &l[4]["rtt_us"]), (&json!("real_ack"), &json!(7), &json!(61_000)));
+        assert_eq!((&l[5]["ev"], &l[5]["seq"]), (&json!("resend_dropped"), &json!(7)));
+        assert_eq!((&l[6]["ev"], &l[6]["count"]), (&json!("replay"), &json!(3)));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

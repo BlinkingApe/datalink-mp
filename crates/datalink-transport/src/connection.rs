@@ -205,6 +205,19 @@ impl ConnectionManager {
             let connection = connection.clone();
             move || connection.paths().iter().find(|p| p.is_selected()).map(|p| p.stats().rtt)
         });
+        let pipeline = pipeline.with_link_stats({
+            let connection = connection.clone();
+            move || {
+                let paths = connection.paths();
+                let s = paths.iter().find(|p| p.is_selected())?.stats();
+                Some(crate::friend_pipeline::LinkStats {
+                    datagrams_sent: s.udp_tx.datagrams,
+                    lost_packets: s.lost_packets,
+                    congestion_events: s.congestion_events,
+                    cwnd: s.cwnd,
+                })
+            }
+        });
         Link::new(outbox, pipeline.with_early_acks(self.options.early_acks), connection.clone())
     }
 

@@ -298,3 +298,10 @@ for i in range(0, len(cs) - 2, 3):
     j, h = cs[i][2], cs[i + 2][2]
     print(f'checksums {clk([d for d in first_copies() if d.get("type") == "0x2307"][i // 3]["t_us"])}: '
           f'mismatched slots {[k for k in range(21) if j[k] != h[k]]}')
+
+# ---------------------------------------------------------------- early acks (ticket build/09)
+import early_ack_analysis as ea  # same folder; standard library only
+
+if any(d['ev'] in ('early_ack', 'early_acks') for d in L):
+    print('\n== Early acks: hops, network time and the delivery check')
+    ea.report(L, PEER, windows=[(name, a, b) for name, a, b in W])

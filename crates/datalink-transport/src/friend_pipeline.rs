@@ -15,10 +15,11 @@
 
 use crate::capture;
 use crate::turn_sync::{self, Activity, Direction, Event, SyncKind, TurnSyncDetector};
+pub use crate::turn_sync::{EarlyAckCounts, LinkFigures, LinkStats};
 use dp_types::DPID;
 use parking_lot::Mutex;
 use crate::jackal::Jackal;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
 /// The most reliable messages in flight per friend that get an Early ack.
@@ -81,12 +82,33 @@ struct EarlyAcks {
     carried: HashSet<u32>,
     /// Seqs Early-acked, whose real acks (duplicates too) are swallowed.
     acked: HashSet<u32>,
-    /// Early-acked seqs still waiting for their real ack (the slots in use).
-    in_flight: HashSet<u32>,
+    /// Early-acked seqs still waiting for their real ack (the slots in use),
+    /// with the time each message was queued.
+    in_flight: HashMap<u32, Instant>,
     /// Sent, but the cap was full: their Early acks wait for a free slot.
-    withheld: VecDeque<(u32, EarlyAck)>,
+    withheld: VecDeque<Withheld>,
     /// The connection was lost: no more Early acks this Game session.
     lost: bool,
+    /// Whether this Game session's `early_acks` capture line is written.
+    state_noted: bool,
+}
+
+/// A message whose Early ack waits for a free slot.
+struct Withheld {
+    seq: u32,
+    ack: EarlyAck,
+    /// When the message was queued.
+    since: Instant,
+    /// The message's `out` line in the capture.
+    capture_id: Option<u64>,
+}
+
+/// What `early_outbound` decided, for the capture lines written once the
+/// message's own `out` line (and its id) exist.
+enum Note {
+    Made(u32),
+    Withheld(u32),
+    Resend(u32),
 }
 
 /// How long "Turn synced" stays on the page after a sync ends.
@@ -103,12 +125,32 @@ pub enum SyncView {
 
 struct State {
     early: EarlyAcks,
+    /// Early ack counts since the pipeline began, never reset.
+    counts: EarlyAckCounts,
+    /// The counts when the running sync began.
+    sync_base: EarlyAckCounts,
     detector: TurnSyncDetector,
     /// The latest finished sync, for the short "Turn synced".
     finished: Option<(Instant, SyncKind, Option<u32>)>,
     now: Box<dyn Fn() -> Instant + Send>,
     rtt: Box<dyn FnMut() -> Option<Duration> + Send>,
+    /// Reads the link's counters and congestion window, if it can.
+    link: Option<Box<dyn FnMut() -> Option<LinkStats> + Send>>,
+    /// The running sync's link readings: at its start, and the windows seen.
+    sync_link: Option<(LinkStats, Vec<u64>, Instant)>,
+    /// What the last finished sync logged.
+    last_sync: Option<SyncFigures>,
 }
+
+/// The figures the pipeline adds to a finished sync's log line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncFigures {
+    pub early: EarlyAckCounts,
+    pub link: Option<LinkFigures>,
+}
+
+/// Least time between two congestion window readings during a sync.
+const LINK_SAMPLE_EVERY: Duration = Duration::from_millis(250);
 
 /// One friend's pipeline. See the module docs.
 pub struct FriendPipeline {
@@ -136,12 +178,30 @@ impl FriendPipeline {
             early_acks: false,
             state: Mutex::new(State {
                 early: EarlyAcks::default(),
+                counts: EarlyAckCounts::default(),
+                sync_base: EarlyAckCounts::default(),
                 detector: TurnSyncDetector::new(),
                 finished: None,
                 now: Box::new(now),
                 rtt: Box::new(rtt),
+                link: None,
+                sync_link: None,
+                last_sync: None,
             }),
         }
+    }
+
+    /// Give the pipeline a way to read the friend's connection (datagrams
+    /// sent, packets lost, congestion events, congestion window), for the
+    /// figures on each sync's log line.
+    pub fn with_link_stats(self, link: impl FnMut() -> Option<LinkStats> + Send + 'static) -> Self {
+        self.state.lock().link = Some(Box::new(link));
+        self
+    }
+
+    /// What the last finished sync added to its log line.
+    pub fn last_sync_figures(&self) -> Option<SyncFigures> {
+        self.state.lock().last_sync
     }
 
     /// Turn Early acks on or off for this pipeline (off unless asked).
@@ -160,41 +220,85 @@ impl FriendPipeline {
         data: &[u8],
         two_players: bool,
     ) -> OutboundResult {
-        let outcome = if self.early_acks && two_players {
+        self.note_early_acks_state(data, two_players);
+        let (outcome, note) = if self.early_acks && two_players {
             self.early_outbound(from, data)
         } else {
-            OutboundOutcome::Send
+            (OutboundOutcome::Send, None)
         };
-        if outcome == OutboundOutcome::DropResend {
+        if let Some(Note::Resend(seq)) = note {
+            capture::resend_dropped(&self.peer, seq);
             return OutboundResult { outcome, capture_id: None, sync_event: None };
         }
         let capture_id = capture::outbound_game(&self.peer, from, to, guaranteed, data);
+        match note {
+            Some(Note::Made(seq)) => capture::early_ack(&self.peer, seq, capture_id, 0),
+            Some(Note::Withheld(seq)) => {
+                let mut s = self.state.lock();
+                if let Some(w) = s.early.withheld.iter_mut().find(|w| w.seq == seq) {
+                    w.capture_id = capture_id;
+                }
+            }
+            _ => {}
+        }
         let sync_event = self.observe(Direction::Out, data);
         OutboundResult { outcome, capture_id, sync_event }
     }
 
-    fn early_outbound(&self, from: DPID, data: &[u8]) -> OutboundOutcome {
-        let Some(j) = Jackal::decode(data).filter(Jackal::is_exactly_reliable_data) else {
-            return OutboundOutcome::Send;
-        };
-        let Some(head) = data.get(..12) else { return OutboundOutcome::Send };
+    /// The Early ack counts so far, since this pipeline began.
+    pub fn snapshot(&self) -> EarlyAckCounts {
+        self.state.lock().counts
+    }
+
+    /// Write the `early_acks` capture line the first time a reliable message
+    /// goes out in a Game session (and again after a lost connection).
+    fn note_early_acks_state(&self, data: &[u8], two_players: bool) {
+        if !capture::enabled() || Jackal::decode(data).filter(Jackal::is_exactly_reliable_data).is_none() {
+            return;
+        }
         let mut s = self.state.lock();
+        if std::mem::replace(&mut s.early.state_noted, true) {
+            return;
+        }
+        let why = if !self.early_acks {
+            "switch"
+        } else if s.early.lost {
+            "connection_lost"
+        } else if !two_players {
+            "players"
+        } else {
+            "on"
+        };
+        drop(s);
+        capture::early_acks_state(&self.peer, why == "on", why);
+    }
+
+    fn early_outbound(&self, from: DPID, data: &[u8]) -> (OutboundOutcome, Option<Note>) {
+        let Some(j) = Jackal::decode(data).filter(Jackal::is_exactly_reliable_data) else {
+            return (OutboundOutcome::Send, None);
+        };
+        let Some(head) = data.get(..12) else { return (OutboundOutcome::Send, None) };
+        let mut s = self.state.lock();
+        let s = &mut *s;
+        let now = (s.now)();
         let e = &mut s.early;
         if e.lost {
-            return OutboundOutcome::Send;
+            return (OutboundOutcome::Send, None);
         }
         if !e.carried.insert(j.seq) {
-            return OutboundOutcome::DropResend;
+            return (OutboundOutcome::DropResend, Some(Note::Resend(j.seq)));
         }
         let mut ack = EarlyAck { to: from, data: head.try_into().expect("12 bytes") };
         ack.data[0..2].copy_from_slice(&0x0002u16.to_le_bytes());
         if e.in_flight.len() >= EARLY_ACK_CAP {
-            e.withheld.push_back((j.seq, ack));
-            return OutboundOutcome::Send;
+            e.withheld.push_back(Withheld { seq: j.seq, ack, since: now, capture_id: None });
+            s.counts.withheld += 1;
+            return (OutboundOutcome::Send, Some(Note::Withheld(j.seq)));
         }
-        e.in_flight.insert(j.seq);
+        e.in_flight.insert(j.seq, now);
         e.acked.insert(j.seq);
-        OutboundOutcome::SendWithEarlyAck(ack)
+        s.counts.made += 1;
+        (OutboundOutcome::SendWithEarlyAck(ack), Some(Note::Made(j.seq)))
     }
 
     /// A game message was read from the friend.
@@ -210,23 +314,29 @@ impl FriendPipeline {
             return InboundOutcome::Deliver;
         };
         let mut s = self.state.lock();
+        let s = &mut *s;
+        let now = (s.now)();
         let e = &mut s.early;
         if e.acked.contains(&j.seq) {
+            s.counts.swallowed += 1;
             // Free the slot (once, for duplicates) and give withheld acks their turn.
             let mut released = Vec::new();
-            if e.in_flight.remove(&j.seq) {
+            if let Some(queued) = e.in_flight.remove(&j.seq) {
+                capture::real_ack(&self.peer, j.seq, micros(now.saturating_duration_since(queued)));
                 while e.in_flight.len() < EARLY_ACK_CAP {
-                    let Some((seq, ack)) = e.withheld.pop_front() else { break };
-                    e.in_flight.insert(seq);
-                    e.acked.insert(seq);
-                    released.push(ack);
+                    let Some(w) = e.withheld.pop_front() else { break };
+                    e.in_flight.insert(w.seq, w.since);
+                    e.acked.insert(w.seq);
+                    let waited = micros(now.saturating_duration_since(w.since));
+                    capture::early_ack(&self.peer, w.seq, w.capture_id, waited);
+                    released.push(w.ack);
                 }
             }
             return InboundOutcome::Swallow { released };
         }
         // The real ack of a message whose Early ack was withheld is the only
         // ack the game gets for it; the withheld one is no longer wanted.
-        e.withheld.retain(|(seq, _)| *seq != j.seq);
+        e.withheld.retain(|w| w.seq != j.seq);
         InboundOutcome::Deliver
     }
 
@@ -254,7 +364,7 @@ impl FriendPipeline {
     }
 
     fn observe(&self, dir: Direction, data: &[u8]) -> Option<Event> {
-        let event = {
+        let (event, figures) = {
             let mut s = self.state.lock();
             let s = &mut *s;
             let now = (s.now)();
@@ -262,13 +372,54 @@ impl FriendPipeline {
             if let Some(Event::Finished(r)) = &event {
                 s.finished = Some((now, r.kind, r.turn));
             }
-            event
+            let reading = if event.is_some() || s.sync_link.is_some() {
+                s.link.as_mut().and_then(|read| read())
+            } else {
+                None
+            };
+            match (&event, reading) {
+                (Some(Event::Started(_)), reading) => {
+                    s.sync_base = s.counts;
+                    s.sync_link = reading.map(|r| (r, vec![r.cwnd], now));
+                }
+                (Some(Event::Finished(_)), Some(end)) => {
+                    if let Some((_, cwnds, _)) = s.sync_link.as_mut() {
+                        cwnds.push(end.cwnd);
+                    }
+                }
+                (None, Some(r)) => {
+                    if let Some((_, cwnds, last)) = s.sync_link.as_mut() {
+                        if now.saturating_duration_since(*last) >= LINK_SAMPLE_EVERY {
+                            *last = now;
+                            cwnds.push(r.cwnd);
+                        }
+                    }
+                }
+                _ => {}
+            }
+            let figures = match (&event, reading) {
+                (Some(Event::Finished(_)), end) => {
+                    let link = match (s.sync_link.take(), end) {
+                        (Some((start, mut cwnds, _)), Some(end)) => Some(LinkFigures::between(start, end, &mut cwnds)),
+                        _ => None,
+                    };
+                    let f = SyncFigures { early: s.counts.since(s.sync_base), link };
+                    s.last_sync = Some(f);
+                    Some(f)
+                }
+                _ => None,
+            };
+            (event, figures)
         };
-        if let Some(Event::Finished(report)) = &event {
-            turn_sync::log_report(&self.peer, report);
+        if let (Some(Event::Finished(report)), Some(f)) = (&event, figures) {
+            turn_sync::log_report(&self.peer, report, f.early, f.link);
         }
         event
     }
+}
+
+fn micros(d: Duration) -> u64 {
+    d.as_micros() as u64
 }
 
 #[cfg(test)]
@@ -346,6 +497,63 @@ mod tests {
         assert!(matches!(pipe.sync_view(), Some(SyncView::Synced { kind: SyncKind::Turn, .. })));
         *clock.lock() = base + Duration::from_secs(5) + SYNCED_SHOWN_FOR;
         assert_eq!(pipe.sync_view(), None);
+    }
+
+    #[test]
+    fn a_sync_carries_the_links_growth_and_median_window() {
+        let base = Instant::now();
+        let clock = Arc::new(Mutex::new(base));
+        let stats = Arc::new(Mutex::new(LinkStats::default()));
+        let (c, st) = (clock.clone(), stats.clone());
+        let pipe = FriendPipeline::new([1; 32], move || *c.lock(), || None).with_link_stats(move || Some(*st.lock()));
+        let step = |ms: u64, s: LinkStats| {
+            *clock.lock() = base + Duration::from_millis(ms);
+            *stats.lock() = s;
+        };
+        let mut start = vec![4, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x83, 0, 0, 0, 0, 0, 0];
+        start.resize(32, 0);
+        let mut end = vec![4, 0, 0, 0, 2, 0, 0, 0, 0x09, 0x43, 0, 0, 0, 0, 0, 0];
+        end.resize(32, 0);
+        let mut mid = vec![4, 0, 0, 0, 3, 0, 0, 0, 0x05, 0x23, 0, 0, 0, 0, 0, 0];
+        mid.resize(32, 0);
+        // Counters before the sync don't count; cwnd readings: 30, 10, 20, 50.
+        step(0, LinkStats { datagrams_sent: 100, lost_packets: 4, congestion_events: 1, cwnd: 99 });
+        pipe.inbound(2, 1, true, &mid);
+        assert_eq!(pipe.last_sync_figures(), None);
+        step(1000, LinkStats { datagrams_sent: 120, lost_packets: 5, congestion_events: 1, cwnd: 30 });
+        pipe.outbound(1, 2, true, &start, false);
+        step(1100, LinkStats { datagrams_sent: 130, lost_packets: 5, congestion_events: 1, cwnd: 777 });
+        pipe.inbound(2, 1, true, &mid); // under 250 ms after the last reading: not read
+        step(1300, LinkStats { datagrams_sent: 150, lost_packets: 6, congestion_events: 2, cwnd: 10 });
+        pipe.inbound(2, 1, true, &ack_for(4));
+        step(1600, LinkStats { datagrams_sent: 170, lost_packets: 8, congestion_events: 3, cwnd: 20 });
+        pipe.inbound(2, 1, true, &ack_for(5));
+        step(1900, LinkStats { datagrams_sent: 220, lost_packets: 9, congestion_events: 4, cwnd: 50 });
+        pipe.inbound(2, 1, true, &end);
+        let f = pipe.last_sync_figures().expect("the sync finished");
+        assert_eq!(
+            f.link,
+            Some(LinkFigures { datagrams_sent: 100, lost_packets: 4, congestion_events: 3, cwnd_median: 25 })
+        );
+    }
+
+    fn ack_for(seq: u32) -> Vec<u8> {
+        let mut v = vec![0u8; 12];
+        v[0] = 2;
+        v[4..8].copy_from_slice(&seq.to_le_bytes());
+        v
+    }
+
+    #[test]
+    fn without_link_stats_a_sync_has_no_link_figures() {
+        let pipe = FriendPipeline::new([1; 32], Instant::now, || None);
+        let mut start = vec![4, 0, 0, 0, 1, 0, 0, 0, 0x01, 0x83, 0, 0, 0, 0, 0, 0];
+        start.resize(32, 0);
+        let mut end = vec![4, 0, 0, 0, 2, 0, 0, 0, 0x09, 0x43, 0, 0, 0, 0, 0, 0];
+        end.resize(32, 0);
+        pipe.outbound(1, 2, true, &start, false);
+        pipe.inbound(2, 1, true, &end);
+        assert_eq!(pipe.last_sync_figures().map(|f| f.link), Some(None));
     }
 
     #[test]
@@ -496,6 +704,25 @@ mod early_ack_tests {
         assert_eq!(p.inbound(2, 1, true, &msg(2, 17)).outcome, InboundOutcome::Deliver);
         let r = p.inbound(2, 1, true, &msg(2, 1)).outcome;
         assert_eq!(r, InboundOutcome::Swallow { released: vec![] });
+    }
+
+    #[test]
+    fn the_snapshot_counts_early_acks_made_withheld_and_swallowed() {
+        let p = pipe();
+        assert_eq!(p.snapshot(), EarlyAckCounts::default());
+        for seq in 1..=17 {
+            send(&p, 4, seq);
+        }
+        send(&p, 4, 3); // a dropped resend is none of the three
+        assert_eq!(p.snapshot(), EarlyAckCounts { made: 16, withheld: 1, swallowed: 0 });
+        p.inbound(2, 1, true, &msg(2, 1));
+        p.inbound(2, 1, true, &msg(2, 1)); // duplicates are swallowed too
+        p.inbound(2, 1, true, &msg(2, 99)); // not Early-acked: delivered
+        assert_eq!(p.snapshot(), EarlyAckCounts { made: 16, withheld: 1, swallowed: 2 });
+        // Counts run on across Game sessions and lost connections.
+        p.game_session_began();
+        p.connection_lost();
+        assert_eq!(p.snapshot().made, 16);
     }
 
     #[test]
