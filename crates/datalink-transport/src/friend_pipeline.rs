@@ -18,6 +18,7 @@ use crate::turn_sync::{self, Direction, Event, TurnSyncDetector};
 use dp_types::DPID;
 use parking_lot::Mutex;
 use crate::jackal::Jackal;
+use crate::protocol::{encode_message, Message};
 use std::collections::{HashSet, VecDeque};
 use std::time::{Duration, Instant};
 
@@ -87,6 +88,10 @@ struct EarlyAcks {
     withheld: VecDeque<(u32, EarlyAck)>,
     /// The connection was lost: no more Early acks this Game session.
     lost: bool,
+    /// Reliable messages sent and not yet really acked, as the encoded frames
+    /// the ordered writer carries, in send order: what a reopened stream
+    /// replays. Withheld messages are in it too.
+    frames: Vec<(u32, Vec<u8>)>,
 }
 
 struct State {
@@ -146,7 +151,7 @@ impl FriendPipeline {
         two_players: bool,
     ) -> OutboundResult {
         let outcome = if self.early_acks && two_players {
-            self.early_outbound(from, data)
+            self.early_outbound(from, to, data)
         } else {
             OutboundOutcome::Send
         };
@@ -158,7 +163,7 @@ impl FriendPipeline {
         OutboundResult { outcome, capture_id, sync_event }
     }
 
-    fn early_outbound(&self, from: DPID, data: &[u8]) -> OutboundOutcome {
+    fn early_outbound(&self, from: DPID, to: DPID, data: &[u8]) -> OutboundOutcome {
         let Some(j) = Jackal::decode(data).filter(Jackal::is_exactly_reliable_data) else {
             return OutboundOutcome::Send;
         };
@@ -170,6 +175,14 @@ impl FriendPipeline {
         }
         if !e.carried.insert(j.seq) {
             return OutboundOutcome::DropResend;
+        }
+        if let Ok(frame) = encode_message(&Message::GameMessage {
+            from,
+            to,
+            flags: dp_types::DPSEND_GUARANTEED,
+            data: data.to_vec(),
+        }) {
+            e.frames.push((j.seq, frame));
         }
         let mut ack = EarlyAck { to: from, data: head.try_into().expect("12 bytes") };
         ack.data[0..2].copy_from_slice(&0x0002u16.to_le_bytes());
@@ -196,6 +209,7 @@ impl FriendPipeline {
         };
         let mut s = self.state.lock();
         let e = &mut s.early;
+        e.frames.retain(|(seq, _)| *seq != j.seq);
         if e.acked.contains(&j.seq) {
             // Free the slot (once, for duplicates) and give withheld acks their turn.
             let mut released = Vec::new();
@@ -213,6 +227,13 @@ impl FriendPipeline {
         // ack the game gets for it; the withheld one is no longer wanted.
         e.withheld.retain(|(seq, _)| *seq != j.seq);
         InboundOutcome::Deliver
+    }
+
+    /// The encoded frames of the reliable messages sent on this connection
+    /// that have no real ack yet, in send order. A reopened stream replays
+    /// them first: the early acks promised the game they would arrive.
+    pub fn in_flight_frames(&self) -> Vec<Vec<u8>> {
+        self.state.lock().early.frames.iter().map(|(_, f)| f.clone()).collect()
     }
 
     /// A Game session began: seqs restart, so all state is cleared.
@@ -462,5 +483,51 @@ mod early_ack_tests {
         assert_eq!(p.inbound(2, 1, true, &msg(2, 1)).outcome, InboundOutcome::Deliver);
         p.game_session_began();
         assert!(matches!(send(&p, 4, 2), OutboundOutcome::SendWithEarlyAck(_)));
+    }
+
+    fn frame_of(seq: u32) -> Vec<u8> {
+        crate::protocol::encode_message(&crate::protocol::Message::GameMessage {
+            from: 1,
+            to: 2,
+            flags: dp_types::DPSEND_GUARANTEED,
+            data: msg(4, seq),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn in_flight_frames_are_the_sent_messages_without_a_real_ack_in_order() {
+        let p = pipe();
+        for seq in [1, 2, 3] {
+            send(&p, 4, seq);
+        }
+        assert_eq!(p.in_flight_frames(), vec![frame_of(1), frame_of(2), frame_of(3)]);
+        p.inbound(2, 1, true, &msg(2, 2));
+        assert_eq!(p.in_flight_frames(), vec![frame_of(1), frame_of(3)]);
+        // A resend is not kept twice, and a withheld message is kept too.
+        send(&p, 4, 1);
+        for seq in 4..=20 {
+            send(&p, 4, seq);
+        }
+        assert_eq!(p.in_flight_frames().len(), 19);
+        // The real ack of a withheld message is delivered, and frees its frame.
+        p.inbound(2, 1, true, &msg(2, 20));
+        assert_eq!(p.in_flight_frames().len(), 18);
+    }
+
+    #[test]
+    fn nothing_is_in_flight_after_a_loss_or_a_new_game_session_or_with_the_switch_off() {
+        let p = pipe();
+        send(&p, 4, 1);
+        p.game_session_began();
+        assert!(p.in_flight_frames().is_empty());
+        send(&p, 4, 1);
+        p.connection_lost();
+        assert!(p.in_flight_frames().is_empty());
+        send(&p, 4, 2);
+        assert!(p.in_flight_frames().is_empty());
+        let off = FriendPipeline::new([1; 32], Instant::now, || None);
+        send(&off, 4, 1);
+        assert!(off.in_flight_frames().is_empty());
     }
 }

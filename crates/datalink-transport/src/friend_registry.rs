@@ -49,7 +49,7 @@ pub struct LinkId(u64);
 pub struct Link<H> {
     id: LinkId,
     outbox: Outbox,
-    pipeline: FriendPipeline,
+    pipeline: Arc<FriendPipeline>,
     handle: H,
 }
 
@@ -58,7 +58,7 @@ impl<H> Link<H> {
     /// friend pipeline for this connection, and an opaque connection handle
     /// the registry hands back for request/response streams, path reads and
     /// closing.
-    pub fn new(outbox: Outbox, pipeline: FriendPipeline, handle: H) -> Self {
+    pub fn new(outbox: Outbox, pipeline: Arc<FriendPipeline>, handle: H) -> Self {
         Link {
             id: LinkId(0),
             outbox,
@@ -120,9 +120,16 @@ pub enum LinkEnded {
 }
 
 /// Facts about a friend scoped to the Game session that must outlive a link.
-/// Cleared when a Game session begins. Empty for now.
+/// Cleared when a Game session begins.
 #[derive(Debug, Default)]
-struct GameSessionFacts {}
+struct GameSessionFacts {
+    /// A link to the friend was lost (or handed over from) this Game session:
+    /// whatever it carried may never have arrived, so no Early acks are made
+    /// on any later link to the friend until the next Game session. The
+    /// record outlives the link while the friend is re-dialled, so a new link
+    /// is told this when it opens.
+    lost_a_link: bool,
+}
 
 struct Record<H> {
     /// From our dial, the friend's Hello, or the roster at a loss. Nothing
@@ -136,8 +143,7 @@ struct Record<H> {
     /// Later links to the friend, oldest first, while the current one is open.
     /// Their readers still deliver; one takes over if the current link ends.
     spares: Vec<Arc<Link<H>>>,
-    /// Nothing reads it yet: it is the home for facts that outlive a link.
-    #[allow(dead_code)]
+    /// The home for facts that outlive a link.
     session: GameSessionFacts,
 }
 
@@ -263,6 +269,9 @@ impl<H: Clone> FriendRegistry<H> {
         if ticket.is_some() {
             record.ticket = ticket;
         }
+        if record.session.lost_a_link {
+            link.pipeline.connection_lost();
+        }
         let link = Arc::new(Link { id, ..link });
         if record.link.is_some() {
             record.spares.push(link);
@@ -307,16 +316,22 @@ impl<H: Clone> FriendRegistry<H> {
                 }
                 Some(record) if !record.spares.is_empty() => {
                     let next = record.spares.remove(0);
+                    let promoted = next.clone();
                     let old = record.link.replace(next);
+                    // What the old link carried may be lost with it, and the
+                    // spare knows nothing of it: no Early acks from here on.
+                    record.session.lost_a_link = true;
                     drop(s);
                     debug!(endpoint = %endpoint_short(&friend), "current link ended, a spare took over");
                     if let Some(old) = old {
                         old.pipeline.connection_lost();
                     }
+                    promoted.pipeline.connection_lost();
                     return LinkEnded::Nothing;
                 }
                 Some(record) => {
                     let lost = record.link.take();
+                    record.session.lost_a_link = true;
                     let answer = match &roster.ticket {
                         Some(ticket)
                             if (!roster.was_host || roster.in_progress) && !record.players.is_empty() =>
@@ -393,16 +408,17 @@ impl<H: Clone> FriendRegistry<H> {
         self.state.lock().unroute(player);
     }
 
-    /// A Game session began: every link's pipeline hears it, and each
+    /// A Game session began: every link's pipeline (spares too, as one may be
+    /// promoted) hears it, and each
     /// friend's facts scoped to the Game session are cleared.
     pub fn game_session_began(&self) {
         let links: Vec<Arc<Link<H>>> = {
             let mut s = self.state.lock();
             s.friends
                 .values_mut()
-                .filter_map(|r| {
+                .flat_map(|r| {
                     r.session = GameSessionFacts::default();
-                    r.link.clone()
+                    r.link.iter().chain(&r.spares).cloned().collect::<Vec<_>>()
                 })
                 .collect()
         };
@@ -702,7 +718,7 @@ mod tests {
     fn stand_in(friend: FriendId) -> (Link<()>, UnboundedReceiver<Frame>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (
-            Link::new(tx, FriendPipeline::new(friend, Instant::now, || None), ()),
+            Link::new(tx, Arc::new(FriendPipeline::new(friend, Instant::now, || None)), ()),
             rx,
         )
     }
@@ -1287,5 +1303,82 @@ mod tests {
 
         assert_eq!(reg.disconnect(BOB).len(), 2);
         assert_eq!(reg.disconnect_all().len(), 3);
+    }
+
+    /// Like `stand_in`, with Early acks on.
+    fn early_stand_in(friend: FriendId) -> (Link<()>, UnboundedReceiver<Frame>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let pipeline = FriendPipeline::new(friend, Instant::now, || None).with_early_acks(true);
+        (Link::new(tx, Arc::new(pipeline), ()), rx)
+    }
+
+    /// A reliable JACKAL message (kind 4) with `seq`, sent to `player` with
+    /// two players in the Game session.
+    fn send_reliable(reg: &FriendRegistry<()>, player: DPID, seq: u32) {
+        let mut data = vec![0u8; 24];
+        data[0] = 4;
+        data[4..8].copy_from_slice(&seq.to_le_bytes());
+        let facts = SendFacts { two_players: true, ..joiner() };
+        reg.send_game(LOCAL, player, true, data, &facts).unwrap();
+    }
+
+    /// How many Early acks the next reliable message gets: 1 or 0.
+    fn early_acks_made(reg: &FriendRegistry<()>, inbox: &GameInbox, player: DPID, seq: u32) -> usize {
+        let before = inbox.count();
+        send_reliable(reg, player, seq);
+        inbox.count() - before
+    }
+
+    fn bob_early() -> (FriendRegistry<()>, GameInbox, Linked) {
+        let inbox = GameInbox::new();
+        let reg = FriendRegistry::new(inbox.clone());
+        let (link, rx) = early_stand_in(BOB);
+        let id = reg.link_opened(BOB, None, link, &us());
+        reg.player_joined(BOB_PLAYER, BOB);
+        (reg, inbox, (id, rx))
+    }
+
+    #[test]
+    fn after_a_lost_link_and_a_redial_no_early_acks_for_the_rest_of_the_game_session() {
+        let (reg, inbox, (bob, _brx)) = bob_early();
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 1), 1);
+
+        let _ = reg.link_ended(BOB, bob, a_joiner("bob's ticket"));
+        let (link, _rx) = early_stand_in(BOB);
+        reg.link_opened(BOB, Some("bob's ticket".into()), link, &us());
+
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 2), 0);
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 3), 0);
+
+        // A new Game session starts afresh, on the new link.
+        reg.game_session_began();
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 1), 1);
+    }
+
+    #[test]
+    fn a_hand_over_to_a_spare_counts_as_a_loss_for_the_rest_of_the_game_session() {
+        let (reg, inbox, (first, _first_rx)) = bob_early();
+        let (spare, _spare_rx) = early_stand_in(BOB);
+        reg.link_opened(BOB, Some("bob's ticket".into()), spare, &us());
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 1), 1);
+
+        assert_eq!(reg.link_ended(BOB, first, a_joiner("bob's ticket")), LinkEnded::Nothing);
+
+        // Whatever the first link carried may be lost with it, and the spare
+        // knows nothing of it.
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 2), 0);
+        reg.game_session_began();
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 1), 1);
+    }
+
+    #[test]
+    fn a_forgotten_friend_comes_back_with_early_acks() {
+        let (reg, inbox, (bob, _brx)) = bob_early();
+        let nothing_to_redial = RosterFacts { was_host: false, in_progress: false, ticket: None };
+        assert_eq!(reg.link_ended(BOB, bob, nothing_to_redial), LinkEnded::Nothing);
+        let (link, _rx) = early_stand_in(BOB);
+        reg.link_opened(BOB, None, link, &us());
+        reg.player_joined(BOB_PLAYER, BOB);
+        assert_eq!(early_acks_made(&reg, &inbox, BOB_PLAYER, 1), 1);
     }
 }

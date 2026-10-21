@@ -1,8 +1,10 @@
 //! The frame sink: the seam under the per-friend ordered writer.
 //!
 //! The writer's rule lives in [`run_ordered_writer`]: open the stream lazily on
-//! the first frame, on a failed write reopen once and retry that frame, and if
-//! the reopen or retry fails close the connection and write nothing more.
+//! the first frame, on a failed write reopen once, replay the frames the
+//! friend pipeline says are in flight (the ones already written, in order),
+//! then retry that frame, and if the reopen, a replay or the retry fails close
+//! the connection and write nothing more.
 //! Production uses [`IrohFrameSink`]; tests use [`MemoryFrameSink`].
 
 use crate::connection::STREAM_MAGIC;
@@ -25,13 +27,29 @@ pub trait FrameSink: Send + 'static {
     fn finish(&mut self);
 }
 
-/// The writer: drains `outbox_rx` into `sink` in queue order.
+/// How many recently written frames the writer remembers, to tell which
+/// in-flight frames it has already put on a stream. Far above the in-flight cap.
+const RECENT_FRAMES: usize = 1024;
+
+fn frame_hash(data: &[u8]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    data.hash(&mut h);
+    h.finish()
+}
+
+/// The writer: drains `outbox_rx` into `sink` in queue order. `in_flight`
+/// gives the friend pipeline's in-flight frames, asked only when a stream has
+/// to be reopened: those the writer already wrote are replayed on the new
+/// stream, in order, before the frame being retried.
 pub async fn run_ordered_writer<S: FrameSink>(
     mut sink: S,
     mut outbox_rx: mpsc::UnboundedReceiver<(Vec<u8>, Option<u64>)>,
     peer_label: String,
+    in_flight: impl Fn() -> Vec<Vec<u8>> + Send + 'static,
 ) {
     let mut opened = false;
+    let mut recent: std::collections::VecDeque<u64> = std::collections::VecDeque::new();
     while let Some((data, capture_id)) = outbox_rx.recv().await {
         if !opened {
             if let Err(e) = sink.open().await {
@@ -48,12 +66,28 @@ pub async fn run_ordered_writer<S: FrameSink>(
                 sink.close(b"stream reopen failed");
                 return;
             }
+            let retry = frame_hash(&data);
+            for old in in_flight() {
+                let h = frame_hash(&old);
+                if h == retry || !recent.contains(&h) {
+                    continue;
+                }
+                if let Err(e2) = sink.write_frame(&old).await {
+                    error!(peer = %peer_label, error = %e2, "ordered stream replay failed; dropping connection");
+                    sink.close(b"stream replay failed");
+                    return;
+                }
+            }
             if let Err(e2) = sink.write_frame(&data).await {
                 error!(peer = %peer_label, error = %e2, "ordered stream retry failed; dropping connection");
                 sink.close(b"stream write failed");
                 return;
             }
         }
+        if recent.len() == RECENT_FRAMES {
+            recent.pop_front();
+        }
+        recent.push_back(frame_hash(&data));
         if let Some(id) = capture_id {
             crate::capture::written(id);
         }
@@ -106,7 +140,7 @@ impl FrameSink for IrohFrameSink {
 
 /// One thing the in-memory sink saw.
 #[cfg(test)]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SinkEvent {
     Preamble,
     Frame(Vec<u8>),
@@ -172,13 +206,23 @@ mod tests {
     use super::*;
 
     async fn run(sink: MemoryFrameSink, frames: &[&[u8]]) -> Vec<SinkEvent> {
+        run_with_in_flight(sink, frames, &[]).await
+    }
+
+    /// `in_flight` is what the friend pipeline would hand the writer on a reopen.
+    async fn run_with_in_flight(
+        sink: MemoryFrameSink,
+        frames: &[&[u8]],
+        in_flight: &[&[u8]],
+    ) -> Vec<SinkEvent> {
+        let in_flight: Vec<Vec<u8>> = in_flight.iter().map(|f| f.to_vec()).collect();
         let events = sink.events.clone();
         let (tx, rx) = mpsc::unbounded_channel();
         for f in frames {
             tx.send((f.to_vec(), None)).unwrap();
         }
         drop(tx);
-        run_ordered_writer(sink, rx, "test".into()).await;
+        run_ordered_writer(sink, rx, "test".into(), move || in_flight.clone()).await;
         let v = events.lock().clone();
         v
     }
@@ -218,5 +262,51 @@ mod tests {
     async fn failed_first_open_closes() {
         let ev = run(MemoryFrameSink::failing(&[0], &[]), &[b"a"]).await;
         assert_eq!(ev, vec![Closed]);
+    }
+
+    /// What the friend's JACKAL delivers: each frame once, first copy kept.
+    fn delivered(ev: &[SinkEvent]) -> Vec<SinkEvent> {
+        let mut seen = std::collections::HashSet::new();
+        ev.iter().filter(|e| matches!(e, Frame(_)) && seen.insert((*e).clone())).cloned().collect()
+    }
+
+    #[tokio::test]
+    async fn a_reset_stream_replays_in_flight_frames_in_order_before_the_retried_frame() {
+        // write #2 (frame "c") fails; "a" and "b" are in flight, "d" is queued
+        // and in flight but not written yet, so it is not replayed.
+        let ev = run_with_in_flight(
+            MemoryFrameSink::failing(&[], &[2]),
+            &[b"a", b"b", b"c", b"d"],
+            &[b"a", b"b", b"d"],
+        )
+        .await;
+        assert_eq!(
+            ev,
+            vec![Preamble, f(b"a"), f(b"b"), Preamble, f(b"a"), f(b"b"), f(b"c"), f(b"d")]
+        );
+        assert_eq!(delivered(&ev), vec![f(b"a"), f(b"b"), f(b"c"), f(b"d")]);
+    }
+
+    #[tokio::test]
+    async fn the_retried_frame_is_not_replayed_twice_even_if_in_flight() {
+        let ev = run_with_in_flight(
+            MemoryFrameSink::failing(&[], &[1]),
+            &[b"a", b"b"],
+            &[b"a", b"b"],
+        )
+        .await;
+        assert_eq!(ev, vec![Preamble, f(b"a"), Preamble, f(b"a"), f(b"b")]);
+    }
+
+    #[tokio::test]
+    async fn a_failed_replay_write_closes_the_connection() {
+        // write #1 fails, then the replay of "a" (write #2) fails
+        let ev = run_with_in_flight(
+            MemoryFrameSink::failing(&[], &[1, 2]),
+            &[b"a", b"b"],
+            &[b"a"],
+        )
+        .await;
+        assert_eq!(ev, vec![Preamble, f(b"a"), Preamble, Closed]);
     }
 }
