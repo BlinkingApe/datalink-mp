@@ -43,6 +43,53 @@ fn relay_only_enabled(value: Option<&str>) -> bool {
     }
 }
 
+/// Environment switch (testing aid, not documented for players): picks QUIC's
+/// congestion controller for every connection. `bbr`, `cubic` or `newreno`;
+/// unset or empty keeps iroh's default (Cubic).
+pub const CONGESTION_ENV: &str = "DATALINK_CONGESTION";
+
+/// A QUIC congestion controller the Helper can be switched to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CongestionController {
+    Bbr,
+    Cubic,
+    NewReno,
+}
+
+impl CongestionController {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Bbr => "bbr",
+            Self::Cubic => "cubic",
+            Self::NewReno => "newreno",
+        }
+    }
+
+    fn factory(self) -> Arc<dyn noq_proto::congestion::ControllerFactory + Send + Sync + 'static> {
+        use noq_proto::congestion::{Bbr3Config, CubicConfig, NewRenoConfig};
+        match self {
+            Self::Bbr => Arc::new(Bbr3Config::default()),
+            Self::Cubic => Arc::new(CubicConfig::default()),
+            Self::NewReno => Arc::new(NewRenoConfig::default()),
+        }
+    }
+}
+
+/// The controller a `DATALINK_CONGESTION` value names. Unset or empty is
+/// `None`; an unknown value warns and is `None` too (iroh's default stays).
+fn parse_congestion(value: Option<&str>) -> Option<CongestionController> {
+    let v = value.map(str::trim).filter(|v| !v.is_empty())?;
+    match v.to_ascii_lowercase().as_str() {
+        "bbr" => Some(CongestionController::Bbr),
+        "cubic" => Some(CongestionController::Cubic),
+        "newreno" => Some(CongestionController::NewReno),
+        _ => {
+            warn!("{CONGESTION_ENV}={v:?} is not bbr, cubic or newreno: keeping the default controller");
+            None
+        }
+    }
+}
+
 /// Network topology mode for message routing
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum NetworkMode {
@@ -91,6 +138,9 @@ pub struct TransportOptions {
     pub host_gone_after: Duration,
     /// Whether to make Early acks for a friend in a two-player game
     pub early_acks: bool,
+    /// Congestion controller to use. `None` defers to `DATALINK_CONGESTION`,
+    /// then to iroh's default. Tests set it instead of the environment.
+    pub congestion: Option<CongestionController>,
 }
 
 impl Default for TransportOptions {
@@ -100,6 +150,7 @@ impl Default for TransportOptions {
             dial_timeout: DEFAULT_DIAL_TIMEOUT,
             host_gone_after: DEFAULT_HOST_GONE_AFTER,
             early_acks: relay_only_enabled(std::env::var(EARLY_ACKS_ENV).ok().as_deref()),
+            congestion: None,
         }
     }
 }
@@ -160,6 +211,16 @@ impl Transport {
         if relay_only_enabled(std::env::var(RELAY_ONLY_ENV).ok().as_deref()) {
             info!("{RELAY_ONLY_ENV} is on: IP transports cleared, all connections will be Relayed");
             builder = builder.clear_ip_transports();
+        }
+        if let Some(controller) = options
+            .congestion
+            .or_else(|| parse_congestion(std::env::var(CONGESTION_ENV).ok().as_deref()))
+        {
+            info!("{CONGESTION_ENV} is on: {} congestion controller", controller.name());
+            let config = iroh::endpoint::QuicTransportConfig::builder()
+                .congestion_controller_factory(controller.factory())
+                .build();
+            builder = builder.transport_config(config);
         }
         let endpoint = match builder
             .bind()
@@ -865,6 +926,18 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn congestion_switch_reads_env_value() {
+        assert_eq!(parse_congestion(None), None);
+        assert_eq!(parse_congestion(Some("")), None);
+        assert_eq!(parse_congestion(Some("bbr")), Some(CongestionController::Bbr));
+        assert_eq!(parse_congestion(Some("BBR")), Some(CongestionController::Bbr));
+        assert_eq!(parse_congestion(Some(" cubic ")), Some(CongestionController::Cubic));
+        assert_eq!(parse_congestion(Some("newreno")), Some(CongestionController::NewReno));
+        // Unknown: warns and keeps iroh's default
+        assert_eq!(parse_congestion(Some("vegas")), None);
+    }
 
     #[test]
     fn test_transport_creation() {
