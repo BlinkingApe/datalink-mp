@@ -11,6 +11,7 @@
 mod com;
 mod directplay;
 mod exports;
+mod fast_wake;
 mod globals;
 mod ipc_client;
 mod lobby;
