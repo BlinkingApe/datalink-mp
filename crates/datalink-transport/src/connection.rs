@@ -284,6 +284,15 @@ impl ConnectionManager {
         self.friends.connected_friends().into_iter().map(|(_, c)| c.remote_id()).collect()
     }
 
+    /// What the page shows of each friend's Turn sync, by endpoint ID.
+    pub fn sync_views(&self) -> Vec<(EndpointId, crate::friend_pipeline::SyncView)> {
+        self.friends
+            .sync_views()
+            .into_iter()
+            .filter_map(|(id, v)| Some((EndpointId::from_bytes(&id).ok()?, v)))
+            .collect()
+    }
+
     /// The class of each connected peer's selected path; a peer without a
     /// selected path yet is left out.
     pub fn peer_paths(&self) -> Vec<(EndpointId, crate::path::PathClass)> {

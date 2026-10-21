@@ -276,9 +276,40 @@
   // The badge's words, by the route status reports. Plain text, no alarm colour.
   var PATH_WORDS = { direct: 'Direct', relayed: 'Relayed (slower)' };
 
-  function renderPeers(peers, paths) {
+  // A sync shorter than this leaves the tab title alone.
+  var TITLE_AFTER_SECS = 10;
+  var BASE_TITLE = document.title;
+
+  function formatBytes(n) {
+    return n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+  }
+
+  // The words for one friend's sync, from status's raw facts. Never "waiting for
+  // your friend": most of a sync is a game computing. With several friends the
+  // game that is working is named by its Helper.
+  function activityText(a, id, many) {
+    if (!a) return '';
+    if (a.phase === 'synced') return a.kind === 'game_start' ? 'Game start synced' : 'Turn synced';
+    var text = a.kind === 'game_start' ? 'Syncing the game start' : 'Syncing turn ' + (a.turn === null ? '' : a.turn);
+    text = text.trim();
+    if (a.working === 'you') text += ': your game is working\u2026';
+    else if (a.working === 'friend') text += ': ' + (many ? id + '\u2019s' : 'your friend\u2019s') + ' game is working out the turn';
+    text += ' (' + a.elapsed_secs + ' s' + (a.bytes === null ? '' : ', ' + formatBytes(a.bytes)) + ')';
+    return text;
+  }
+
+  // The tab title changes only for a long sync, to plain text.
+  function renderTitle(sync) {
+    var long = false;
+    for (var id in sync) if (sync[id].phase === 'syncing' && sync[id].elapsed_secs >= TITLE_AFTER_SECS) long = true;
+    var title = long ? 'Syncing\u2026' : BASE_TITLE;
+    if (document.title !== title) document.title = title;
+  }
+
+  function renderPeers(peers, paths, sync) {
     paths = paths || {};
-    var key = peers.map(function (p) { return p + ':' + (paths[p] || ''); }).join(' ');
+    sync = sync || {};
+    var key = peers.map(function (p) { return p + ':' + (paths[p] || '') + ':' + activityText(sync[p], p, peers.length > 1); }).join(' ');
     if (key === shownPeersKey) return;
     shownPeersKey = key;
     if (!peers.length) {
@@ -297,6 +328,13 @@
         badge.className = 'path';
         badge.textContent = ' ' + PATH_WORDS[paths[peers[i]]];
         peersLine.appendChild(badge);
+      }
+      var activity = activityText(sync[peers[i]], peers[i], peers.length > 1);
+      if (activity) {
+        var note = document.createElement('span');
+        note.className = 'activity';
+        note.textContent = ' \u2013 ' + activity;
+        peersLine.appendChild(note);
       }
     }
   }
@@ -348,7 +386,8 @@
     // Step 4 is never ticked: it is the current step once steps 1 and 3 are done.
     setStep(4, false, step1Done && s.game_connected);
 
-    renderPeers(s.peers, s.peer_paths);
+    renderPeers(s.peers, s.peer_paths, s.sync_activity);
+    renderTitle(s.sync_activity || {});
     // Only the Host sees the count at step 2: a Joiner's step 2 already says
     // "Connected to your friend".
     hostingPeers.hidden = s.state !== 'hosting' || !s.peers.length;

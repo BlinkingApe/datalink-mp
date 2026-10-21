@@ -106,6 +106,32 @@ struct Active {
     waiting: HashSet<(Direction, u32)>,
     rtts: Vec<Duration>,
     last_sample: Option<Instant>,
+    /// Which way the latest new data message went: the other side sends next.
+    last_data: Option<Direction>,
+    /// Whether a barrier named phase 7, the leaders resync.
+    resync: bool,
+}
+
+/// Whose game is working out the turn, inferred from who sends next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Working {
+    /// This machine's game.
+    You,
+    /// The friend's game.
+    Friend,
+}
+
+/// What the page shows of a running sync. Follows the detector, so it can't
+/// disagree with the log lines.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Activity {
+    pub kind: SyncKind,
+    pub turn: Option<u32>,
+    pub elapsed: Duration,
+    /// Both ways, shown only for the game start and a resync.
+    pub bytes: Option<u64>,
+    pub working: Option<Working>,
 }
 
 /// Finds Turn syncs and the game start in one friend's game messages.
@@ -140,6 +166,23 @@ impl TurnSyncDetector {
     /// The kind of the sync running now.
     pub fn current(&self) -> Option<SyncKind> {
         self.active.as_ref().map(|a| a.kind)
+    }
+
+    /// What the page shows of the sync running at `now`, if one is.
+    pub fn activity(&self, now: Instant) -> Option<Activity> {
+        let a = self.active.as_ref()?;
+        let show_bytes = a.kind == SyncKind::GameStart || a.resync;
+        Some(Activity {
+            kind: a.kind,
+            turn: a.turn,
+            elapsed: now.saturating_duration_since(a.started),
+            bytes: show_bytes.then_some(a.out_bytes + a.in_bytes),
+            // The side that sent last is waiting on the other one.
+            working: a.last_data.map(|d| match d {
+                Direction::Out => Working::Friend,
+                Direction::In => Working::You,
+            }),
+        })
     }
 
     /// Feed one game message, as seen at `now`. `rtt` is asked for the
@@ -177,6 +220,9 @@ impl TurnSyncDetector {
             } else {
                 if BARRIERS.contains(&ty) {
                     if let Some(a) = self.active.as_mut() {
+                        if data.get(24..28) == Some(&7u32.to_le_bytes()[..]) {
+                            a.resync = true;
+                        }
                         if a.turn.is_none() {
                             a.turn = data.get(28..32).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
                         }
@@ -193,6 +239,9 @@ impl TurnSyncDetector {
 
         if let Some(a) = self.active.as_mut() {
             if is_data {
+                if fresh {
+                    a.last_data = Some(dir);
+                }
                 a.waiting.insert((dir, seq));
             } else if is_ack {
                 a.waiting.remove(&(dir.other(), seq));
@@ -261,6 +310,8 @@ impl TurnSyncDetector {
             waiting: HashSet::new(),
             rtts: Vec::new(),
             last_sample: None,
+            last_data: None,
+            resync: false,
         });
         Some(Event::Started(kind))
     }
@@ -434,6 +485,44 @@ mod tests {
 
     fn feed(d: &mut TurnSyncDetector, base: Instant, ms: u64, dir: Direction, data: &[u8]) -> Option<Event> {
         d.observe(base + Duration::from_millis(ms), dir, data, &mut || None)
+    }
+
+    #[test]
+    fn activity_follows_the_detector_and_names_whose_game_is_working() {
+        let mut d = TurnSyncDetector::new();
+        let t = Instant::now();
+        let at = |ms| t + Duration::from_millis(ms);
+        assert_eq!(d.activity(at(0)), None);
+        feed(&mut d, t, 0, Direction::In, &data_msg(1, 0x8301, 44));
+        let a = d.activity(at(3_000)).unwrap();
+        assert_eq!((a.kind, a.elapsed), (SyncKind::Turn, Duration::from_secs(3)));
+        // The friend sent last, so our game is the one working.
+        assert_eq!(a.working, Some(Working::You));
+        feed(&mut d, t, 10, Direction::Out, &data_msg(2, 0x4303, 44));
+        assert_eq!(d.activity(at(20)).unwrap().working, Some(Working::Friend));
+        // A resent copy of the friend's message changes nothing.
+        feed(&mut d, t, 30, Direction::In, &data_msg(1, 0x8301, 44));
+        assert_eq!(d.activity(at(40)).unwrap().working, Some(Working::Friend));
+        // The same sync between bursts is still the same activity, and it ends with the detector.
+        assert!(d.activity(at(9_000)).is_some());
+        feed(&mut d, t, 9_100, Direction::In, &data_msg(3, 0x4309, 44));
+        assert_eq!(d.activity(at(9_200)), None);
+    }
+
+    #[test]
+    fn bytes_show_only_for_the_game_start_and_a_resync() {
+        let t = Instant::now();
+        let mut d = TurnSyncDetector::new();
+        feed(&mut d, t, 0, Direction::Out, &data_msg(1, 0x8301, 1_000));
+        assert_eq!(d.activity(t).unwrap().bytes, None);
+        let mut barrier = data_msg(2, 0x4303, 44);
+        barrier[24..28].copy_from_slice(&7u32.to_le_bytes());
+        feed(&mut d, t, 1, Direction::In, &barrier);
+        assert_eq!(d.activity(t).unwrap().bytes, Some(1_000 + 44));
+
+        let mut d = TurnSyncDetector::new();
+        feed(&mut d, t, 0, Direction::Out, &data_msg(1, 0x4101, 500));
+        assert_eq!(d.activity(t).unwrap().bytes, Some(500));
     }
 
     #[test]

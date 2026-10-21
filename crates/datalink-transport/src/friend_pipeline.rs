@@ -14,7 +14,7 @@
 //! pipeline never takes another module's lock. Time and RTT are injected.
 
 use crate::capture;
-use crate::turn_sync::{self, Direction, Event, TurnSyncDetector};
+use crate::turn_sync::{self, Activity, Direction, Event, SyncKind, TurnSyncDetector};
 use dp_types::DPID;
 use parking_lot::Mutex;
 use crate::jackal::Jackal;
@@ -94,9 +94,23 @@ struct EarlyAcks {
     frames: Vec<(u32, Vec<u8>)>,
 }
 
+/// How long "Turn synced" stays on the page after a sync ends.
+pub const SYNCED_SHOWN_FOR: Duration = Duration::from_secs(4);
+
+/// What the page shows of one friend's syncs now.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SyncView {
+    /// A sync is running.
+    Syncing(Activity),
+    /// One finished a moment ago.
+    Synced { kind: SyncKind, turn: Option<u32> },
+}
+
 struct State {
     early: EarlyAcks,
     detector: TurnSyncDetector,
+    /// The latest finished sync, for the short "Turn synced".
+    finished: Option<(Instant, SyncKind, Option<u32>)>,
     now: Box<dyn Fn() -> Instant + Send>,
     rtt: Box<dyn FnMut() -> Option<Duration> + Send>,
 }
@@ -128,6 +142,7 @@ impl FriendPipeline {
             state: Mutex::new(State {
                 early: EarlyAcks::default(),
                 detector: TurnSyncDetector::new(),
+                finished: None,
                 now: Box::new(now),
                 rtt: Box::new(rtt),
             }),
@@ -247,12 +262,28 @@ impl FriendPipeline {
         self.state.lock().early = EarlyAcks { lost: true, ..EarlyAcks::default() };
     }
 
+    /// What the page shows of this friend's syncs: the one running, or the one
+    /// that just finished.
+    pub fn sync_view(&self) -> Option<SyncView> {
+        let s = self.state.lock();
+        let now = (s.now)();
+        if let Some(a) = s.detector.activity(now) {
+            return Some(SyncView::Syncing(a));
+        }
+        let (at, kind, turn) = s.finished?;
+        (now.saturating_duration_since(at) < SYNCED_SHOWN_FOR).then_some(SyncView::Synced { kind, turn })
+    }
+
     fn observe(&self, dir: Direction, data: &[u8]) -> Option<Event> {
         let event = {
             let mut s = self.state.lock();
             let s = &mut *s;
             let now = (s.now)();
-            s.detector.observe(now, dir, data, &mut s.rtt)
+            let event = s.detector.observe(now, dir, data, &mut s.rtt);
+            if let Some(Event::Finished(r)) = &event {
+                s.finished = Some((now, r.kind, r.turn));
+            }
+            event
         };
         if let Some(Event::Finished(report)) = &event {
             turn_sync::log_report(&self.peer, report);
@@ -311,6 +342,31 @@ mod tests {
             events.extend(e);
         }
         events
+    }
+
+    #[test]
+    fn the_view_follows_the_sync_then_says_synced_for_a_few_seconds() {
+        let base = Instant::now();
+        let clock = Arc::new(Mutex::new(base));
+        let c = clock.clone();
+        let pipe = FriendPipeline::new([1; 32], move || *c.lock(), || None);
+        let msg = |seq: u8, ty: u8| {
+            let mut v = vec![0u8; 44];
+            v[0] = 4;
+            v[4] = seq;
+            v[8] = ty;
+            v[9] = 0x43;
+            v
+        };
+        assert_eq!(pipe.sync_view(), None);
+        pipe.inbound(2, 1, true, &msg(1, 0x01));
+        assert!(matches!(pipe.sync_view(), Some(SyncView::Syncing(_))));
+        *clock.lock() = base + Duration::from_secs(5);
+        assert!(matches!(pipe.sync_view(), Some(SyncView::Syncing(a)) if a.elapsed == Duration::from_secs(5)));
+        pipe.inbound(2, 1, true, &msg(2, 0x09));
+        assert!(matches!(pipe.sync_view(), Some(SyncView::Synced { kind: SyncKind::Turn, .. })));
+        *clock.lock() = base + Duration::from_secs(5) + SYNCED_SHOWN_FOR;
+        assert_eq!(pipe.sync_view(), None);
     }
 
     #[test]
